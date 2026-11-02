@@ -31,12 +31,12 @@ const resources = [
 ];
 
 const planets = [
-  {id:"ferra",name:"Ferra",className:"Зона добычи",resource:"Железная руда",image:"./assets/planets/ferra.svg",status:"ОБНАРУЖЕНА"},
-  {id:"cuprum",name:"Cuprum",className:"Промышленный пояс",resource:"Медь",image:"./assets/planets/cuprum.svg",status:"СКОРО"},
-  {id:"azur",name:"Azur",className:"Кристаллические моря",resource:"Голубой кристалл",image:"./assets/planets/azur.svg",status:"ОБНАРУЖЕНА"},
-  {id:"ameth",name:"Ameth",className:"Минеральные каньоны",resource:"Аметист",image:"./assets/planets/ameth.svg",status:"ОБНАРУЖЕНА"},
-  {id:"quantis",name:"Quantis",className:"Аномальная зона",resource:"Квантовый камень",image:"./assets/planets/quantis.svg",status:"СКОРО"},
-  {id:"stellara",name:"Stellara",className:"Дальний сектор",resource:"Звёздное ядро",image:"./assets/planets/stellara.svg",status:"СКОРО"}
+  {id:"ferra",name:"Ferra",className:"Зона добычи",resource:"Железная руда",image:"./assets/game-art/planets/realistic/planet-real-01.webp",status:"ОБНАРУЖЕНА"},
+  {id:"cuprum",name:"Cuprum",className:"Промышленный пояс",resource:"Медь",image:"./assets/game-art/planets/realistic/planet-real-02.webp",status:"СКОРО"},
+  {id:"azur",name:"Azur",className:"Кристаллические моря",resource:"Голубой кристалл",image:"./assets/game-art/planets/realistic/planet-real-03.webp",status:"ОБНАРУЖЕНА"},
+  {id:"ameth",name:"Ameth",className:"Минеральные каньоны",resource:"Аметист",image:"./assets/game-art/planets/realistic/planet-real-04.webp",status:"ОБНАРУЖЕНА"},
+  {id:"quantis",name:"Quantis",className:"Аномальная зона",resource:"Квантовый камень",image:"./assets/game-art/planets/realistic/planet-real-05.webp",status:"СКОРО"},
+  {id:"stellara",name:"Stellara",className:"Дальний сектор",resource:"Звёздное ядро",image:"./assets/game-art/planets/realistic/planet-real-06.webp",status:"СКОРО"}
 ];
 
 const pageInfo = {
@@ -128,7 +128,7 @@ function pageHeading(){
   el("topbar-section").textContent=info.title.toLocaleUpperCase("ru-RU");
 }
 function renderPlanetCards(){
-  return planets.slice(0,3).map((p,i)=>{
+  return planets.map((p,i)=>{
     return '<article class="planet-card"><div class="planet-art"><img src="'+p.image+'" alt="Планета '+p.name+'" loading="lazy"></div><div class="planet-card-copy"><b>'+p.name.toUpperCase()+'</b><small>'+p.className+' · '+p.resource+'</small><span>'+(p.status==="ОБНАРУЖЕНА"?"РАЗВЕДАНА":"В РАЗРАБОТКЕ")+'</span></div></article>';
   }).join("");
 }
@@ -140,7 +140,7 @@ function renderHome(){
   const mainHero='<section class="panel mission-hero"><div class="mission-copy"><div class="mission-code">СЕКТОР 01 · СТАРТОВАЯ СИСТЕМА</div><h2>Исследование начинается с подготовки</h2><p>Собери флот, распределяй топливо и отправляй корабли в сектора с неразведанными ресурсами.</p><div class="mission-actions"><button class="primary-button" data-go="expeditions">Открыть экспедиции '+svgIcon("arrow")+'</button><button class="secondary-button" data-go="rockets">Состав флота</button></div></div><div class="mission-art"><img src="./assets/game-art/ships/scout.webp" alt="Корабль Scout"><span class="mission-art-label">SCOUT / CLASS I</span></div></section>';
   const stats='<section class="dashboard-grid"><div class="panel"><div class="panel-title-row"><h2>Оперативная сводка</h2><small>ТЕКУЩЕЕ СОСТОЯНИЕ</small></div><div class="mission-facts"><div class="mission-fact"><small>КОРАБЛИ В АНГАРЕ</small><b>'+(state.authenticated?owned:"—")+'</b></div><div class="mission-fact"><small>АКТИВНЫЕ ПОЛЁТЫ</small><b>'+(state.authenticated?active.length:"—")+'</b></div><div class="mission-fact"><small>ГОТОВЫ К СБОРУ</small><b>'+(state.authenticated?due:"—")+'</b></div></div><div class="list-row"><div class="list-left"><span class="list-icon">'+svgIcon("orbit")+'</span><div><b>Экспедиционная сеть</b><small>'+(state.authenticated?"Данные получены из базы игрока":"Войди, чтобы синхронизировать флот")+'</small></div></div><span class="status-pill '+(state.authenticated?"ready":"warning")+'">'+(state.authenticated?"СИНХРОН":"ТРЕБУЕТСЯ ВХОД")+'</span></div></div><div class="panel"><div class="panel-title-row"><h2>Быстрые действия</h2><small>НАВИГАЦИЯ</small></div><div class="compact-list"><div class="list-row"><div class="list-left"><span class="list-icon">'+svgIcon("ship")+'</span><div><b>Проверить ангар</b><small>Состояние и покупка кораблей</small></div></div><button class="text-link" data-go="rockets">Открыть →</button></div><div class="list-row"><div class="list-left"><span class="list-icon">'+svgIcon("inventory")+'</span><div><b>Инвентаризация</b><small>Найденные материалы</small></div></div><button class="text-link" data-go="inventory">Открыть →</button></div><div class="list-row"><div class="list-left"><span class="list-icon">'+svgIcon("market")+'</span><div><b>Технологии</b><small>Развитие кораблей</small></div></div><button class="text-link" data-go="market">Открыть →</button></div></div></div></section>';
   const chart=panel("НАВИГАЦИОННАЯ КАРТА",'<div class="galaxy-map-frame"><img src="./assets/maps/galaxy-map.svg" alt="Карта секторов галактики"></div><div class="map-legend"><span><i class="map-dot map-known"></i>Известный сектор</span><span><i class="map-dot map-route"></i>Маршрут связи</span><span><i class="map-dot map-frontier"></i>Внешняя зона</span></div><div class="space-object-strip"><div><img src="./assets/game-art/objects/station.webp" alt=""><span>ОРБИТАЛЬНАЯ СТАНЦИЯ</span></div><div><img src="./assets/game-art/objects/asteroid.webp" alt=""><span>ПОЯС АСТЕРОИДОВ</span></div><div><img src="./assets/game-art/objects/mining-drone.webp" alt=""><span>РАЗВЕДДРОН</span></div></div>',"SECTOR GRID 01");
-  const sectors=panel("ПЛАНЕТЫ СИСТЕМЫ",'<div class="planet-grid">'+renderPlanetCards()+'</div>',"3 ИЗ 6 СЕКТОРОВ");
+  const sectors=panel("ПЛАНЕТЫ СИСТЕМЫ",'<div class="planet-grid">'+renderPlanetCards()+'</div>',"6 СЕКТОРОВ");
   const note='<div class="system-note-wide"><span class="system-note-mark">i</span><span>Игровая экономика находится в тестовом режиме. ASTRA Coins не являются денежным балансом, а реальные выплаты пока отключены.</span></div>';
   return mainHero+stats+chart+sectors+note;
 }
@@ -200,7 +200,7 @@ function renderMarket(){
     ["drill","Буровой модуль","Специализация на добыче сырья","./assets/game-art/modules/drill.webp"],
     ["navigation","Навигационный блок","Точность расчёта маршрутов","./assets/game-art/modules/navigation-console.webp"],
     ["cargo","Грузовой отсек","Увеличение вместимости","./assets/game-art/modules/cargo-bay.webp"],
-    ["shield","Защитный экран","Защита оборудования","./assets/game-art/modules/shield.webp"]
+    ["shield","Защитный экран","Защита оборудования","./assets/game-art/modules/shield.webp"],["fuel","Топливный резервуар","Запас для дальних маршрутов","./assets/game-art/modules/fuel-tank.webp"],["solar","Солнечная панель","Автономное питание систем","./assets/game-art/modules/solar-panel.webp"]
   ];
   const cards=entries.map((x,i)=>'<article class="market-card"><div class="module-art"><img src="'+x[3]+'" alt="'+x[1]+'"></div><b>'+x[1]+'</b><small>'+x[2]+'</small><span class="market-state">В РАЗРАБОТКЕ</span></article>').join("");
   return panel("ТЕХНОЛОГИЧЕСКИЕ МОДУЛИ",'<div class="market-intro"><div><h2>Модернизация флота</h2><p>Каталог будущих компонентов. Цены и покупка появятся после внедрения серверных правил модификации.</p></div></div><div class="market-grid">'+cards+'</div><div class="notice-banner">Модули пока нельзя приобрести. Мы не показываем вымышленные цены и не списываем ASTRA Coins.</div>');
