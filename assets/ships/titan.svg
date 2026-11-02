@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 260" role="img" aria-label="titan spacecraft">
+ <defs><linearGradient id="h" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#f5c4cc"/><stop offset=".55" stop-color="#e78c9a"/><stop offset="1" stop-color="#6e344d"/></linearGradient><radialGradient id="g"><stop stop-color="#e78c9a" stop-opacity=".28"/><stop offset="1" stop-color="#e78c9a" stop-opacity="0"/></radialGradient></defs>
+ <circle cx="200" cy="128" r="116" fill="url(#g)"/>
+ <g fill="#d9eaff" opacity=".7"><circle cx="53" cy="55" r="2"/><circle cx="335" cy="62" r="2"/><circle cx="315" cy="204" r="1.7"/><circle cx="77" cy="210" r="1.5"/><circle cx="275" cy="28" r="1.4"/></g>
+ <path d="M166 150 L105 205 L164 195 Z M234 150 L295 205 L236 195 Z" fill="#6e344d" stroke="#e78c9a" stroke-width="3" stroke-linejoin="round"/>
+ <path d="M185 173 L174 222 L200 205 L226 222 L215 173" fill="#6e344d" stroke="#e78c9a" stroke-width="3"/>
+ <path d="M200 26 C163 64 151 112 164 173 L200 194 L236 173 C249 112 237 64 200 26Z" fill="url(#h)" stroke="#f5c4cc" stroke-width="4"/>
+ <path d="M200 28 C181 70 182 132 200 190" stroke="#fff" stroke-opacity=".42" stroke-width="5" fill="none"/>
+ <path d="M176 179 L185 230 L200 250 L215 230 L224 179" fill="#6e344d" opacity=".95"/>
+ <path d="M188 207 L200 247 L212 207" fill="#e78c9a" opacity=".75"/>
+ <circle cx="200" cy="108" r="25" fill="#14243c" stroke="#f5c4cc" stroke-width="6"/>
+ <circle cx="200" cy="108" r="12" fill="#b7f5ff"/><circle cx="196" cy="104" r="4" fill="#fff" opacity=".8"/>
+ 
+ <path d="M184 190 L193 218 L200 229 L207 218 L216 190" fill="#ffbd70" opacity=".9"/>
+ </svg>
