@@ -142,7 +142,8 @@ function renderHome(){
   const chart=panel("НАВИГАЦИОННАЯ КАРТА",'<div class="galaxy-map-frame"><img src="./assets/maps/galaxy-map.svg" alt="Карта секторов галактики"></div><div class="map-legend"><span><i class="map-dot map-known"></i>Известный сектор</span><span><i class="map-dot map-route"></i>Маршрут связи</span><span><i class="map-dot map-frontier"></i>Внешняя зона</span></div><div class="space-object-strip"><div><img src="./assets/game-art/objects/station.webp" alt=""><span>ОРБИТАЛЬНАЯ СТАНЦИЯ</span></div><div><img src="./assets/game-art/objects/asteroid.webp" alt=""><span>ПОЯС АСТЕРОИДОВ</span></div><div><img src="./assets/game-art/objects/mining-drone.webp" alt=""><span>РАЗВЕДДРОН</span></div></div>',"SECTOR GRID 01");
   const sectors=panel("ПЛАНЕТЫ СИСТЕМЫ",'<div class="planet-grid">'+renderPlanetCards()+'</div>',"6 СЕКТОРОВ");
   const note='<div class="system-note-wide"><span class="system-note-mark">i</span><span>Игровая экономика находится в тестовом режиме. ASTRA Coins не являются денежным балансом, а реальные выплаты пока отключены.</span></div>';
-  return mainHero+stats+chart+sectors+note;
+  const extraSprites=["beacon","cargo-container","outpost","probe","relay-satellite","satellite","supply-crate","teleporter","turret","wreckage"].map(id=>`<div class="space-object-card"><img src="./assets/game-art/objects/${id}.webp" alt="${id}"><span>${id.toUpperCase()}</span></div>`).join("");
+  return mainHero+stats+chart+sectors+panel("ОБЪЕКТЫ ГАЛАКТИКИ",'<div class="space-object-gallery">'+extraSprites+'</div>',"13 SPRITES")+note;
 }
 function renderRocketCards(){
   const owned=ownedIds();
@@ -158,7 +159,8 @@ function renderRockets(){
   const summary=state.authenticated?state.playerRockets.length+" КОРАБЛЯ В АНГАРЕ":"КАТАЛОГ КОРАБЛЕЙ";
   const intro='<div class="section-intro"><div><h2>Линейка кораблей</h2><p>У каждого класса своё время полёта и грузовая вместимость.</p></div><span class="status-pill '+(state.authenticated?"ready":"warning")+'">'+summary+'</span></div>';
   const cards=panel("КАТАЛОГ ФЛОТА",'<div class="item-grid">'+renderRocketCards()+'</div>',"5 КЛАССОВ");
-  return intro+cards;
+  const extraShips=["fighter","guardian","phantom","ranger","stealth"].map(id=>`<article class="sprite-showcase-card"><img src="./assets/game-art/ships/${id}.webp" alt="${id}"><b>${id.toUpperCase()}</b></article>`).join("");
+  return intro+cards+panel("ДРУГИЕ КОРПУСА",'<div class="sprite-showcase-grid">'+extraShips+'</div>',"5 SPRITES");
 }
 function renderExpeditions(){
   if(!state.authenticated){
