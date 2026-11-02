@@ -17,7 +17,7 @@
       </a>
       <div class="topbar-right">
         <span class="demo-label">DEMO</span>
-        <button class="icon-button" id="profile-shortcut" aria-label="Профиль">◉</button>
+        <button class="icon-button" id="profile-shortcut" aria-label="Войти или открыть профиль">◉</button>
       </div>
     </header>
 
@@ -64,6 +64,23 @@
       <button class="nav-item" data-page="more"><span>☰</span><small>Ещё</small></button>
     </nav>
   </div>
+  <dialog id="auth-dialog" class="auth-dialog">
+    <form id="auth-form" class="auth-form">
+      <button type="button" class="dialog-close" id="auth-close" aria-label="Закрыть">×</button>
+      <p class="eyebrow">ДОСТУП К КОСМОПОРТУ</p>
+      <h2 id="auth-title">Войти в Crypto Astra</h2>
+      <p class="muted small" id="auth-description">Войди, чтобы сохранить прогресс на сервере.</p>
+      <label id="display-name-label">Имя пилота<input id="auth-name" name="display_name" minlength="2" maxlength="32" autocomplete="nickname" placeholder="Например, StarPilot"></label>
+      <label>Email<input id="auth-email" name="email" type="email" autocomplete="email" required placeholder="you@example.com"></label>
+      <label>Пароль<input id="auth-password" name="password" type="password" minlength="8" autocomplete="current-password" required placeholder="Минимум 8 символов"></label>
+      <p id="auth-message" class="auth-message" aria-live="polite"></p>
+      <button class="primary-button auth-submit" id="auth-submit" type="submit">Войти</button>
+      <button class="secondary-button auth-switch" id="auth-switch" type="button">Создать аккаунт</button>
+      <p class="auth-footnote">Тестовая версия. Не используй пароль от других сервисов.</p>
+    </form>
+  </dialog>
+  <script src="./supabase/config.js" defer></script>
+  <script src="./auth.js" defer></script>
   <script src="./app.js" defer></script>
 </body>
 </html>
