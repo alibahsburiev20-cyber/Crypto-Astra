@@ -4,15 +4,15 @@ const state = {
   authenticated:false,userId:null,profileName:"Космический пилот",playerRockets:[],expeditions:[]
 };
 const rockets=[
- {id:"scout",name:"Scout",icon:"🚀",time:"30 минут",minutes:30,cargo:10,price:0,description:"Стартовая ракета для первых коротких экспедиций."},
- {id:"miner",name:"Miner",icon:"🛰️",time:"2 часа",minutes:120,cargo:50,price:1500,description:"Добывающий корабль с увеличенным грузовым отсеком."},
- {id:"explorer",name:"Explorer",icon:"🌠",time:"4 часа",minutes:240,cargo:120,price:4500,description:"Исследовательский корабль для дальних маршрутов."},
- {id:"titan",name:"Titan",icon:"🛸",time:"8 часов",minutes:480,cargo:300,price:12000,description:"Тяжёлая ракета для крупных экспедиций."},
- {id:"galaxy",name:"Galaxy",icon:"🚀",time:"12 часов",minutes:720,cargo:600,price:30000,description:"Флагман стартовой линейки Crypto Astra."}
+ {id:"scout",name:"Scout",icon:"🚀",image:"./assets/ships/scout.svg",time:"30 минут",minutes:30,cargo:10,price:0,description:"Стартовая ракета для первых коротких экспедиций."},
+ {id:"miner",name:"Miner",icon:"🛰️",image:"./assets/ships/miner.svg",time:"2 часа",minutes:120,cargo:50,price:1500,description:"Добывающий корабль с увеличенным грузовым отсеком."},
+ {id:"explorer",name:"Explorer",icon:"🌠",image:"./assets/ships/explorer.svg",time:"4 часа",minutes:240,cargo:120,price:4500,description:"Исследовательский корабль для дальних маршрутов."},
+ {id:"titan",name:"Titan",icon:"🛸",image:"./assets/ships/titan.svg",time:"8 часов",minutes:480,cargo:300,price:12000,description:"Тяжёлая ракета для крупных экспедиций."},
+ {id:"galaxy",name:"Galaxy",icon:"🚀",image:"./assets/ships/galaxy.svg",time:"12 часов",minutes:720,cargo:600,price:30000,description:"Флагман стартовой линейки Crypto Astra."}
 ];
 const resources=[
- ["iron_ore","Iron Ore","⛰️"],["copper","Copper","🟠"],["blue_crystal","Blue Crystal","💎"],
- ["amethyst","Amethyst","🔮"],["quantum_stone","Quantum Stone","🪨"],["stellar_core","Stellar Core","🌟"]
+ ["iron_ore","Iron Ore","⛰️","./assets/resources/iron-ore.svg"],["copper","Copper","🟠","./assets/resources/copper.svg"],["blue_crystal","Blue Crystal","💎","./assets/resources/blue-crystal.svg"],
+ ["amethyst","Amethyst","🔮","./assets/resources/amethyst.svg"],["quantum_stone","Quantum Stone","🪨","./assets/resources/quantum-stone.svg"],["stellar_core","Stellar Core","🌟","./assets/resources/stellar-core.svg"]
 ];
 const pageInfo={
  spaceport:["Космопорт","Твоя база. Подготовь ракету и отправляйся исследовать космос."],
@@ -42,6 +42,12 @@ function updateHeader(){
  }
  const shortcut=el("profile-shortcut");
  if(shortcut)shortcut.title=state.authenticated?"Открыть профиль":"Войти в аккаунт";
+ const demo=document.querySelector(".demo-label");
+ if(demo)demo.textContent=state.authenticated?"ONLINE":"DEMO";
+ const commander=document.querySelector(".commander-panel h3");
+ if(commander)commander.textContent=state.authenticated?state.profileName:"Космический пилот";
+ const commanderSub=document.querySelector(".commander-panel .muted");
+ if(commanderSub)commanderSub.textContent=state.authenticated?"Командир экспедиции":"Начинающий исследователь";
 }
 function panel(title,body){return '<section class="panel"><div class="panel-heading">'+title+'</div>'+body+'</section>'}
 function ownedRocketIds(){return new Set(state.playerRockets.map(r=>r.rocket_id))}
@@ -51,7 +57,7 @@ function rocketCards(){
   const has=state.authenticated?owned.has(r.id):r.id==="scout";
   const action=has?"select":(state.authenticated?"buy":"login");
   const label=has?"В ангаре":(state.authenticated?"Купить":"Войти");
-  return '<article class="item-card"><div class="item-visual">'+r.icon+'</div><h3>'+r.name+'</h3><p>'+r.description+'</p><div class="item-meta"><span>Груз: '+r.cargo+'</span><b>'+(r.price===0?"БЕСПЛАТНО":r.price.toLocaleString("ru-RU")+" ASTRA")+'</b></div><button class="'+(has?"secondary-button":"primary-button")+'" data-action="'+action+'" data-name="'+r.id+'">'+label+'</button></article>';
+  return '<article class="item-card"><div class="item-visual"><img src="'+r.image+'" alt="Ракета '+r.name+'" loading="lazy"></div><h3>'+r.name+'</h3><p>'+r.description+'</p><div class="item-meta"><span>Груз: '+r.cargo+'</span><b>'+(r.price===0?"БЕСПЛАТНО":r.price.toLocaleString("ru-RU")+" ASTRA")+'</b></div><button class="'+(has?"secondary-button":"primary-button")+'" data-action="'+action+'" data-name="'+r.id+'">'+label+'</button></article>';
  }).join("")+'</div>';
 }
 function renderExpeditions(){
@@ -75,7 +81,7 @@ function render(){
  document.querySelectorAll(".nav-item").forEach(b=>b.classList.toggle("active",b.dataset.page===state.page));
  let html="";
  if(state.page==="spaceport"){
-  html='<section class="panel hero-panel"><div class="hero-copy"><p class="eyebrow">СЕКТОР 01 · СТАРТОВАЯ СИСТЕМА</p><h2>Галактика ждёт<br>своего исследователя</h2><p>Подготовь Scout, проверь запасы топлива и отправляйся в первую экспедицию.</p><button class="primary-button" data-go="expeditions">Начать экспедицию →</button></div><div class="hero-planet" aria-label="Планета"></div></section>'+
+  html='<section class="panel hero-panel"><div class="hero-copy"><p class="eyebrow">СЕКТОР 01 · СТАРТОВАЯ СИСТЕМА</p><h2>Галактика ждёт<br>своего исследователя</h2><p>Подготовь Scout, проверь запасы топлива и отправляйся в первую экспедицию.</p><button class="primary-button" data-go="expeditions">Начать экспедицию →</button></div><img class="hero-planet" src="./assets/planets/azur.svg" alt="Планета Azur" loading="eager"></section>'+
   '<div><h2 class="section-title">Быстрый доступ</h2><div class="quick-grid"><button class="quick-card" data-go="rockets"><span class="quick-icon">🚀</span><b>Мой флот</b><small>Управление ракетами</small></button><button class="quick-card" data-go="inventory"><span class="quick-icon">▦</span><b>Склад</b><small>Космические ресурсы</small></button><button class="quick-card" data-go="market"><span class="quick-icon">⚒️</span><b>Мастерская</b><small>Развитие флота</small></button></div></div>'+
   panel("ПОСЛЕДНИЕ СОБЫТИЯ",'<div class="list-row"><div class="list-left"><span class="list-icon">🧑‍🚀</span><div><b>'+(state.authenticated?"С возвращением, "+escapeHtml(state.profileName):"Добро пожаловать в Crypto Astra")+'</b><small>'+(state.authenticated?"Твой прогресс сохранён в аккаунте.":"Войди, чтобы сохранить прогресс на сервере.")+'</small></div></div><span class="status-dot">'+(state.authenticated?"ONLINE":"DEMO")+'</span></div>');
  }else if(state.page==="rockets"){
@@ -83,7 +89,7 @@ function render(){
  }else if(state.page==="expeditions"){
   html=renderExpeditions();
  }else if(state.page==="inventory"){
-  html=panel("КОСМИЧЕСКИЕ МАТЕРИАЛЫ",'<div>'+resources.map(([id,name,icon])=>'<div class="list-row"><div class="list-left"><span class="list-icon">'+icon+'</span><div><b>'+name+'</b><small>Космический ресурс</small></div></div><strong>'+state.inventory[id]+'</strong></div>').join("")+'</div>');
+  html=panel("КОСМИЧЕСКИЕ МАТЕРИАЛЫ",'<div>'+resources.map(([id,name,icon,image])=>'<div class="list-row resource-row"><div class="list-left"><img class="resource-art" src="'+image+'" alt="" loading="lazy"><div><b>'+name+'</b><small>Космический ресурс</small></div></div><strong>'+state.inventory[id]+'</strong></div>').join("")+'</div>');
  }else if(state.page==="market"){
   html=panel("РЫНОК И МАСТЕРСКАЯ",'<div class="empty-state"><div style="font-size:34px">⚒️</div><b>Мастерская готовится к открытию</b><br>Здесь появятся ремонт, улучшение ракет и обмен ресурсов.</div>');
  }else if(state.page==="pool"){
