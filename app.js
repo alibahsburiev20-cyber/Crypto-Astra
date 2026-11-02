@@ -71,7 +71,7 @@ function renderExpeditions(){
  const launchHtml=panel("ДОСТУПНЫЕ РАКЕТЫ",owned.length?'<div class="item-grid">'+owned.map(pr=>{
   const r=rockets.find(x=>x.id===pr.rocket_id);if(!r)return "";
   const busy=active.some(e=>e.player_rocket_id===pr.id);
-  return '<article class="item-card"><div class="item-visual">'+r.icon+'</div><h3>'+r.name+'</h3><p>Длительность: '+r.time+'<br>Вместимость: '+r.cargo+'</p><button class="primary-button" data-action="launch" data-id="'+pr.id+'" '+(busy||state.fuel<1?"disabled":"")+'>'+(busy?"Уже в полёте":"Запустить экспедицию")+'</button></article>';
+  return '<article class="item-card"><div class="item-visual"><img src="'+r.image+'" alt="Ракета '+r.name+'" loading="lazy"></div><h3>'+r.name+'</h3><p>Длительность: '+r.time+'<br>Вместимость: '+r.cargo+'</p><button class="primary-button" data-action="launch" data-id="'+pr.id+'" '+(busy||state.fuel<1?"disabled":"")+'>'+(busy?"Уже в полёте":"Запустить экспедицию")+'</button></article>';
  }).join("")+'</div>':'<div class="empty-state">В ангаре пока нет ракет.</div>');
  return '<div class="page-actions"><button class="secondary-button" data-action="refresh">Обновить статус экспедиций</button></div>'+activeHtml+launchHtml;
 }
