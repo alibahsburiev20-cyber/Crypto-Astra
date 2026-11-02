@@ -19,3 +19,16 @@
 .nav-item:focus-visible,.primary-button:focus-visible,.secondary-button:focus-visible,.quick-card:focus-visible,.icon-button:focus-visible{outline:2px solid var(--cyan);outline-offset:3px}
 button:hover:not(:disabled){filter:brightness(1.08)}
 @media(max-width:480px){.hero-planet{width:112px;height:120px}.planet-grid{gap:7px}.planet-card img{height:78px}.planet-card div{padding:8px}.planet-card b{font-size:10px}.planet-card small{font-size:8px}.resource-art{width:46px;height:46px}}
+
+.brand-mark-image{width:36px;height:36px;display:block;object-fit:contain}
+.market-intro{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:8px 0 20px}
+.market-intro h2{font-size:19px;margin:0 0 7px}
+.market-intro p{max-width:440px;line-height:1.5;margin:0}
+.market-emblem{width:74px;height:74px;flex:none;border-radius:22px;display:grid;place-items:center;background:linear-gradient(145deg,#263d60,#17243c);border:1px solid #496487;color:var(--cyan);font-size:35px}
+.market-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:16px}
+.market-card{min-width:0;min-height:154px;padding:14px;border:1px solid var(--line);border-radius:12px;background:linear-gradient(155deg,#1a2943,#111a2d);display:flex;flex-direction:column;align-items:flex-start}
+.market-icon{width:38px;height:38px;display:grid;place-items:center;border-radius:11px;background:#65d9e81c;color:var(--cyan);font-size:21px;margin-bottom:12px}
+.market-card b{font-size:11px;line-height:1.4}
+.market-card small{font-size:9px;color:var(--muted);line-height:1.45;margin-top:5px}
+.market-state{margin-top:auto;padding-top:12px;color:var(--gold);font-size:8px;letter-spacing:1.2px;font-weight:800}
+@media(max-width:480px){.market-grid{grid-template-columns:1fr 1fr}.market-card{min-height:140px;padding:11px}.market-intro h2{font-size:16px}.market-emblem{width:58px;height:58px;border-radius:17px}}
