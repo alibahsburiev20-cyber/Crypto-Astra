@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 300" role="img" aria-label="Ameth">
+ <defs><radialGradient id="p" cx="30%" cy="25%" r="80%"><stop stop-color="#e8d8ff"/><stop offset=".3" stop-color="#b99bff"/><stop offset="1" stop-color="#59418f"/></radialGradient><radialGradient id="shade"><stop offset=".45" stop-color="#081225" stop-opacity="0"/><stop offset="1" stop-color="#030817" stop-opacity=".8"/></radialGradient></defs>
+ <g fill="#d8e8ff" opacity=".7"><circle cx="32" cy="48" r="2"/><circle cx="365" cy="42" r="1.8"/><circle cx="350" cy="240" r="2"/><circle cx="63" cy="252" r="1.4"/><circle cx="290" cy="22" r="1.5"/></g>
+ <ellipse cx="210" cy="166" rx="150" ry="32" fill="none" stroke="#e8d8ff" stroke-opacity=".45" stroke-width="9" transform="rotate(-13 210 166)"/>
+ <circle cx="210" cy="145" r="112" fill="url(#p)"/>
+ <g fill="#e8d8ff" opacity=".22"><circle cx="163" cy="111" r="18"/><circle cx="253" cy="168" r="28"/><circle cx="180" cy="205" r="12"/></g>
+ <circle cx="210" cy="145" r="112" fill="url(#shade)"/>
+ <path d="M90 160 Q200 205 332 143" fill="none" stroke="#fff" stroke-opacity=".18" stroke-width="4"/>
+ </svg>
