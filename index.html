@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#080d1b">
+  <meta name="description" content="Crypto Astra — космическая браузерная экономическая игра.">
+  <title>Crypto Astra</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="#" aria-label="Crypto Astra — главная">
+        <span class="brand-mark">✦</span>
+        <span>CRYPTO <b>ASTRA</b></span>
+      </a>
+      <div class="topbar-right">
+        <span class="demo-label">DEMO</span>
+        <button class="icon-button" id="profile-shortcut" aria-label="Профиль">◉</button>
+      </div>
+    </header>
+
+    <main id="app" tabindex="-1">
+      <section class="welcome-row">
+        <div>
+          <p class="eyebrow">КОСМИЧЕСКАЯ ЭКОНОМИКА</p>
+          <h1 id="page-title">Космопорт</h1>
+          <p class="muted" id="page-subtitle">Твоя экспедиция начинается здесь.</p>
+        </div>
+        <div class="rank-chip"><span>✧</span> Уровень <b id="player-level">1</b></div>
+      </section>
+
+      <section class="resource-strip" aria-label="Ресурсы игрока">
+        <article class="resource-card"><span class="resource-icon coin">A</span><div><small>ASTRA COINS</small><strong id="coin-balance">500</strong></div></article>
+        <article class="resource-card"><span class="resource-icon fuel">⛽</span><div><small>ТОПЛИВО</small><strong id="fuel-balance">3</strong></div></article>
+        <article class="resource-card"><span class="resource-icon xp">✧</span><div><small>ОПЫТ</small><strong id="xp-balance">0 XP</strong></div></article>
+      </section>
+
+      <section class="content-grid">
+        <div class="main-column" id="page-content"></div>
+        <aside class="side-column">
+          <article class="panel commander-panel">
+            <div class="panel-heading"><span>КОМАНДИР</span><span class="status-dot">● ONLINE</span></div>
+            <div class="commander-avatar">👨‍🚀</div>
+            <h3>Космический пилот</h3>
+            <p class="muted small">Начинающий исследователь</p>
+            <div class="progress-label"><span>До уровня 2</span><b id="xp-progress-label">0 / 100 XP</b></div>
+            <div class="progress-track"><span id="xp-progress" style="width:0%"></span></div>
+          </article>
+          <article class="panel notice-panel">
+            <span class="notice-icon">ⓘ</span>
+            <div><b>Тестовая версия</b><p>Баланс и действия сейчас демонстрационные. Реальные награды и выплаты не подключены.</p></div>
+          </article>
+        </aside>
+      </section>
+    </main>
+
+    <nav class="bottom-nav" aria-label="Основная навигация">
+      <button class="nav-item active" data-page="spaceport"><span>⌂</span><small>База</small></button>
+      <button class="nav-item" data-page="rockets"><span>🚀</span><small>Ракеты</small></button>
+      <button class="nav-item" data-page="expeditions"><span>◎</span><small>Полёты</small></button>
+      <button class="nav-item" data-page="inventory"><span>▦</span><small>Склад</small></button>
+      <button class="nav-item" data-page="more"><span>☰</span><small>Ещё</small></button>
+    </nav>
+  </div>
+  <script src="./app.js" defer></script>
+</body>
+</html>
