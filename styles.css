@@ -304,3 +304,9 @@ button:hover:not(:disabled){filter:brightness(1.08)}
   .map-legend{gap:9px;font-size:7px}
   .module-art{height:82px}
 }
+
+.space-object-strip{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin-top:13px;padding-top:12px;border-top:1px solid var(--line-soft)}
+.space-object-strip>div{min-width:0;display:flex;align-items:center;gap:8px;padding:7px;border:1px solid var(--line-soft);background:#131e24;border-radius:4px}
+.space-object-strip img{width:35px;height:35px;object-fit:contain;flex:none}
+.space-object-strip span{color:var(--muted-2);font-size:7px;letter-spacing:.6px;line-height:1.35}
+@media(max-width:560px){.space-object-strip{gap:5px}.space-object-strip>div{gap:4px;padding:5px}.space-object-strip img{width:26px;height:26px}.space-object-strip span{font-size:6px}}
