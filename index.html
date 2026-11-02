@@ -3,82 +3,135 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#080d1b">
-  <meta name="description" content="Crypto Astra — космическая браузерная экономическая игра.">
-  <title>Crypto Astra</title>
-  <link rel="icon" type="image/svg+xml" href="./assets/branding/logo-mark.svg">\n  <link rel="stylesheet" href="./styles.css">
+  <meta name="theme-color" content="#0c1116">
+  <meta name="description" content="Crypto Astra — космическая стратегия об исследовании, добыче и развитии флота.">
+  <title>Crypto Astra — космопорт</title>
+  <link rel="icon" type="image/svg+xml" href="./assets/branding/logo-mark.svg">
+  <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
   <div class="app-shell">
-    <header class="topbar">
+    <aside class="sidebar">
       <a class="brand" href="#" aria-label="Crypto Astra — главная">
         <img class="brand-mark-image" src="./assets/branding/logo-mark.svg" alt="">
-        <span>CRYPTO <b>ASTRA</b></span>
+        <span class="brand-wordmark">CRYPTO <b>ASTRA</b></span>
       </a>
-      <div class="topbar-right">
-        <span class="demo-label">DEMO</span>
-        <button class="icon-button" id="profile-shortcut" aria-label="Войти или открыть профиль">◉</button>
+
+      <div class="sidebar-label">КОМАНДНЫЙ ЦЕНТР</div>
+      <nav class="side-nav" aria-label="Основная навигация">
+        <button class="nav-link active" data-page="spaceport"><span class="nav-icon" data-icon="overview"></span><span class="nav-copy"><b>Обзор</b><small>Космопорт</small></span></button>
+        <button class="nav-link" data-page="rockets"><span class="nav-icon" data-icon="ship"></span><span class="nav-copy"><b>Мой флот</b><small>Ангар и корабли</small></span></button>
+        <button class="nav-link" data-page="expeditions"><span class="nav-icon" data-icon="orbit"></span><span class="nav-copy"><b>Экспедиции</b><small>Полёты и задания</small></span></button>
+        <button class="nav-link" data-page="inventory"><span class="nav-icon" data-icon="inventory"></span><span class="nav-copy"><b>Склад</b><small>Ресурсы и материалы</small></span></button>
+      </nav>
+
+      <div class="sidebar-label sidebar-label-spaced">ИНФРАСТРУКТУРА</div>
+      <nav class="side-nav">
+        <button class="nav-link" data-page="market"><span class="nav-icon" data-icon="market"></span><span class="nav-copy"><b>Верфь</b><small>Модули и улучшения</small></span></button>
+        <button class="nav-link" data-page="pool"><span class="nav-icon" data-icon="pool"></span><span class="nav-copy"><b>Astra Pool</b><small>Фонд наград</small></span></button>
+      </nav>
+
+      <div class="sidebar-spacer"></div>
+      <div class="sidebar-foot">
+        <div class="connection-row"><span class="connection-dot"></span><span>СЕРВЕР ДОСТУПЕН</span></div>
+        <div class="version-row"><span>CRYPTO ASTRA</span><span>BUILD 0.2</span></div>
       </div>
-    </header>
+    </aside>
 
-    <main id="app" tabindex="-1">
-      <section class="welcome-row">
-        <div>
-          <p class="eyebrow">КОСМИЧЕСКАЯ ЭКОНОМИКА</p>
-          <h1 id="page-title">Космопорт</h1>
-          <p class="muted" id="page-subtitle">Твоя экспедиция начинается здесь.</p>
+    <div class="workspace">
+      <header class="topbar">
+        <div class="topbar-context">
+          <span class="context-mark">CA</span>
+          <div><span class="topbar-overline">КОСМИЧЕСКАЯ СЕТЬ</span><b id="topbar-section">КОСМОПОРТ</b></div>
         </div>
-        <div class="rank-chip"><span>✧</span> Уровень <b id="player-level">1</b></div>
-      </section>
+        <div class="topbar-actions">
+          <span class="environment-tag" id="demo-label">DEMO</span>
+          <button class="profile-shortcut" id="profile-shortcut" aria-label="Открыть профиль">
+            <span class="profile-initials" id="profile-initials">CA</span>
+            <span class="profile-shortcut-copy"><b id="topbar-profile-name">Гость</b><small id="account-status">Вход не выполнен</small></span>
+            <span class="profile-chevron">⌄</span>
+          </button>
+        </div>
+      </header>
 
-      <section class="resource-strip" aria-label="Ресурсы игрока">
-        <article class="resource-card"><span class="resource-icon coin">A</span><div><small>ASTRA COINS</small><strong id="coin-balance">500</strong></div></article>
-        <article class="resource-card"><span class="resource-icon fuel">⛽</span><div><small>ТОПЛИВО</small><strong id="fuel-balance">3</strong></div></article>
-        <article class="resource-card"><span class="resource-icon xp">✧</span><div><small>ОПЫТ</small><strong id="xp-balance">0 XP</strong></div></article>
-      </section>
+      <main id="app" tabindex="-1">
+        <section class="page-heading">
+          <div>
+            <p class="eyebrow" id="page-kicker">КОМАНДНЫЙ ЦЕНТР / 01</p>
+            <h1 id="page-title">Космопорт</h1>
+            <p class="page-subtitle" id="page-subtitle">Состояние базы и готовность флота.</p>
+          </div>
+          <div class="rank-chip"><span class="rank-label">УРОВЕНЬ</span><b id="player-level">—</b></div>
+        </section>
 
-      <section class="content-grid">
-        <div class="main-column" id="page-content"></div>
-        <aside class="side-column">
-          <article class="panel commander-panel">
-            <div class="panel-heading"><span>КОМАНДИР</span><span class="status-dot">● ONLINE</span></div>
-            <div class="commander-avatar">👨‍🚀</div>
-            <h3>Космический пилот</h3>
-            <p class="muted small">Начинающий исследователь</p>
-            <div class="progress-label"><span>До уровня 2</span><b id="xp-progress-label">0 / 100 XP</b></div>
-            <div class="progress-track"><span id="xp-progress" style="width:0%"></span></div>
+        <section class="resource-strip" aria-label="Игровые показатели">
+          <article class="resource-card">
+            <span class="stat-icon stat-coins" data-icon="coin"></span>
+            <div class="resource-copy"><small>ASTRA COINS</small><strong id="coin-balance">—</strong></div>
+            <span class="stat-note">БАЛАНС</span>
           </article>
-          <article class="panel notice-panel">
-            <span class="notice-icon">ⓘ</span>
-            <div><b>Тестовая версия</b><p>Баланс и действия сейчас демонстрационные. Реальные награды и выплаты не подключены.</p></div>
+          <article class="resource-card">
+            <span class="stat-icon stat-fuel" data-icon="fuel"></span>
+            <div class="resource-copy"><small>ТОПЛИВО</small><strong id="fuel-balance">—</strong></div>
+            <span class="stat-note">ЗАПАС</span>
           </article>
-        </aside>
-      </section>
-    </main>
+          <article class="resource-card">
+            <span class="stat-icon stat-xp" data-icon="experience"></span>
+            <div class="resource-copy"><small>ОПЫТ</small><strong id="xp-balance">—</strong></div>
+            <span class="stat-note">ПРОГРЕСС</span>
+          </article>
+        </section>
 
-    <nav class="bottom-nav" aria-label="Основная навигация">
-      <button class="nav-item active" data-page="spaceport"><span>⌂</span><small>База</small></button>
-      <button class="nav-item" data-page="rockets"><span>🚀</span><small>Ракеты</small></button>
-      <button class="nav-item" data-page="expeditions"><span>◎</span><small>Полёты</small></button>
-      <button class="nav-item" data-page="inventory"><span>▦</span><small>Склад</small></button>
-      <button class="nav-item" data-page="more"><span>☰</span><small>Ещё</small></button>
-    </nav>
+        <section class="content-grid">
+          <div class="main-column" id="page-content"></div>
+          <aside class="side-column">
+            <article class="panel pilot-panel">
+              <div class="panel-heading"><span>ПИЛОТ</span><span class="live-state" id="pilot-state">НЕ В СЕТИ</span></div>
+              <div class="pilot-identity">
+                <div class="pilot-avatar" id="pilot-avatar">CA</div>
+                <div class="pilot-name-block"><b id="pilot-name">Гость</b><small id="pilot-subtitle">Создай аккаунт, чтобы начать</small></div>
+              </div>
+              <div class="progress-label"><span>Прогресс уровня</span><b id="xp-progress-label">—</b></div>
+              <div class="progress-track"><span id="xp-progress" style="width:0%"></span></div>
+              <button class="text-button" id="pilot-profile-link" data-page="profile">Открыть профиль <span>→</span></button>
+            </article>
+            <article class="panel system-panel">
+              <div class="panel-heading"><span>СОСТОЯНИЕ СИСТЕМЫ</span><span class="system-state">НОРМА</span></div>
+              <div class="system-row"><span>Игровой сервер</span><b><i></i> Онлайн</b></div>
+              <div class="system-row"><span>Синхронизация</span><b id="sync-state">Ожидание</b></div>
+              <div class="system-row"><span>Режим экономики</span><b>Тестовый</b></div>
+              <p class="system-note">ASTRA Coins — внутриигровые единицы. Денежные выплаты не подключены.</p>
+            </article>
+          </aside>
+        </section>
+      </main>
+
+      <nav class="mobile-nav" aria-label="Основная навигация">
+        <button class="mobile-nav-item active" data-page="spaceport"><span data-icon="overview"></span><small>Обзор</small></button>
+        <button class="mobile-nav-item" data-page="rockets"><span data-icon="ship"></span><small>Флот</small></button>
+        <button class="mobile-nav-item" data-page="expeditions"><span data-icon="orbit"></span><small>Полёты</small></button>
+        <button class="mobile-nav-item" data-page="inventory"><span data-icon="inventory"></span><small>Склад</small></button>
+        <button class="mobile-nav-item" data-page="more"><span data-icon="menu"></span><small>Ещё</small></button>
+      </nav>
+    </div>
   </div>
+
   <dialog id="auth-dialog" class="auth-dialog">
     <form id="auth-form" class="auth-form">
       <button type="button" class="dialog-close" id="auth-close" aria-label="Закрыть">×</button>
-      <p class="eyebrow">ДОСТУП К КОСМОПОРТУ</p>
+      <p class="eyebrow">ДОСТУП К СИСТЕМЕ</p>
       <h2 id="auth-title">Войти в Crypto Astra</h2>
-      <p class="muted small" id="auth-description">Войди, чтобы сохранить прогресс на сервере.</p>
-      <label id="display-name-label">Имя пилота<input id="auth-name" name="display_name" minlength="2" maxlength="32" autocomplete="nickname" placeholder="Например, StarPilot"></label>
+      <p class="auth-description" id="auth-description">Войди, чтобы продолжить работу с флотом.</p>
+      <label id="display-name-label">Имя пилота<input id="auth-name" name="display_name" minlength="2" maxlength="32" autocomplete="nickname" placeholder="Имя пилота"></label>
       <label>Email<input id="auth-email" name="email" type="email" autocomplete="email" required placeholder="you@example.com"></label>
       <label>Пароль<input id="auth-password" name="password" type="password" minlength="8" autocomplete="current-password" required placeholder="Минимум 8 символов"></label>
       <p id="auth-message" class="auth-message" aria-live="polite"></p>
       <button class="primary-button auth-submit" id="auth-submit" type="submit">Войти</button>
       <button class="secondary-button auth-switch" id="auth-switch" type="button">Создать аккаунт</button>
-      <p class="auth-footnote">Тестовая версия. Не используй пароль от других сервисов.</p>
+      <p class="auth-footnote">Не используй пароль от других сервисов.</p>
     </form>
   </dialog>
+
   <script src="./supabase/config.js" defer></script>
   <script src="./auth.js" defer></script>
   <script src="./app.js" defer></script>
