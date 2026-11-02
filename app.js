@@ -67,7 +67,7 @@ function renderExpeditions(){
   const busy=active.some(e=>e.player_rocket_id===pr.id);
   return '<article class="item-card"><div class="item-visual">'+r.icon+'</div><h3>'+r.name+'</h3><p>Длительность: '+r.time+'<br>Вместимость: '+r.cargo+'</p><button class="primary-button" data-action="launch" data-id="'+pr.id+'" '+(busy||state.fuel<1?"disabled":"")+'>'+(busy?"Уже в полёте":"Запустить экспедицию")+'</button></article>';
  }).join("")+'</div>':'<div class="empty-state">В ангаре пока нет ракет.</div>');
- return activeHtml+launchHtml;
+ return '<div class="page-actions"><button class="secondary-button" data-action="refresh">Обновить статус экспедиций</button></div>'+activeHtml+launchHtml;
 }
 function render(){
  const [title,subtitle]=pageInfo[state.page]||pageInfo.spaceport;
@@ -126,6 +126,7 @@ document.addEventListener("click",async e=>{
  const type=action.dataset.action;
  try{
   if(type==="login"){openAuth();return}
+  if(type==="refresh"){await loadAccountData();return}
   if(type==="logout"){await window.CryptoAstra.auth.signOut();state.authenticated=false;state.playerRockets=[];state.expeditions=[];navigate("spaceport");return}
   if(!state.authenticated){openAuth();return}
   action.disabled=true;
