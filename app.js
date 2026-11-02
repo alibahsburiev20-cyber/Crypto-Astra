@@ -14,20 +14,20 @@ const state = {
 };
 
 const rockets = [
-  {id:"scout",name:"Scout",image:"./assets/ships/scout.svg",duration:30,cargo:10,price:0,role:"Разведка",description:"Лёгкий корабль для первых коротких вылетов."},
-  {id:"miner",name:"Miner",image:"./assets/ships/miner.svg",duration:120,cargo:50,price:1500,role:"Добыча",description:"Компактный добывающий корабль с увеличенным отсеком."},
-  {id:"explorer",name:"Explorer",image:"./assets/ships/explorer.svg",duration:240,cargo:120,price:4500,role:"Исследование",description:"Дальний радиус действия и расширенный грузовой отсек."},
-  {id:"titan",name:"Titan",image:"./assets/ships/titan.svg",duration:480,cargo:300,price:12000,role:"Тяжёлый класс",description:"Тяжёлый корпус для продолжительных экспедиций."},
+  {id:"scout",name:"Scout",image:"./assets/game-art/ships/scout.webp",duration:30,cargo:10,price:0,role:"Разведка",description:"Лёгкий корабль для первых коротких вылетов."},
+  {id:"miner",name:"Miner",image:"./assets/game-art/ships/miner.webp",duration:120,cargo:50,price:1500,role:"Добыча",description:"Компактный добывающий корабль с увеличенным отсеком."},
+  {id:"explorer",name:"Explorer",image:"./assets/game-art/ships/explorer.webp",duration:240,cargo:120,price:4500,role:"Исследование",description:"Дальний радиус действия и расширенный грузовой отсек."},
+  {id:"titan",name:"Titan",image:"./assets/game-art/ships/titan.webp",duration:480,cargo:300,price:12000,role:"Тяжёлый класс",description:"Тяжёлый корпус для продолжительных экспедиций."},
   {id:"galaxy",name:"Galaxy",image:"./assets/ships/galaxy.svg",duration:720,cargo:600,price:30000,role:"Флагман",description:"Максимальная грузоподъёмность стартовой линейки."}
 ];
 
 const resources = [
-  {id:"iron_ore",name:"Железная руда",en:"Iron Ore",image:"./assets/resources/iron-ore.svg",description:"Базовый конструкционный материал."},
-  {id:"copper",name:"Медь",en:"Copper",image:"./assets/resources/copper.svg",description:"Проводящий металл для оборудования."},
-  {id:"blue_crystal",name:"Голубой кристалл",en:"Blue Crystal",image:"./assets/resources/blue-crystal.svg",description:"Кристаллическое сырьё неизвестного происхождения."},
-  {id:"amethyst",name:"Аметист",en:"Amethyst",image:"./assets/resources/amethyst.svg",description:"Редкий минерал из глубоких пород."},
-  {id:"quantum_stone",name:"Квантовый камень",en:"Quantum Stone",image:"./assets/resources/quantum-stone.svg",description:"Материал с нестабильными энергетическими свойствами."},
-  {id:"stellar_core",name:"Звёздное ядро",en:"Stellar Core",image:"./assets/resources/stellar-core.svg",description:"Редкий компонент для продвинутых систем."}
+  {id:"iron_ore",name:"Железная руда",en:"Iron Ore",image:"./assets/game-art/resources/iron-ore.webp",description:"Базовый конструкционный материал."},
+  {id:"copper",name:"Медь",en:"Copper",image:"./assets/game-art/resources/copper-ore.webp",description:"Проводящий металл для оборудования."},
+  {id:"blue_crystal",name:"Голубой кристалл",en:"Blue Crystal",image:"./assets/game-art/resources/blue-crystal.webp",description:"Кристаллическое сырьё неизвестного происхождения."},
+  {id:"amethyst",name:"Аметист",en:"Amethyst",image:"./assets/game-art/resources/amethyst.webp",description:"Редкий минерал из глубоких пород."},
+  {id:"quantum_stone",name:"Квантовый камень",en:"Quantum Stone",image:"./assets/game-art/resources/quantum-ore.webp",description:"Материал с нестабильными энергетическими свойствами."},
+  {id:"stellar_core",name:"Звёздное ядро",en:"Stellar Core",image:"./assets/game-art/resources/stellar-core.webp",description:"Редкий компонент для продвинутых систем."}
 ];
 
 const planets = [
@@ -137,9 +137,9 @@ function renderHome(){
   const active=state.expeditions.filter(e=>e.status==="in_progress");
   const due=active.filter(e=>new Date(e.ends_at)<=new Date()).length;
   const heroStatus=state.authenticated?(active.length?active.length+" АКТИВНЫХ ПОЛЁТА":"ФЛОТ ГОТОВ К РАБОТЕ"):"ПРЕДВАРИТЕЛЬНЫЙ ПРОСМОТР";
-  const mainHero='<section class="panel mission-hero"><div class="mission-copy"><div class="mission-code">СЕКТОР 01 · СТАРТОВАЯ СИСТЕМА</div><h2>Исследование начинается с подготовки</h2><p>Собери флот, распределяй топливо и отправляй корабли в сектора с неразведанными ресурсами.</p><div class="mission-actions"><button class="primary-button" data-go="expeditions">Открыть экспедиции '+svgIcon("arrow")+'</button><button class="secondary-button" data-go="rockets">Состав флота</button></div></div><div class="mission-art"><img src="./assets/ships/scout.svg" alt="Корабль Scout"><span class="mission-art-label">SCOUT / CLASS I</span></div></section>';
+  const mainHero='<section class="panel mission-hero"><div class="mission-copy"><div class="mission-code">СЕКТОР 01 · СТАРТОВАЯ СИСТЕМА</div><h2>Исследование начинается с подготовки</h2><p>Собери флот, распределяй топливо и отправляй корабли в сектора с неразведанными ресурсами.</p><div class="mission-actions"><button class="primary-button" data-go="expeditions">Открыть экспедиции '+svgIcon("arrow")+'</button><button class="secondary-button" data-go="rockets">Состав флота</button></div></div><div class="mission-art"><img src="./assets/game-art/ships/scout.webp" alt="Корабль Scout"><span class="mission-art-label">SCOUT / CLASS I</span></div></section>';
   const stats='<section class="dashboard-grid"><div class="panel"><div class="panel-title-row"><h2>Оперативная сводка</h2><small>ТЕКУЩЕЕ СОСТОЯНИЕ</small></div><div class="mission-facts"><div class="mission-fact"><small>КОРАБЛИ В АНГАРЕ</small><b>'+(state.authenticated?owned:"—")+'</b></div><div class="mission-fact"><small>АКТИВНЫЕ ПОЛЁТЫ</small><b>'+(state.authenticated?active.length:"—")+'</b></div><div class="mission-fact"><small>ГОТОВЫ К СБОРУ</small><b>'+(state.authenticated?due:"—")+'</b></div></div><div class="list-row"><div class="list-left"><span class="list-icon">'+svgIcon("orbit")+'</span><div><b>Экспедиционная сеть</b><small>'+(state.authenticated?"Данные получены из базы игрока":"Войди, чтобы синхронизировать флот")+'</small></div></div><span class="status-pill '+(state.authenticated?"ready":"warning")+'">'+(state.authenticated?"СИНХРОН":"ТРЕБУЕТСЯ ВХОД")+'</span></div></div><div class="panel"><div class="panel-title-row"><h2>Быстрые действия</h2><small>НАВИГАЦИЯ</small></div><div class="compact-list"><div class="list-row"><div class="list-left"><span class="list-icon">'+svgIcon("ship")+'</span><div><b>Проверить ангар</b><small>Состояние и покупка кораблей</small></div></div><button class="text-link" data-go="rockets">Открыть →</button></div><div class="list-row"><div class="list-left"><span class="list-icon">'+svgIcon("inventory")+'</span><div><b>Инвентаризация</b><small>Найденные материалы</small></div></div><button class="text-link" data-go="inventory">Открыть →</button></div><div class="list-row"><div class="list-left"><span class="list-icon">'+svgIcon("market")+'</span><div><b>Технологии</b><small>Развитие кораблей</small></div></div><button class="text-link" data-go="market">Открыть →</button></div></div></div></section>';
-  const chart=panel("НАВИГАЦИОННАЯ КАРТА",'<div class="galaxy-map-frame"><img src="./assets/maps/galaxy-map.svg" alt="Карта секторов галактики"></div><div class="map-legend"><span><i class="map-dot map-known"></i>Известный сектор</span><span><i class="map-dot map-route"></i>Маршрут связи</span><span><i class="map-dot map-frontier"></i>Внешняя зона</span></div><div class="space-object-strip"><div><img src="./assets/objects/station.svg" alt=""><span>ОРБИТАЛЬНАЯ СТАНЦИЯ</span></div><div><img src="./assets/objects/asteroid.svg" alt=""><span>ПОЯС АСТЕРОИДОВ</span></div><div><img src="./assets/objects/drone.svg" alt=""><span>РАЗВЕДДРОН</span></div></div>',"SECTOR GRID 01");
+  const chart=panel("НАВИГАЦИОННАЯ КАРТА",'<div class="galaxy-map-frame"><img src="./assets/maps/galaxy-map.svg" alt="Карта секторов галактики"></div><div class="map-legend"><span><i class="map-dot map-known"></i>Известный сектор</span><span><i class="map-dot map-route"></i>Маршрут связи</span><span><i class="map-dot map-frontier"></i>Внешняя зона</span></div><div class="space-object-strip"><div><img src="./assets/game-art/objects/station.webp" alt=""><span>ОРБИТАЛЬНАЯ СТАНЦИЯ</span></div><div><img src="./assets/game-art/objects/asteroid.webp" alt=""><span>ПОЯС АСТЕРОИДОВ</span></div><div><img src="./assets/game-art/objects/mining-drone.webp" alt=""><span>РАЗВЕДДРОН</span></div></div>',"SECTOR GRID 01");
   const sectors=panel("ПЛАНЕТЫ СИСТЕМЫ",'<div class="planet-grid">'+renderPlanetCards()+'</div>',"3 ИЗ 6 СЕКТОРОВ");
   const note='<div class="system-note-wide"><span class="system-note-mark">i</span><span>Игровая экономика находится в тестовом режиме. ASTRA Coins не являются денежным балансом, а реальные выплаты пока отключены.</span></div>';
   return mainHero+stats+chart+sectors+note;
@@ -195,14 +195,14 @@ function renderInventory(){
 }
 function renderMarket(){
   const entries=[
-    ["engine","Ионный двигатель","Система повышения эффективности полёта","engine.svg"],
-    ["hull","Усиленный корпус","Дополнительная защита корабля","hull.svg"],
-    ["drill","Буровой модуль","Специализация на добыче сырья","drill-module.svg"],
-    ["navigation","Навигационный блок","Точность расчёта маршрутов","navigation.svg"],
-    ["cargo","Грузовой отсек","Увеличение вместимости","cargo-bay.svg"],
-    ["shield","Защитный экран","Защита оборудования","shield.svg"]
+    ["engine","Ионный двигатель","Система повышения эффективности полёта","./assets/game-art/modules/engine.webp"],
+    ["hull","Усиленный корпус","Дополнительная защита корабля","./assets/game-art/modules/hull.webp"],
+    ["drill","Буровой модуль","Специализация на добыче сырья","./assets/game-art/modules/drill.webp"],
+    ["navigation","Навигационный блок","Точность расчёта маршрутов","./assets/game-art/modules/navigation-console.webp"],
+    ["cargo","Грузовой отсек","Увеличение вместимости","./assets/game-art/modules/cargo-bay.webp"],
+    ["shield","Защитный экран","Защита оборудования","./assets/game-art/modules/shield.webp"]
   ];
-  const cards=entries.map((x,i)=>'<article class="market-card"><div class="module-art"><img src="./assets/modules/'+x[3]+'" alt="'+x[1]+'"></div><b>'+x[1]+'</b><small>'+x[2]+'</small><span class="market-state">В РАЗРАБОТКЕ</span></article>').join("");
+  const cards=entries.map((x,i)=>'<article class="market-card"><div class="module-art"><img src="'+x[3]+'" alt="'+x[1]+'"></div><b>'+x[1]+'</b><small>'+x[2]+'</small><span class="market-state">В РАЗРАБОТКЕ</span></article>').join("");
   return panel("ТЕХНОЛОГИЧЕСКИЕ МОДУЛИ",'<div class="market-intro"><div><h2>Модернизация флота</h2><p>Каталог будущих компонентов. Цены и покупка появятся после внедрения серверных правил модификации.</p></div></div><div class="market-grid">'+cards+'</div><div class="notice-banner">Модули пока нельзя приобрести. Мы не показываем вымышленные цены и не списываем ASTRA Coins.</div>');
 }
 function renderPool(){
@@ -212,7 +212,7 @@ function renderProfile(){
   if(!state.authenticated){
     return panel("УЧЁТНАЯ ЗАПИСЬ",'<div class="empty-state"><div class="empty-mark">'+svgIcon("lock")+'</div><b>Профиль недоступен</b>Войди в систему или создай аккаунт, чтобы сохранить игровой прогресс.<div class="page-actions" style="justify-content:center"><button class="primary-button" data-action="login">Войти / регистрация</button></div></div>');
   }
-  return panel("ДАННЫЕ ПИЛОТА",'<div class="profile-large"><div class="profile-large-avatar"><img src="./assets/avatars/pilot-01.svg" alt="Аватар пилота"></div><div><h2>'+escapeHtml(state.profileName)+'</h2><p>'+escapeHtml(state.email)+'</p><span class="status-pill ready">АККАУНТ ПОДТВЕРЖДЁН СЕССИЕЙ</span></div></div><div class="mission-facts"><div class="mission-fact"><small>УРОВЕНЬ</small><b>'+state.level+'</b></div><div class="mission-fact"><small>РАКЕТ В АНГАРЕ</small><b>'+state.playerRockets.length+'</b></div><div class="mission-fact"><small>ОПЫТ</small><b>'+formatNumber(state.xp)+' XP</b></div></div><div class="page-actions"><button class="secondary-button" data-action="refresh">'+svgIcon("refresh")+' Синхронизировать</button><button class="secondary-button" data-action="logout">Выйти из аккаунта</button></div>');
+  return panel("ДАННЫЕ ПИЛОТА",'<div class="profile-large"><div class="profile-large-avatar"><img src="./assets/game-art/pilots/pilot-01.webp" alt="Аватар пилота"></div><div><h2>'+escapeHtml(state.profileName)+'</h2><p>'+escapeHtml(state.email)+'</p><span class="status-pill ready">АККАУНТ ПОДТВЕРЖДЁН СЕССИЕЙ</span></div></div><div class="mission-facts"><div class="mission-fact"><small>УРОВЕНЬ</small><b>'+state.level+'</b></div><div class="mission-fact"><small>РАКЕТ В АНГАРЕ</small><b>'+state.playerRockets.length+'</b></div><div class="mission-fact"><small>ОПЫТ</small><b>'+formatNumber(state.xp)+' XP</b></div></div><div class="page-actions"><button class="secondary-button" data-action="refresh">'+svgIcon("refresh")+' Синхронизировать</button><button class="secondary-button" data-action="logout">Выйти из аккаунта</button></div>');
 }
 function renderMore(){
   const rows=[
