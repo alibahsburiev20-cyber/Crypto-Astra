@@ -1,31 +1,14 @@
-# Crypto Astra — WebP game art
+# Crypto Astra — organized static assets
 
-В каталоге находятся **68 WebP-изображений**, разложенных по назначению. Все файлы находятся внутри `assets/game-art/`; в корне репозитория дублей нет.
+68 individual assets organized by category. Images are converted losslessly enough for UI use to WebP quality 92; original backgrounds are intentionally preserved to avoid cutting off dark ship details, pilot hair, or planet edges. No animations.
 
-| Папка | Количество | Содержимое |
-|---|---:|---|
-| `ships/` | 9 | Корабли и классы флота |
-| `pilots/` | 8 | Портреты пилотов |
-| `planets/pixel/` | 8 | Планеты в pixel-стиле |
-| `planets/realistic/` | 8 | Планеты в реалистичном стиле |
-| `resources/` | 14 | Руды, кристаллы и энергетические ядра |
-| `modules/` | 8 | Компоненты и оборудование кораблей |
-| `objects/` | 13 | Станции, дроны и объекты исследования |
+- `ships/` — 9 ships
+- `pilots/` — 8 pilot portraits
+- `planets/pixel/` — 8 pixel planets
+- `planets/realistic/` — 8 realistic planets
+- `resources/` — 14 ores, crystals and cores
+- `modules/` — 8 equipment modules
+- `objects/` — 13 stations, drones and exploration objects
+- `source-sheets/` — original mixed ship/equipment source sheet
 
-## Исходники
-
-- `source-sheets/ships-and-equipment-source.jpg` — исходный лист изображений.
-- `source-archives/crypto_astra_assets_organized.zip` — сохранённый ZIP-архив исходной подборки.
-
-## Подключение в приложении
-
-Текущий интерфейс использует WebP для кораблей Scout, Miner, Explorer и Titan, для шести материалов склада, шести модулей верфи, объектов космопорта и аватара профиля. SVG остаются для карты, планет стартовой системы и корабля Galaxy, для которого в подборке нет отдельного WebP-файла.
-
-Пути в коде должны быть относительными от корня проекта, например `./assets/game-art/ships/scout.webp`.
-
-## Правила
-
-- Имена файлов — lowercase kebab-case.
-- Для карточек инвентаря и оборудования использовать `object-fit: contain`.
-- Не заменять визуальный вариант планет без отдельного выбора pixel или realistic стиля.
-- Все изображения статичные; анимации и CSS-переходы не добавлять.
+Use `object-fit: contain` for inventory cards. Because backgrounds are preserved, preview on the target dark UI before replacing existing SVG artwork.
