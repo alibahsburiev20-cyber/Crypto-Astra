@@ -1,0 +1,43 @@
+name: Import Crypto Astra art pack
+
+on:
+  push:
+    paths:
+      - "crypto_astra_assets_organized.zip"
+      - ".github/workflows/import-art-pack.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  import-assets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - name: Extract optimized art pack
+        run: |
+          test -s crypto_astra_assets_organized.zip
+          mkdir -p assets/game-art
+          unzip -o crypto_astra_assets_organized.zip -d /tmp/crypto-astra-art
+          cp -R /tmp/crypto-astra-art/ships assets/game-art/
+          cp -R /tmp/crypto-astra-art/objects assets/game-art/
+          cp -R /tmp/crypto-astra-art/pilots assets/game-art/
+          cp -R /tmp/crypto-astra-art/planets assets/game-art/
+          cp -R /tmp/crypto-astra-art/resources assets/game-art/
+          cp -R /tmp/crypto-astra-art/modules assets/game-art/
+          cp -R /tmp/crypto-astra-art/source-sheets assets/game-art/
+          cp /tmp/crypto-astra-art/README.md assets/game-art/README.md
+      - name: Commit imported assets
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add assets/game-art
+          if git diff --cached --quiet; then
+            echo "No asset changes to commit."
+          else
+            git commit -m "Import optimized Crypto Astra art assets"
+            git push
+          fi
