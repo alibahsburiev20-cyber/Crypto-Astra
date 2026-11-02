@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 300" role="img" aria-label="Quantis">
+ <defs><radialGradient id="p" cx="30%" cy="25%" r="80%"><stop stop-color="#d8e2ff"/><stop offset=".3" stop-color="#8f9ebf"/><stop offset="1" stop-color="#343e68"/></radialGradient><radialGradient id="shade"><stop offset=".45" stop-color="#081225" stop-opacity="0"/><stop offset="1" stop-color="#030817" stop-opacity=".8"/></radialGradient></defs>
+ <g fill="#d8e8ff" opacity=".7"><circle cx="32" cy="48" r="2"/><circle cx="365" cy="42" r="1.8"/><circle cx="350" cy="240" r="2"/><circle cx="63" cy="252" r="1.4"/><circle cx="290" cy="22" r="1.5"/></g>
+ <ellipse cx="210" cy="166" rx="150" ry="32" fill="none" stroke="#d8e2ff" stroke-opacity=".45" stroke-width="9" transform="rotate(-13 210 166)"/>
+ <circle cx="210" cy="145" r="112" fill="url(#p)"/>
+ <path d="M105 116 Q170 88 250 113 T320 105 M101 157 Q175 133 245 154 T319 146 M135 204 Q195 183 286 203" fill="none" stroke="#d8e2ff" stroke-opacity=".42" stroke-width="12"/>
+ <circle cx="210" cy="145" r="112" fill="url(#shade)"/>
+ <path d="M90 160 Q200 205 332 143" fill="none" stroke="#fff" stroke-opacity=".18" stroke-width="4"/>
+ </svg>
