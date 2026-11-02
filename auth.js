@@ -49,7 +49,7 @@
     return data;
   }
   async function signUp(email, password, displayName) {
-    const data = await authRequest("signup", { email, password, data: { display_name: displayName } });
+    const data = await authRequest("signup?redirect_to=" + encodeURIComponent("https://crypto-astra.pages.dev"), { email, password, data: { display_name: displayName } });
     if (data.access_token) saveSession({ ...data, expires_at: Math.floor(Date.now()/1000) + (data.expires_in || 3600) });
     return data;
   }
