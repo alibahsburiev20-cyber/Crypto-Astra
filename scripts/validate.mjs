@@ -22,4 +22,25 @@ if(all)pass("All 68 WebP sprites are present");
 if(!app.includes("function renderGallery()")||!app.includes("planet-pixel-")||!app.includes("pilot-"))fail("Sprite archive missing");else pass("Sprite archive renderer exists");
 if(/\b(animation|transition)\s*:/i.test(css)||/@keyframes\b/i.test(css))fail("Motion found in static v1 CSS");else pass("No CSS animations or transitions");
 if(!app.includes('gallery:{title:"Архив спрайтов"'))fail("Gallery route missing");else pass("Gallery route exists");
+
+// CSS structure: a stray "}" silently drops the next rule in the browser.
+{
+  const stripped=css.replace(/\/\*[\s\S]*?\*\//g,"");
+  let depth=0,broken=false;
+  for(const ch of stripped){
+    if(ch==="{")depth++;
+    else if(ch==="}"){depth--;if(depth<0){broken=true;break;}}
+  }
+  if(broken||depth!==0)fail("styles.css has unbalanced braces");else pass("styles.css braces are balanced");
+  if(/^\s*\d+%\s*\{/m.test(stripped))fail("styles.css has orphan keyframe steps (leftover from a removed animation)");else pass("No orphan keyframe steps in styles.css");
+}
+
+// Every RPC the client calls must exist in a migration.
+{
+  const dir=path.join(root,"supabase/migrations");
+  const sql=fs.readdirSync(dir).filter(f=>f.endsWith(".sql")).map(f=>fs.readFileSync(path.join(dir,f),"utf8")).join("\n");
+  const rpcs=[...new Set([...app.matchAll(/rpc\(["']([a-z_]+)["']/g)].map(m=>m[1]))];
+  const absent=rpcs.filter(n=>!new RegExp("function\\s+public\\."+n+"\\b").test(sql));
+  if(absent.length)fail("RPC called by app.js but missing in migrations: "+absent.join(", "));else pass("All RPCs used by app.js exist in migrations ("+rpcs.join(", ")+")");
+}
 console.log("Crypto Astra validation finished.");
