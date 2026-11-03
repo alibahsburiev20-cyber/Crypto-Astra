@@ -6,6 +6,9 @@ const state = {
   profileName:"Гость",
   coins:0,
   fuel:0,
+  fuelMax:5,
+  fuelRegenMinutes:15,
+  nextFuelAt:null,
   xp:0,
   level:1,
   playerRockets:[],
@@ -13,6 +16,8 @@ const state = {
   expeditions:[],
   syncStatus:"checking"
 };
+let lastDueKey="";
+const primaryPages=["spaceport","rockets","expeditions","inventory"];
 
 const rockets = [
   {id:"scout",name:"Scout",image:"./assets/game-art/ships/scout.webp",duration:30,cargo:10,price:0,role:"Разведка",description:"Лёгкий корабль для первых коротких вылетов."},
@@ -91,6 +96,13 @@ function formatDuration(minutes){
   const h=Math.floor(minutes/60),m=minutes%60;
   return h+" ч"+(m?" "+m+" мин":"");
 }
+function resourceName(id,fallback){
+  return resources.find(r=>r.id===id)?.name||fallback||"Ресурсы";
+}
+function dueKey(){
+  const now=new Date();
+  return state.expeditions.filter(e=>e.status==="in_progress"&&new Date(e.ends_at)<=now).map(e=>e.id).join(",");
+}
 function panel(title,body,meta=""){
   return '<section class="panel"><div class="panel-heading"><span>'+title+'</span>'+(meta?'<span class="muted-label">'+meta+'</span>':"")+'</div>'+body+'</section>';
 }
@@ -102,7 +114,7 @@ function navigate(page){
 }
 function updateHeader(){
   el("coin-balance").textContent=state.authenticated?formatNumber(state.coins):"—";
-  el("fuel-balance").textContent=state.authenticated?formatNumber(state.fuel):"—";
+  el("fuel-balance").textContent=state.authenticated?formatNumber(state.fuel)+" / "+formatNumber(state.fuelMax):"—";
   el("xp-balance").textContent=state.authenticated?formatNumber(state.xp)+" XP":"—";
   el("player-level").textContent=state.authenticated?state.level:"—";
   el("xp-progress-label").textContent=state.authenticated?(state.xp%100)+" / 100 XP":"—";
@@ -187,12 +199,16 @@ function renderExpeditions(){
     const busy=active.some(e=>e.player_rocket_id===pr.id);
     return '<div class="list-row"><div class="list-left"><span class="list-icon">'+svgIcon("ship")+'</span><div><b>'+r.name+'</b><small>'+formatDuration(r.duration)+' · груз '+formatNumber(r.cargo)+'</small></div></div><button class="primary-button" data-action="launch" data-id="'+pr.id+'" '+(busy||state.fuel<1?"disabled":"")+'>'+(busy?"В полёте":"Запустить")+'</button></div>';
   }).join("");
+  const fuelNote=state.fuel<state.fuelMax
+    ?'<p class="system-note">Топливо: +1 каждые '+state.fuelRegenMinutes+' мин, максимум '+state.fuelMax+(state.nextFuelAt?'. Следующая единица около '+new Date(state.nextFuelAt).toLocaleTimeString("ru-RU",{hour:"2-digit",minute:"2-digit"})+'.':'.')+' Обнови данные, чтобы увидеть текущий запас.</p>'
+    :'';
   const history=completed.length?panel("ПОСЛЕДНИЕ ЗАВЕРШЁННЫЕ ПОЛЁТЫ",completed.map(e=>{
     const rw=e.reward_payload||{};
-    return '<div class="list-row"><div class="list-left"><span class="list-icon">'+svgIcon("check")+'</span><div><b>Экспедиция завершена</b><small>'+new Date(e.completed_at||e.created_at).toLocaleString("ru-RU")+'</small></div></div><span class="list-value">'+escapeHtml(rw.resource_name||"Ресурсы")+' × '+formatNumber(rw.quantity||0)+'</span></div>';
+    const coins=Number(rw.coins||0);
+    return '<div class="list-row"><div class="list-left"><span class="list-icon">'+svgIcon("check")+'</span><div><b>Экспедиция завершена</b><small>'+new Date(e.completed_at||e.created_at).toLocaleString("ru-RU")+'</small></div></div><span class="list-value">'+escapeHtml(resourceName(rw.resource_id,rw.resource_name))+' × '+formatNumber(rw.quantity||0)+(coins?' · +'+formatNumber(coins)+' ASTRA':'')+'</span></div>';
   }).join("")):"";
   return panel("АКТИВНЫЕ ЭКСПЕДИЦИИ",'<div class="page-actions"><button class="secondary-button" data-action="refresh">'+svgIcon("refresh")+' Обновить данные</button></div>'+activeCards,active.length+" АКТИВНО")+
-    panel("ГОТОВЫЕ К ЗАПУСКУ",'<div class="compact-list">'+(available||'<div class="empty-state">В ангаре пока нет кораблей.</div>')+'</div>',"ТОПЛИВО: "+formatNumber(state.fuel))+
+    panel("ГОТОВЫЕ К ЗАПУСКУ",'<div class="compact-list">'+(available||'<div class="empty-state">В ангаре пока нет кораблей.</div>')+'</div>'+fuelNote,"ТОПЛИВО: "+formatNumber(state.fuel)+" / "+formatNumber(state.fuelMax))+
     history;
 }
 function renderInventory(){
@@ -226,16 +242,18 @@ function renderProfile(){
 }
 function renderMore(){
   const rows=[
-    ["О проекте","Версия интерфейса 0.3 · мобильная браузерная игра"],
+    ["О проекте","Версия интерфейса 0.2 · мобильная браузерная игра"],
     ["Игровые балансы","ASTRA Coins и ресурсы используются только внутри игры"],
     ["Astra Pool","Реальные выплаты пока отключены"],
     ["Сохранность данных","Покупки и экспедиции проверяются базой данных"],
     ["Поддержка","Контакты проекта появятся перед публичным запуском"]
   ];
+  const sections=[["market","Верфь","Модули и улучшения кораблей"],["pool","Astra Pool","Фонд наград и правила"]];
   const accountButton=state.authenticated
     ?'<button class="secondary-button" data-go="profile">Открыть профиль</button>'
     :'<button class="secondary-button" data-action="login">Войти или создать аккаунт</button>';
-  return panel("СИСТЕМНАЯ ИНФОРМАЦИЯ",'<div class="compact-list">'+rows.map((r,i)=>'<div class="list-row"><div class="list-left"><span class="list-icon">'+svgIcon(["overview","coin","pool","lock","settings"][i])+'</span><div><b>'+r[0]+'</b><small>'+r[1]+'</small></div></div></div>').join("")+'</div><div class="page-actions">'+accountButton+'</div>')+
+  return panel("РАЗДЕЛЫ",'<div class="compact-list">'+sections.map(s=>'<div class="list-row"><div class="list-left"><span class="list-icon">'+svgIcon(s[0])+'</span><div><b>'+s[1]+'</b><small>'+s[2]+'</small></div></div><button class="text-link" data-go="'+s[0]+'">Открыть →</button></div>').join("")+'</div>')+
+    panel("СИСТЕМНАЯ ИНФОРМАЦИЯ",'<div class="compact-list">'+rows.map((r,i)=>'<div class="list-row"><div class="list-left"><span class="list-icon">'+svgIcon(["overview","coin","pool","lock","settings"][i])+'</span><div><b>'+r[0]+'</b><small>'+r[1]+'</small></div></div></div>').join("")+'</div><div class="page-actions">'+accountButton+'</div>')+
     panel("КОЛЛЕКЦИЯ АРТЕФАКТОВ",'<div class="archive-shortcut"><div><b>Архив спрайтов</b><small>68 WebP-изображений и дополнительные SVG-иллюстрации</small></div><button class="primary-button" data-go="gallery">Открыть архив</button></div>');
 }
 function archiveCard(src,title,caption){
@@ -281,7 +299,11 @@ function renderGallery(){
 
 function render(){
   pageHeading();
-  document.querySelectorAll(".nav-link,.mobile-nav-item").forEach(btn=>btn.classList.toggle("active",btn.dataset.page===state.page));
+  document.querySelectorAll(".nav-link").forEach(btn=>btn.classList.toggle("active",btn.dataset.page===state.page));
+  document.querySelectorAll(".mobile-nav-item").forEach(btn=>{
+    const p=btn.dataset.page;
+    btn.classList.toggle("active",p===state.page||(p==="more"&&!primaryPages.includes(state.page)));
+  });
   let content="";
   if(state.page==="spaceport")content=renderHome();
   else if(state.page==="rockets")content=renderRockets();
@@ -294,6 +316,7 @@ function render(){
   else content=renderMore();
   el("page-content").innerHTML=content;
   updateHeader();
+  lastDueKey=dueKey();
 }
 async function loadAccountData(){
   state.syncStatus="checking";
@@ -326,6 +349,13 @@ async function loadAccountData(){
   }
   state.authenticated=true;state.userId=session.user.id;state.email=session.user.email||"";
   try{
+    // Server-side fuel regeneration; tolerate failure so the rest of the data still loads.
+    const sync=await window.CryptoAstra.db.rpc("sync_player_wallet",{}).catch(error=>{console.warn("Wallet sync failed:",error);return null;});
+    if(sync&&sync.max_fuel){
+      state.fuelMax=Number(sync.max_fuel);
+      state.fuelRegenMinutes=Number(sync.regen_minutes||15);
+      state.nextFuelAt=sync.next_fuel_at||null;
+    }
     const uid=encodeURIComponent(session.user.id);
     const [profiles,wallets,playerRockets,inventory,expeditions]=await Promise.all([
       window.CryptoAstra.db.rows("profiles","select=id,display_name&id=eq."+uid),
@@ -351,6 +381,13 @@ async function loadAccountData(){
 }
 hydrateIcons();
 render();
+
+// Flip "in flight" to "ready" without a network request when a timer runs out.
+setInterval(()=>{
+  if(document.hidden||!state.authenticated)return;
+  if(state.page!=="spaceport"&&state.page!=="expeditions")return;
+  if(dueKey()!==lastDueKey)render();
+},10000);
 
 document.addEventListener("click",async event=>{
   const nav=event.target.closest("[data-page]");
@@ -379,7 +416,7 @@ document.addEventListener("click",async event=>{
       const result=await window.CryptoAstra.db.rpc("complete_expedition",{p_expedition_id:action.dataset.id});
       await loadAccountData();
       const reward=result.reward||{};
-      alert("Экспедиция завершена. Получено: "+(reward.resource_name||"ресурс")+" × "+(reward.quantity||1)+" и "+(reward.xp||10)+" XP.");
+      alert("Экспедиция завершена. Получено: "+resourceName(reward.resource_id,reward.resource_name)+" × "+formatNumber(reward.quantity||1)+", "+formatNumber(reward.coins||0)+" ASTRA Coins и "+(reward.xp||10)+" XP.");
     }else if(type==="select"){
       navigate("expeditions");
     }
