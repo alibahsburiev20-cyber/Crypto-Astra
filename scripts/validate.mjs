@@ -1,0 +1,24 @@
+import fs from "node:fs";
+import path from "node:path";
+const root=process.cwd();
+const read=(name)=>fs.readFileSync(path.join(root,name),"utf8");
+const fail=(m)=>{console.error("FAIL:",m);process.exitCode=1;};
+const pass=(m)=>console.log("OK:",m);
+const html=read("index.html"),app=read("app.js"),css=read("styles.css");
+const ids=[...html.matchAll(/\bid=["']([^"']+)["']/g)].map(m=>m[1]);
+const duplicates=ids.filter((id,i)=>ids.indexOf(id)!==i);
+if(duplicates.length)fail("Duplicate HTML ids: "+[...new Set(duplicates)].join(", "));else pass("HTML ids are unique");
+const idSet=new Set(ids);
+const missingIds=[...new Set([...app.matchAll(/\bel\(["']([^"']+)["']\)/g)].map(m=>m[1]))].filter(id=>!idSet.has(id));
+if(missingIds.length)fail("JS references missing DOM ids: "+missingIds.join(", "));else pass("Every el(id) reference exists in index.html");
+const refs=[...[...html.matchAll(/(?:src|href)=["']\.\/([^"']+)["']/g)].map(m=>m[1]),...[...app.matchAll(/["'](\.\/assets\/[^"'$]+)["']/g)].map(m=>m[1].slice(2))];
+const missing=[...new Set(refs)].filter(file=>!fs.existsSync(path.join(root,file)));
+if(missing.length)fail("Missing asset references: "+missing.join(", "));else pass("All literal HTML/JS asset references exist");
+const counts={"assets/game-art/ships":9,"assets/game-art/pilots":8,"assets/game-art/planets/pixel":8,"assets/game-art/planets/realistic":8,"assets/game-art/resources":14,"assets/game-art/modules":8,"assets/game-art/objects":13};
+let all=true;
+for(const [dir,n] of Object.entries(counts)){const actual=fs.readdirSync(path.join(root,dir)).filter(f=>f.endsWith(".webp")).length;if(actual!==n){all=false;fail(dir+": expected "+n+", found "+actual);}}
+if(all)pass("All 68 WebP sprites are present");
+if(!app.includes("function renderGallery()")||!app.includes("planet-pixel-")||!app.includes("pilot-"))fail("Sprite archive missing");else pass("Sprite archive renderer exists");
+if(/\b(animation|transition)\s*:/i.test(css)||/@keyframes\b/i.test(css))fail("Motion found in static v1 CSS");else pass("No CSS animations or transitions");
+if(!app.includes('gallery:{title:"Архив спрайтов"'))fail("Gallery route missing");else pass("Gallery route exists");
+console.log("Crypto Astra validation finished.");

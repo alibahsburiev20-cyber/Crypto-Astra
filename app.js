@@ -10,7 +10,8 @@ const state = {
   level:1,
   playerRockets:[],
   inventory:{},
-  expeditions:[]
+  expeditions:[],
+  syncStatus:"checking"
 };
 
 const rockets = [
@@ -47,7 +48,8 @@ const pageInfo = {
   market:{title:"Верфь",kicker:"05 / МОДЕРНИЗАЦИЯ",subtitle:"Технологические модули и развитие кораблей."},
   pool:{title:"Astra Pool",kicker:"06 / ФОНД",subtitle:"Прозрачная информация о механике фонда наград."},
   profile:{title:"Профиль пилота",kicker:"07 / АККАУНТ",subtitle:"Учётная запись и игровая статистика."},
-  more:{title:"Система",kicker:"08 / СИСТЕМА",subtitle:"Информация о проекте и текущем режиме игры."}
+  more:{title:"Система",kicker:"08 / СИСТЕМА",subtitle:"Информация о проекте и текущем режиме игры."},
+  gallery:{title:"Архив спрайтов",kicker:"09 / КОЛЛЕКЦИЯ",subtitle:"Все статичные изображения кораблей, пилотов, планет, модулей и объектов Crypto Astra."}
 };
 
 const iconPaths = {
@@ -58,6 +60,7 @@ const iconPaths = {
   market:'<path d="m14 6 4 4M3 21l5.2-1 11.3-11.3a2.8 2.8 0 0 0-4-4L4.2 16 3 21Z"/><path d="m12 8 4 4"/>',
   pool:'<path d="M12 2v20M2 12h20M5 5l14 14M19 5 5 19"/><circle cx="12" cy="12" r="8"/>',
   menu:'<path d="M4 6h16M4 12h16M4 18h16"/>',
+  gallery:'<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
   coin:'<circle cx="12" cy="12" r="8.5"/><path d="M15.5 8.5c-.7-.7-1.7-1-3.2-1-1.8 0-3 .8-3 2s1.1 1.8 3 2.3 3 1.2 3 2.5-1.2 2.2-3.2 2.2c-1.4 0-2.6-.4-3.4-1.2M12 5.5v13"/>',
   fuel:'<path d="M6 21V4.5A1.5 1.5 0 0 1 7.5 3h7A1.5 1.5 0 0 1 16 4.5V21M4 21h14M8.5 7h5"/><path d="M16 8h2l2 3v5.5a1.5 1.5 0 0 1-3 0V14"/>',
   experience:'<path d="m12 2 2.6 6.1L21 10l-6.4 1.9L12 18l-2.6-6.1L3 10l6.4-1.9L12 2Z"/><path d="m19 16 1.2 2.8L23 20l-2.8 1.2L19 24l-1.2-2.8L15 20l2.8-1.2L19 16Z"/>',
@@ -117,7 +120,14 @@ function updateHeader(){
   el("pilot-state").classList.toggle("online",state.authenticated);
   el("demo-label").textContent=state.authenticated?"ONLINE":"DEMO";
   el("demo-label").classList.toggle("online",state.authenticated);
-  el("sync-state").textContent=state.authenticated?"Синхронизировано":"Ожидание";
+  const connected=state.syncStatus==="online"||state.syncStatus==="synced";
+  const checking=state.syncStatus==="checking";
+  el("server-status").textContent=connected?"СЕРВЕР ДОСТУПЕН":(checking?"ПРОВЕРКА СВЯЗИ":"НЕТ СОЕДИНЕНИЯ");
+  el("connection-dot").classList.toggle("offline",!connected&&!checking);
+  el("api-state").textContent=connected?"Подключено":(checking?"Проверка…":"Нет соединения");
+  el("sync-state").textContent=state.syncStatus==="synced"?"Синхронизировано":(state.syncStatus==="online"?"База доступна":(checking?"Проверка…":"Ошибка"));
+  el("system-status").textContent=connected?"НОРМА":(checking?"ПРОВЕРКА":"ОШИБКА");
+  el("system-status").classList.toggle("offline",!connected&&!checking);
 }
 function ownedIds(){return new Set(state.playerRockets.map(r=>r.rocket_id))}
 function pageHeading(){
@@ -136,14 +146,12 @@ function renderHome(){
   const owned=state.playerRockets.length;
   const active=state.expeditions.filter(e=>e.status==="in_progress");
   const due=active.filter(e=>new Date(e.ends_at)<=new Date()).length;
-  const heroStatus=state.authenticated?(active.length?active.length+" АКТИВНЫХ ПОЛЁТА":"ФЛОТ ГОТОВ К РАБОТЕ"):"ПРЕДВАРИТЕЛЬНЫЙ ПРОСМОТР";
   const mainHero='<section class="panel mission-hero"><div class="mission-copy"><div class="mission-code">СЕКТОР 01 · СТАРТОВАЯ СИСТЕМА</div><h2>Исследование начинается с подготовки</h2><p>Собери флот, распределяй топливо и отправляй корабли в сектора с неразведанными ресурсами.</p><div class="mission-actions"><button class="primary-button" data-go="expeditions">Открыть экспедиции '+svgIcon("arrow")+'</button><button class="secondary-button" data-go="rockets">Состав флота</button></div></div><div class="mission-art"><img src="./assets/game-art/ships/scout.webp" alt="Корабль Scout"><span class="mission-art-label">SCOUT / CLASS I</span></div></section>';
   const stats='<section class="dashboard-grid"><div class="panel"><div class="panel-title-row"><h2>Оперативная сводка</h2><small>ТЕКУЩЕЕ СОСТОЯНИЕ</small></div><div class="mission-facts"><div class="mission-fact"><small>КОРАБЛИ В АНГАРЕ</small><b>'+(state.authenticated?owned:"—")+'</b></div><div class="mission-fact"><small>АКТИВНЫЕ ПОЛЁТЫ</small><b>'+(state.authenticated?active.length:"—")+'</b></div><div class="mission-fact"><small>ГОТОВЫ К СБОРУ</small><b>'+(state.authenticated?due:"—")+'</b></div></div><div class="list-row"><div class="list-left"><span class="list-icon">'+svgIcon("orbit")+'</span><div><b>Экспедиционная сеть</b><small>'+(state.authenticated?"Данные получены из базы игрока":"Войди, чтобы синхронизировать флот")+'</small></div></div><span class="status-pill '+(state.authenticated?"ready":"warning")+'">'+(state.authenticated?"СИНХРОН":"ТРЕБУЕТСЯ ВХОД")+'</span></div></div><div class="panel"><div class="panel-title-row"><h2>Быстрые действия</h2><small>НАВИГАЦИЯ</small></div><div class="compact-list"><div class="list-row"><div class="list-left"><span class="list-icon">'+svgIcon("ship")+'</span><div><b>Проверить ангар</b><small>Состояние и покупка кораблей</small></div></div><button class="text-link" data-go="rockets">Открыть →</button></div><div class="list-row"><div class="list-left"><span class="list-icon">'+svgIcon("inventory")+'</span><div><b>Инвентаризация</b><small>Найденные материалы</small></div></div><button class="text-link" data-go="inventory">Открыть →</button></div><div class="list-row"><div class="list-left"><span class="list-icon">'+svgIcon("market")+'</span><div><b>Технологии</b><small>Развитие кораблей</small></div></div><button class="text-link" data-go="market">Открыть →</button></div></div></div></section>';
   const chart=panel("НАВИГАЦИОННАЯ КАРТА",'<div class="galaxy-map-frame"><img src="./assets/maps/galaxy-map.svg" alt="Карта секторов галактики"></div><div class="map-legend"><span><i class="map-dot map-known"></i>Известный сектор</span><span><i class="map-dot map-route"></i>Маршрут связи</span><span><i class="map-dot map-frontier"></i>Внешняя зона</span></div><div class="space-object-strip"><div><img src="./assets/game-art/objects/station.webp" alt=""><span>ОРБИТАЛЬНАЯ СТАНЦИЯ</span></div><div><img src="./assets/game-art/objects/asteroid.webp" alt=""><span>ПОЯС АСТЕРОИДОВ</span></div><div><img src="./assets/game-art/objects/mining-drone.webp" alt=""><span>РАЗВЕДДРОН</span></div></div>',"SECTOR GRID 01");
   const sectors=panel("ПЛАНЕТЫ СИСТЕМЫ",'<div class="planet-grid">'+renderPlanetCards()+'</div>',"6 СЕКТОРОВ");
   const note='<div class="system-note-wide"><span class="system-note-mark">i</span><span>Игровая экономика находится в тестовом режиме. ASTRA Coins не являются денежным балансом, а реальные выплаты пока отключены.</span></div>';
-  const extraSprites=["beacon","cargo-container","outpost","probe","relay-satellite","satellite","supply-crate","teleporter","turret","wreckage"].map(id=>`<div class="space-object-card"><img src="./assets/game-art/objects/${id}.webp" alt="${id}"><span>${id.toUpperCase()}</span></div>`).join("");
-  return mainHero+stats+chart+sectors+panel("ОБЪЕКТЫ ГАЛАКТИКИ",'<div class="space-object-gallery">'+extraSprites+'</div>',"13 SPRITES")+note;
+  return mainHero+stats+chart+sectors+note;
 }
 function renderRocketCards(){
   const owned=ownedIds();
@@ -214,18 +222,63 @@ function renderProfile(){
   if(!state.authenticated){
     return panel("УЧЁТНАЯ ЗАПИСЬ",'<div class="empty-state"><div class="empty-mark">'+svgIcon("lock")+'</div><b>Профиль недоступен</b>Войди в систему или создай аккаунт, чтобы сохранить игровой прогресс.<div class="page-actions" style="justify-content:center"><button class="primary-button" data-action="login">Войти / регистрация</button></div></div>');
   }
-  return panel("ДАННЫЕ ПИЛОТА",'<div class="profile-large"><div class="profile-large-avatar"><img src="./assets/game-art/pilots/pilot-01.webp" alt="Аватар пилота"></div><div><h2>'+escapeHtml(state.profileName)+'</h2><p>'+escapeHtml(state.email)+'</p><span class="status-pill ready">АККАУНТ ПОДТВЕРЖДЁН СЕССИЕЙ</span></div></div><div class="mission-facts"><div class="mission-fact"><small>УРОВЕНЬ</small><b>'+state.level+'</b></div><div class="mission-fact"><small>РАКЕТ В АНГАРЕ</small><b>'+state.playerRockets.length+'</b></div><div class="mission-fact"><small>ОПЫТ</small><b>'+formatNumber(state.xp)+' XP</b></div></div><div class="page-actions"><button class="secondary-button" data-action="refresh">'+svgIcon("refresh")+' Синхронизировать</button><button class="secondary-button" data-action="logout">Выйти из аккаунта</button></div>');
+  return panel("ДАННЫЕ ПИЛОТА",'<div class="profile-large"><div class="profile-large-avatar"><img src="./assets/game-art/pilots/pilot-01.webp" alt="Аватар пилота"></div><div><h2>'+escapeHtml(state.profileName)+'</h2><p>'+escapeHtml(state.email)+'</p><span class="status-pill ready">СЕССИЯ АКТИВНА</span></div></div><div class="mission-facts"><div class="mission-fact"><small>УРОВЕНЬ</small><b>'+state.level+'</b></div><div class="mission-fact"><small>РАКЕТ В АНГАРЕ</small><b>'+state.playerRockets.length+'</b></div><div class="mission-fact"><small>ОПЫТ</small><b>'+formatNumber(state.xp)+' XP</b></div></div><div class="page-actions"><button class="secondary-button" data-action="refresh">'+svgIcon("refresh")+' Синхронизировать</button><button class="secondary-button" data-action="logout">Выйти из аккаунта</button></div>');
 }
 function renderMore(){
   const rows=[
-    ["О проекте","Версия интерфейса 0.2 · мобильная браузерная игра"],
+    ["О проекте","Версия интерфейса 0.3 · мобильная браузерная игра"],
     ["Игровые балансы","ASTRA Coins и ресурсы используются только внутри игры"],
     ["Astra Pool","Реальные выплаты пока отключены"],
-    ["Сохранность данных","Игровые операции выполняются сервером"],
+    ["Сохранность данных","Покупки и экспедиции проверяются базой данных"],
     ["Поддержка","Контакты проекта появятся перед публичным запуском"]
   ];
-  return panel("СИСТЕМНАЯ ИНФОРМАЦИЯ",'<div class="compact-list">'+rows.map((r,i)=>'<div class="list-row"><div class="list-left"><span class="list-icon">'+svgIcon(["overview","coin","pool","lock","settings"][i])+'</span><div><b>'+r[0]+'</b><small>'+r[1]+'</small></div></div></div>').join("")+'</div><div class="page-actions"><button class="secondary-button" data-action="login">Управление аккаунтом</button></div>');
+  const accountButton=state.authenticated
+    ?'<button class="secondary-button" data-go="profile">Открыть профиль</button>'
+    :'<button class="secondary-button" data-action="login">Войти или создать аккаунт</button>';
+  return panel("СИСТЕМНАЯ ИНФОРМАЦИЯ",'<div class="compact-list">'+rows.map((r,i)=>'<div class="list-row"><div class="list-left"><span class="list-icon">'+svgIcon(["overview","coin","pool","lock","settings"][i])+'</span><div><b>'+r[0]+'</b><small>'+r[1]+'</small></div></div></div>').join("")+'</div><div class="page-actions">'+accountButton+'</div>')+
+    panel("КОЛЛЕКЦИЯ АРТЕФАКТОВ",'<div class="archive-shortcut"><div><b>Архив спрайтов</b><small>68 WebP-изображений и дополнительные SVG-иллюстрации</small></div><button class="primary-button" data-go="gallery">Открыть архив</button></div>');
 }
+function archiveCard(src,title,caption){
+  return '<article class="archive-card"><img src="'+escapeHtml(src)+'" alt="'+escapeHtml(title)+'" loading="lazy" decoding="async"><div><b>'+escapeHtml(title)+'</b><small>'+escapeHtml(caption)+'</small></div></article>';
+}
+function renderGallery(){
+  const ships=[
+    ["Scout","./assets/game-art/ships/scout.webp","В основном флоте"],
+    ["Miner","./assets/game-art/ships/miner.webp","В основном флоте"],
+    ["Explorer","./assets/game-art/ships/explorer.webp","В основном флоте"],
+    ["Titan","./assets/game-art/ships/titan.webp","В основном флоте"],
+    ["Phantom","./assets/game-art/ships/phantom.webp","Дополнительный корпус"],
+    ["Ranger","./assets/game-art/ships/ranger.webp","Дополнительный корпус"],
+    ["Fighter","./assets/game-art/ships/fighter.webp","Дополнительный корпус"],
+    ["Guardian","./assets/game-art/ships/guardian.webp","Дополнительный корпус"],
+    ["Stealth","./assets/game-art/ships/stealth.webp","Дополнительный корпус"],
+    ["Galaxy","./assets/ships/galaxy.svg","Флагман основного каталога"]
+  ];
+  const pilots=Array.from({length:8},(_,i)=>["Пилот "+String(i+1).padStart(2,"0"),"./assets/game-art/pilots/pilot-"+String(i+1).padStart(2,"0")+".webp",i===0?"Аватар профиля":"Дополнительный портрет"]);
+  const realistic=Array.from({length:8},(_,i)=>["Realistic "+String(i+1).padStart(2,"0"),"./assets/game-art/planets/realistic/planet-real-"+String(i+1).padStart(2,"0")+".webp","Реалистичный стиль"]);
+  const pixel=Array.from({length:8},(_,i)=>["Pixel "+String(i+1).padStart(2,"0"),"./assets/game-art/planets/pixel/planet-pixel-"+String(i+1).padStart(2,"0")+".webp","Pixel-стиль"]);
+  const resourceFiles=["amber-core","amethyst","blue-core","blue-crystal","copper-ore","crystal-asteroid","energy-rock","gold-crystal","iron-ore","power-cell","purple-core","quantum-ore","stellar-core","teal-crystal"];
+  const liveResources=new Set(["amethyst","blue-crystal","copper-ore","iron-ore","quantum-ore","stellar-core"]);
+  const resourcesArchive=resourceFiles.map(id=>[id.replace(/-/g," ").toUpperCase(),"./assets/game-art/resources/"+id+".webp",liveResources.has(id)?"Есть в текущем инвентаре":"Визуальный образец, не игровой ресурс"]);
+  const moduleFiles=[
+    ["Cargo Bay","cargo-bay"],["Drill","drill"],["Engine","engine"],["Fuel Tank","fuel-tank"],
+    ["Hull","hull"],["Navigation Console","navigation-console"],["Shield","shield"],["Solar Panel","solar-panel"]
+  ];
+  const modulesArchive=moduleFiles.map(x=>[x[0],"./assets/game-art/modules/"+x[1]+".webp","Каталог модулей верфи"]);
+  const objectFiles=["asteroid","beacon","cargo-container","mining-drone","outpost","probe","relay-satellite","satellite","station","supply-crate","teleporter","turret","wreckage"];
+  const objectsArchive=objectFiles.map(id=>[id.replace(/-/g," ").toUpperCase(),"./assets/game-art/objects/"+id+".webp","Объект галактики"]);
+  const cards=items=>items.map(x=>archiveCard(x[1],x[0],x[2])).join("");
+  const total=ships.length+pilots.length+realistic.length+pixel.length+resourcesArchive.length+modulesArchive.length+objectsArchive.length;
+  return '<div class="archive-summary"><div><b>'+total+'</b><small>ИЗОБРАЖЕНИЙ В КАТАЛОГЕ</small></div><div><b>68</b><small>WEBP-СПРАЙТОВ</small></div><div><b>7</b><small>КАТЕГОРИЙ</small></div></div>'+
+    panel("КОРАБЛИ",'<div class="archive-grid">'+cards(ships)+'</div>',ships.length+" ИЗОБРАЖЕНИЙ")+
+    panel("ПИЛОТЫ",'<div class="archive-grid">'+cards(pilots)+'</div>',pilots.length+" ПОРТРЕТОВ")+
+    panel("ПЛАНЕТЫ · REALISTIC",'<div class="archive-grid">'+cards(realistic)+'</div>',realistic.length+" ПЛАНЕТ")+
+    panel("ПЛАНЕТЫ · PIXEL",'<div class="archive-grid">'+cards(pixel)+'</div>',pixel.length+" ПЛАНЕТ")+
+    panel("РЕСУРСЫ И ОБРАЗЦЫ",'<div class="archive-grid">'+cards(resourcesArchive)+'</div>',resourcesArchive.length+" ИЗОБРАЖЕНИЙ")+
+    panel("МОДУЛИ ВЕРФИ",'<div class="archive-grid">'+cards(modulesArchive)+'</div>',modulesArchive.length+" МОДУЛЕЙ")+
+    panel("ОБЪЕКТЫ ГАЛАКТИКИ",'<div class="archive-grid">'+cards(objectsArchive)+'</div>',objectsArchive.length+" ОБЪЕКТОВ");
+}
+
 function render(){
   pageHeading();
   document.querySelectorAll(".nav-link,.mobile-nav-item").forEach(btn=>btn.classList.toggle("active",btn.dataset.page===state.page));
@@ -237,17 +290,38 @@ function render(){
   else if(state.page==="market")content=renderMarket();
   else if(state.page==="pool")content=renderPool();
   else if(state.page==="profile")content=renderProfile();
+  else if(state.page==="gallery")content=renderGallery();
   else content=renderMore();
   el("page-content").innerHTML=content;
   updateHeader();
 }
 async function loadAccountData(){
-  const session=await window.CryptoAstra.auth.getSession();
+  state.syncStatus="checking";
+  updateHeader();
+  let session=null;
+  try{
+    session=await window.CryptoAstra.auth.getSession();
+  }catch(error){
+    console.error("Session check failed:",error);
+    state.authenticated=false;state.userId=null;state.email="";
+    state.profileName="Гость";state.playerRockets=[];state.expeditions=[];
+    state.coins=0;state.fuel=0;state.xp=0;state.level=1;
+    state.inventory=Object.fromEntries(resources.map(r=>[r.id,0]));
+    state.syncStatus="error";
+    render();return;
+  }
   if(!session?.user?.id){
     state.authenticated=false;state.userId=null;state.email="";
     state.profileName="Гость";state.playerRockets=[];state.expeditions=[];
     state.coins=0;state.fuel=0;state.xp=0;state.level=1;
     state.inventory=Object.fromEntries(resources.map(r=>[r.id,0]));
+    try{
+      await window.CryptoAstra.db.rows("rocket_catalog","select=id&limit=1");
+      state.syncStatus="online";
+    }catch(error){
+      console.error("Public API check failed:",error);
+      state.syncStatus="error";
+    }
     render();return;
   }
   state.authenticated=true;state.userId=session.user.id;state.email=session.user.email||"";
@@ -261,22 +335,20 @@ async function loadAccountData(){
       window.CryptoAstra.db.rows("expeditions","select=id,player_rocket_id,status,started_at,ends_at,completed_at,reward_payload,created_at&user_id=eq."+uid+"&order=created_at.desc")
     ]);
     state.profileName=profiles[0]?.display_name||"Космический пилот";
-    if(wallets[0]){
-      state.coins=Number(wallets[0].astra_coins);state.fuel=Number(wallets[0].fuel);
-      state.xp=Number(wallets[0].xp);state.level=Number(wallets[0].level);
-    }
+    state.coins=Number(wallets[0]?.astra_coins||0);
+    state.fuel=Number(wallets[0]?.fuel||0);
+    state.xp=Number(wallets[0]?.xp||0);
+    state.level=Number(wallets[0]?.level||1);
     state.playerRockets=playerRockets;
     state.inventory=Object.fromEntries(resources.map(r=>[r.id,Number(inventory.find(x=>x.resource_id===r.id)?.quantity||0)]));
     state.expeditions=expeditions;
-    el("sync-state").textContent="Синхронизировано";
+    state.syncStatus="synced";
   }catch(error){
     console.error("Account sync failed:",error);
-    el("sync-state").textContent="Ошибка";
-    el("sync-state").style.color="var(--red)";
+    state.syncStatus="error";
   }
   render();
 }
-
 hydrateIcons();
 render();
 

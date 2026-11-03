@@ -29,11 +29,12 @@
       <nav class="side-nav">
         <button class="nav-link" data-page="market"><span class="nav-icon" data-icon="market"></span><span class="nav-copy"><b>Верфь</b><small>Модули и улучшения</small></span></button>
         <button class="nav-link" data-page="pool"><span class="nav-icon" data-icon="pool"></span><span class="nav-copy"><b>Astra Pool</b><small>Фонд наград</small></span></button>
+        <button class="nav-link" data-page="gallery"><span class="nav-icon" data-icon="gallery"></span><span class="nav-copy"><b>Архив спрайтов</b><small>Все игровые изображения</small></span></button>
       </nav>
 
       <div class="sidebar-spacer"></div>
       <div class="sidebar-foot">
-        <div class="connection-row"><span class="connection-dot"></span><span>СЕРВЕР ДОСТУПЕН</span></div>
+        <div class="connection-row"><span class="connection-dot" id="connection-dot"></span><span id="server-status">ПРОВЕРКА СВЯЗИ</span></div>
         <div class="version-row"><span>CRYPTO ASTRA</span><span>BUILD 0.2</span></div>
       </div>
     </aside>
@@ -96,9 +97,9 @@
               <button class="text-button" id="pilot-profile-link" data-page="profile">Открыть профиль <span>→</span></button>
             </article>
             <article class="panel system-panel">
-              <div class="panel-heading"><span>СОСТОЯНИЕ СИСТЕМЫ</span><span class="system-state">НОРМА</span></div>
-              <div class="system-row"><span>Игровой сервер</span><b><i></i> Онлайн</b></div>
-              <div class="system-row"><span>Синхронизация</span><b id="sync-state">Ожидание</b></div>
+              <div class="panel-heading"><span>СОСТОЯНИЕ СИСТЕМЫ</span><span class="system-state" id="system-status">ПРОВЕРКА</span></div>
+              <div class="system-row"><span>Supabase API</span><b id="api-state">Проверка…</b></div>
+              <div class="system-row"><span>Синхронизация</span><b id="sync-state">Проверка…</b></div>
               <div class="system-row"><span>Режим экономики</span><b>Тестовый</b></div>
               <p class="system-note">ASTRA Coins — внутриигровые единицы. Денежные выплаты не подключены.</p>
             </article>
