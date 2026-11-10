@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Crypto Astra</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main>
+    <h1>Crypto Astra</h1>
+    <p class="tagline">Космическая экономическая игра</p>
+
+    <section id="auth" hidden>
+      <div class="tabs">
+        <button type="button" id="tab-register" class="tab active">Регистрация</button>
+        <button type="button" id="tab-login" class="tab">Вход</button>
+      </div>
+      <form id="auth-form" autocomplete="on">
+        <label>Email <input id="email" type="email" required autocomplete="email"></label>
+        <label>Пароль (8–128 символов) <input id="password" type="password" required minlength="8" maxlength="128" autocomplete="current-password"></label>
+        <button type="submit" id="auth-submit">Зарегистрироваться</button>
+        <p id="auth-error" class="error" role="alert"></p>
+      </form>
+    </section>
+
+    <section id="game" hidden>
+      <div class="row">
+        <span id="world" class="muted"></span>
+        <button type="button" id="logout" class="link">Выйти</button>
+      </div>
+
+      <div class="cards">
+        <div class="card"><span class="label">ASTRA</span><span id="astra" class="value">—</span></div>
+        <div class="card"><span class="label">Топливо</span><span id="fuel" class="value">—</span></div>
+        <div class="card"><span class="label">Очки сезона</span><span id="points" class="value">—</span></div>
+        <div class="card"><span class="label">Уровень</span><span id="level" class="value">—</span></div>
+      </div>
+
+      <h2>Флот</h2>
+      <ul id="ships" class="ships"></ul>
+
+      <h2>Claim</h2>
+      <button type="button" id="claim">Забрать</button>
+      <p id="claim-info" class="muted"></p>
+    </section>
+  </main>
+
+  <footer>
+    ASTRA Coins — внутриигровая валюта. Это не деньги, не токен и не актив; выплат нет, прибыли не обещаем.
+  </footer>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

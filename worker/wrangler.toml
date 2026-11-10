@@ -2,6 +2,11 @@ name = "crypto-astra-api"
 main = "src/index.ts"
 compatibility_date = "2026-11-01"
 
+# Клиент отдаётся тем же Worker (бесплатно). Один адрес для сайта и API: не нужны CORS, кука refresh работает.
+# Запросы, для которых нет файла в client/ (/auth/*, /me, /claim), идут в Worker.
+[assets]
+directory = "../client"
+
 [[d1_databases]]
 binding = "DB"
 database_name = "astra-global"
