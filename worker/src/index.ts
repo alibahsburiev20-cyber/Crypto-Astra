@@ -1,14 +1,15 @@
 import type { Env } from './env';
-import { World } from './world/World';
+import { route } from './http/router';
 import { WorldLobby } from './lobby/WorldLobby';
+import { World } from './world/World';
 
 export { World, WorldLobby };
 export type { Env };
 
 export default {
-  async fetch(request: Request, _env: Env): Promise<Response> {
-    const url = new URL(request.url);
-    if (url.pathname === '/health') return Response.json({ ok: true, service: 'crypto-astra-api' });
-    return Response.json({ error: 'not_found' }, { status: 404 });
+  fetch(request: Request, env: Env): Promise<Response> {
+    return route(request, env);
   },
+  // Расписание (cron) задано в wrangler.toml; планировщик мира и сверка Ledger подключатся следующим шагом.
+  async scheduled(): Promise<void> {},
 };
