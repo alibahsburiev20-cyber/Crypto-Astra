@@ -1,0 +1,29 @@
+name = "crypto-astra-api"
+main = "src/index.ts"
+compatibility_date = "2026-11-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "astra-global"
+database_id = "49cf3fff-baaa-4c06-b750-9946778e7380"
+migrations_dir = "migrations/d1"
+
+[[durable_objects.bindings]]
+name = "WORLD"
+class_name = "World"
+
+[[durable_objects.bindings]]
+name = "LOBBY"
+class_name = "WorldLobby"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["World", "WorldLobby"]
+
+[triggers]
+crons = ["0 * * * *", "0 3 * * *"]
+
+# R2 (архив и бэкапы) включается позже, когда появится доход:
+# [[r2_buckets]]
+# binding = "ARCHIVE"
+# bucket_name = "astra-archive"
