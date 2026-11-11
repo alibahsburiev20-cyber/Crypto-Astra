@@ -1,4 +1,4 @@
-name = "crypto-astra-api"
+name = "crypto-astra"
 main = "src/index.ts"
 compatibility_date = "2026-11-01"
 
