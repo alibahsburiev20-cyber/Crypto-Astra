@@ -1,6 +1,7 @@
 import { CLAIM_INTERVAL_MS, START_ASTRA, START_FUEL, WORLD_CAPACITY } from '../../shared/constants';
 import { applyDelta, getBalance } from '../balances';
 import { ApiError } from '../errors';
+import { ensureMaintenance } from './maintenance';
 
 export function playerExists(sql: SqlStorage, playerId: string): boolean {
   return sql.exec('SELECT 1 FROM players WHERE id = ?', playerId).toArray().length > 0;
@@ -18,6 +19,7 @@ export function createPlayer(sql: SqlStorage, playerId: string, now: number): { 
   sql.exec(`INSERT INTO ships (id, player_id, type, durability, status) VALUES (?, ?, 'scout', 100, 'idle')`, crypto.randomUUID(), playerId);
   applyDelta(sql, { playerId, asset: 'astra', delta: START_ASTRA, reason: 'start_bonus', sourceRef: 'start' }, now);
   applyDelta(sql, { playerId, asset: 'fuel', delta: START_FUEL, reason: 'start_bonus', sourceRef: 'start' }, now);
+  ensureMaintenance(sql, now);
   return { created: true };
 }
 
@@ -31,7 +33,6 @@ export function getPlayerState(sql: SqlStorage, playerId: string) {
       astra: getBalance(sql, playerId, 'astra'), fuel: getBalance(sql, playerId, 'fuel'), points: getBalance(sql, playerId, 'points'),
     },
     ships: sql.exec('SELECT id, type, durability, status FROM ships WHERE player_id = ?', playerId).toArray(),
-    expeditions: sql.exec(`SELECT id, ship_id, kind, started_at, ends_at FROM expeditions WHERE player_id = ? AND status = 'active' ORDER BY started_at`, playerId).toArray(),
     nextClaimAt: c.length ? Number(c[0].last_claim_at) + CLAIM_INTERVAL_MS : null,
   };
 }

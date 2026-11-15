@@ -12,11 +12,14 @@ export const CLAIM_REWARD = 5;
 export const IDEM_TTL_MS = 30 * DAY_MS;
 export const RESERVATION_TTL_MS = 5 * 60 * 1000;
 
-// Экспедиции: длительности из концепции v2.1 (15 мин / 4 ч / 24 ч).
-// Расход топлива и награды — временные значения для разработки, подлежат симуляции до запуска.
-export const EXPEDITION_KINDS = {
-  short: { durationMs: 15 * 60 * 1000, fuel: 1, rewardMin: 8, rewardMax: 12 },
-  medium: { durationMs: 4 * 60 * 60 * 1000, fuel: 1, rewardMin: 128, rewardMax: 192 },
-  long: { durationMs: DAY_MS, fuel: 1, rewardMin: 768, rewardMax: 1152 },
-} as const;
-export type ExpeditionKind = keyof typeof EXPEDITION_KINDS;
+export const FUEL_REGEN_MS = 2 * 60 * 60 * 1000;
+export const FUEL_UNIT_PRICE = 25;
+export const FUEL_DAILY_MAX = 20;
+export const EXPEDITION_FULL_REWARD = 8;
+export const POINTS_SOFT_CAP = 700;
+export const POINTS_HARD_CAP = 1000;
+export const REPAIR_ASTRA_PER_PERCENT = 15;
+
+export function utcDay(now: number): number {
+  return Math.floor(now / DAY_MS);
+}

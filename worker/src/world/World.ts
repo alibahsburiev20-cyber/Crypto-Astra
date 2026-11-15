@@ -1,10 +1,13 @@
 import { DurableObject } from 'cloudflare:workers';
 import type { Env } from '../env';
-import { type ExpeditionKind } from '../shared/constants';
+import { runDueJobs } from './jobs';
 import { claim, type ClaimResult } from './modules/claim';
-import { collectExpedition, startExpedition, type CollectResult, type StartResult } from './modules/expeditions';
-import { createPlayer, getPlayerState } from './modules/players';
+import { cancelExpedition, chooseExpeditionEvent, startExpedition } from './modules/expeditions';
+import { createPlayer } from './modules/players';
+import { buildState, listLedger } from './modules/state';
+import { buyFuel, repairShip } from './modules/upkeep';
 import { verifyLedger, type LedgerReport } from './ledger';
+import { migrateLegacyExpeditions } from './migrate';
 import { WORLD_SCHEMA } from './schema';
 
 // Один мир = один объект. Запросы обрабатываются по одному, а каждое действие
@@ -17,31 +20,91 @@ export class World extends DurableObject<Env> {
     super(ctx, env);
     this.sql = ctx.storage.sql;
     ctx.blockConcurrencyWhile(async () => {
-      for (const stmt of WORLD_SCHEMA) this.sql.exec(stmt);
+      this.ctx.storage.transactionSync(() => {
+        migrateLegacyExpeditions(this.sql, Date.now());
+        for (const stmt of WORLD_SCHEMA) this.sql.exec(stmt);
+      });
     });
   }
 
-  createPlayer(playerId: string): { created: boolean } {
-    return this.ctx.storage.transactionSync(() => createPlayer(this.sql, playerId, Date.now()));
+  async createPlayer(playerId: string): Promise<{ created: boolean }> {
+    const now = Date.now();
+    const created = this.ctx.storage.transactionSync(() => createPlayer(this.sql, playerId, now));
+    await this.arm();
+    return created;
   }
 
   claim(playerId: string, idemKey: string): ClaimResult {
     return this.ctx.storage.transactionSync(() => claim(this.sql, playerId, idemKey, Date.now()));
   }
 
-  startExpedition(playerId: string, idemKey: string, req: { kind: ExpeditionKind; shipId?: string | null }): StartResult {
-    return this.ctx.storage.transactionSync(() => startExpedition(this.sql, playerId, idemKey, req, Date.now()));
+  async getState(playerId: string) {
+    const now = Date.now();
+    const state = this.ctx.storage.transactionSync(() => buildState(this.sql, playerId, now));
+    await this.arm();
+    return state;
   }
 
-  collectExpedition(playerId: string, idemKey: string, expeditionId: string): CollectResult {
-    return this.ctx.storage.transactionSync(() => collectExpedition(this.sql, playerId, idemKey, expeditionId, Date.now()));
+  listLedger(playerId: string, limit: number) {
+    return listLedger(this.sql, playerId, limit);
   }
 
-  getState(playerId: string) {
-    return getPlayerState(this.sql, playerId);
+  async startExpedition(playerId: string, idemKey: string, body: { shipId: string; planet: string; kind: string }) {
+    const now = Date.now();
+    const result = this.ctx.storage.transactionSync(() => startExpedition(this.sql, playerId, idemKey, body, now));
+    await this.arm();
+    return result;
+  }
+
+  async cancelExpedition(playerId: string, idemKey: string, expeditionId: string) {
+    const now = Date.now();
+    const result = this.ctx.storage.transactionSync(() => cancelExpedition(this.sql, playerId, idemKey, expeditionId, now));
+    await this.arm();
+    return result;
+  }
+
+  async chooseEvent(playerId: string, idemKey: string, expeditionId: string, choiceId: string) {
+    const now = Date.now();
+    const result = this.ctx.storage.transactionSync(() => chooseExpeditionEvent(this.sql, playerId, idemKey, expeditionId, choiceId, now));
+    await this.arm();
+    return result;
+  }
+
+  async repair(playerId: string, idemKey: string, shipId: string) {
+    const now = Date.now();
+    const result = this.ctx.storage.transactionSync(() => repairShip(this.sql, playerId, idemKey, shipId, now));
+    await this.arm();
+    return result;
+  }
+
+  async buyFuel(playerId: string, idemKey: string) {
+    const now = Date.now();
+    const result = this.ctx.storage.transactionSync(() => buyFuel(this.sql, playerId, idemKey, now));
+    await this.arm();
+    return result;
   }
 
   verifyLedger(): LedgerReport {
     return verifyLedger(this.sql);
+  }
+
+  async poke(): Promise<{ ran: number }> {
+    const ran = runDueJobs(this.sql, Date.now(), (fn) => this.ctx.storage.transactionSync(fn));
+    await this.arm();
+    return { ran };
+  }
+
+  async alarm(): Promise<void> {
+    await this.poke();
+  }
+
+  private async arm(): Promise<void> {
+    const rows = this.sql.exec(`SELECT MIN(run_at) AS t FROM jobs WHERE status = 'pending'`).toArray();
+    const raw = rows[0]?.t;
+    if (raw === null || raw === undefined) {
+      try { await this.ctx.storage.deleteAlarm(); } catch { /* будильника не было */ }
+      return;
+    }
+    await this.ctx.storage.setAlarm(Number(raw));
   }
 }

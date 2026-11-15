@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Crypto Astra</title>
   <link rel="stylesheet" href="/styles.css">
 </head>
@@ -29,23 +29,17 @@
         <span id="world" class="muted"></span>
         <button type="button" id="logout" class="link">Выйти</button>
       </div>
-
-      <div class="cards">
-        <div class="card"><span class="label">ASTRA</span><span id="astra" class="value">—</span></div>
-        <div class="card"><span class="label">Топливо</span><span id="fuel" class="value">—</span></div>
-        <div class="card"><span class="label">Очки сезона</span><span id="points" class="value">—</span></div>
-        <div class="card"><span class="label">Уровень</span><span id="level" class="value">—</span></div>
-      </div>
-
-      <h2>Флот</h2>
-      <ul id="ships" class="ships"></ul>
-
-      <h2>Claim</h2>
-      <button type="button" id="claim">Забрать</button>
-      <p id="claim-info" class="muted"></p>
+      <p id="frozen" class="error" hidden>Мир заморожен: сверка журнала не сошлась. Игровые действия остановлены.</p>
+      <div id="panel"></div>
+      <nav class="dock" aria-label="Разделы">
+        <button type="button" data-view="bridge" class="active">Мостик</button>
+        <button type="button" data-view="flight">Рейс</button>
+        <button type="button" data-view="fleet">Флот</button>
+        <button type="button" data-view="wallet">Кошелёк</button>
+        <button type="button" data-view="ledger">Журнал</button>
+      </nav>
     </section>
   </main>
-
   <footer>
     ASTRA Coins — внутриигровая валюта. Это не деньги, не токен и не актив; выплат нет, прибыли не обещаем.
   </footer>

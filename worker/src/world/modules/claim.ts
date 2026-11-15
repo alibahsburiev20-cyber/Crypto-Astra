@@ -1,6 +1,7 @@
 import { applyDelta } from '../balances';
 import { ApiError } from '../errors';
 import { withIdempotency } from '../idempotency';
+import { assertPlayable } from './maintenance';
 import { decideClaim, type ClaimState } from './claimMath';
 import { playerExists } from './players';
 
@@ -12,6 +13,7 @@ export type ClaimResult =
 export function claim(sql: SqlStorage, playerId: string, idemKey: string, now: number): ClaimResult {
   return withIdempotency<ClaimResult>(sql, playerId, 'claim', idemKey, {}, now, () => {
     if (!playerExists(sql, playerId)) throw new ApiError(404, 'player_not_found');
+    assertPlayable(sql);
     const row = sql.exec('SELECT last_claim_at, day, count FROM claim_state WHERE player_id = ?', playerId).toArray()[0];
     const state: ClaimState | null = row ? { lastClaimAt: Number(row.last_claim_at), day: Number(row.day), count: Number(row.count) } : null;
     const d = decideClaim(state, now);

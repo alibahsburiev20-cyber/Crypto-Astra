@@ -1,11 +1,12 @@
 import { requireAuth } from '../auth/guards';
 import type { Env } from '../env';
 import { login, logout, refresh, register } from '../routes/auth';
-import { claim, collectExpedition, me, startExpedition } from '../routes/game';
+import { buyFuel, cancelExpedition, chooseEvent, claim, ledger, me, repair, startExpedition } from '../routes/game';
 import { errorResponse, json } from './response';
 
 export async function route(request: Request, env: Env): Promise<Response> {
-  const { pathname: p } = new URL(request.url);
+  const url = new URL(request.url);
+  const p = url.pathname;
   const m = request.method;
   try {
     if (p === '/health') return json({ ok: true, service: 'crypto-astra-api' });
@@ -15,13 +16,16 @@ export async function route(request: Request, env: Env): Promise<Response> {
     if (m === 'POST' && p === '/auth/refresh') return await refresh(request, env);
     if (m === 'POST' && p === '/auth/logout') return await logout(request, env);
 
-    const collectMatch = /^\/expeditions\/([^/]{1,64})\/collect$/.exec(p);
-    if (p === '/me' || p === '/claim' || p === '/expeditions/start' || collectMatch) {
+    if (p === '/me' || p === '/claim' || p === '/ledger' || p === '/expeditions/start' || p === '/expeditions/cancel' || p === '/expeditions/choose' || p === '/ships/repair' || p === '/fuel/buy') {
       const a = await requireAuth(request, env);
       if (m === 'GET' && p === '/me') return await me(env, a);
+      if (m === 'GET' && p === '/ledger') return await ledger(url, env, a);
       if (m === 'POST' && p === '/claim') return await claim(request, env, a);
       if (m === 'POST' && p === '/expeditions/start') return await startExpedition(request, env, a);
-      if (m === 'POST' && collectMatch) return await collectExpedition(request, env, a, collectMatch[1]);
+      if (m === 'POST' && p === '/expeditions/cancel') return await cancelExpedition(request, env, a);
+      if (m === 'POST' && p === '/expeditions/choose') return await chooseEvent(request, env, a);
+      if (m === 'POST' && p === '/ships/repair') return await repair(request, env, a);
+      if (m === 'POST' && p === '/fuel/buy') return await buyFuel(request, env, a);
     }
     return json({ error: 'not_found' }, 404);
   } catch (e) {
