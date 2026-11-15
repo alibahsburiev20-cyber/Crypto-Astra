@@ -31,6 +31,7 @@ export function getPlayerState(sql: SqlStorage, playerId: string) {
       astra: getBalance(sql, playerId, 'astra'), fuel: getBalance(sql, playerId, 'fuel'), points: getBalance(sql, playerId, 'points'),
     },
     ships: sql.exec('SELECT id, type, durability, status FROM ships WHERE player_id = ?', playerId).toArray(),
+    expeditions: sql.exec(`SELECT id, ship_id, kind, started_at, ends_at FROM expeditions WHERE player_id = ? AND status = 'active' ORDER BY started_at`, playerId).toArray(),
     nextClaimAt: c.length ? Number(c[0].last_claim_at) + CLAIM_INTERVAL_MS : null,
   };
 }

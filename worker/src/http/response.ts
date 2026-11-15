@@ -10,6 +10,13 @@ const STATUS_BY_CODE: Record<string, number> = {
   world_full: 409,
   reservation_expired: 409,
   player_id_required: 400,
+  bad_expedition_kind: 400,
+  ship_not_found: 404,
+  no_idle_ship: 409,
+  ship_busy: 409,
+  ship_broken: 409,
+  expedition_not_found: 404,
+  already_collected: 409,
 };
 
 export function json(data: unknown, status = 200, headers: Record<string, string> = {}): Response {
