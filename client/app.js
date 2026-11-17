@@ -312,19 +312,64 @@ function renderFlight() {
   if (!selected || selected.locked) selected = open[0];
   const kind = window.__kind || 'short';
   const opt = selected?.options.find((o) => o.kind === kind);
+
+  const planetArt = (p, big) => el('span', { class: `planet-art p-${p.id}${big ? ' big' : ''}` },
+    el('img', {
+      src: `/icons/planets/${p.id}.png`, alt: '', width: big ? '96' : '84', height: big ? '96' : '84',
+      loading: 'lazy',
+      // Пока иконка не сгенерирована, остаётся градиентный шар из CSS.
+      onError: (e) => e.currentTarget.remove(),
+    }));
+
+  const grid = el('div', { class: 'planet-grid', role: 'list' }, ...planets.map((p) => {
+    const isSel = p.id === selected?.id;
+    return el('button', {
+      type: 'button',
+      class: `planet-card${isSel ? ' selected' : ''}${p.locked ? ' locked' : ''}`,
+      disabled: p.locked ? '' : null,
+      'aria-pressed': isSel ? 'true' : 'false',
+      title: p.locked ? p.lock : p.name,
+      onClick: () => { window.__planet = p.id; render(); },
+    },
+      planetArt(p, false),
+      el('span', { class: 'planet-name' }, p.name),
+      el('span', { class: 'planet-meta' }, p.locked ? p.lock : `Сектор ${p.sector} · сложность ${p.difficulty}`),
+      !p.locked && p.resources?.length ? el('span', { class: 'planet-res' },
+        ...p.resources.slice(0, 3).map((r) => el('img', {
+          src: `/icons/resources/${r.id}.png`, alt: '', width: '14', height: '14', class: 'icon-xs', loading: 'lazy',
+        }))) : null,
+    );
+  }));
+
+  const detail = selected ? el('div', { class: 'planet-detail' },
+    planetArt(selected, true),
+    el('div', { class: 'planet-detail-info' },
+      el('h3', {}, selected.name),
+      el('p', { class: 'muted' }, `Сектор ${selected.sector} · ${selected.sectorName} · сложность ${selected.difficulty}`),
+      el('div', { class: 'res-list' }, ...(selected.resources || []).map((r) => el('span', {},
+        el('img', { src: `/icons/resources/${r.id}.png`, alt: '', width: '14', height: '14', class: 'icon-xs', loading: 'lazy' }),
+        r.name))),
+    ),
+  ) : null;
+
   return el('div', {},
     shipArt(ship?.type || 'scout'),
-    el('h2', {}, 'Новый рейс'),
-    el('label', {}, 'Планета', el('select', { onChange: (e) => { window.__planet = e.target.value; render(); } },
-      ...planets.map((p) => el('option', { value: p.id, selected: p.id === selected?.id ? '' : null, disabled: p.locked ? '' : null },
-        p.locked ? `${p.name} — ${p.lock}` : p.name)))),
-    el('div', { class: 'choices' }, ...['short', 'medium', 'long'].map((k) => {
+    el('div', { class: 'screen-title' }, el('h2', {}, 'Куда летим'), el('span', { class: 'badge' }, 'Экспедиция')),
+    grid,
+    detail,
+    el('div', { class: 'choices kinds' }, ...['short', 'medium', 'long'].map((k) => {
       const o = selected?.options.find((x) => x.kind === k);
       return el('button', { type: 'button', class: k === kind ? '' : 'ghost', onClick: () => { window.__kind = k; render(); } }, o ? o.label : k);
     })),
-    opt ? el('p', { class: 'muted' }, `Топливо ${opt.fuel}, ${fmtDur(opt.durationMs)}, опыт ${opt.xp}. Оценка ASTRA ${opt.astra[0]}–${opt.astra[1]}, груз ${opt.units[0]}–${opt.units[1]}. Итог считает сервер, это не обещание.`) : null,
+    opt ? el('div', { class: 'block' },
+      el('p', { class: 'muted' },
+        `Топливо ${opt.fuel} · ${fmtDur(opt.durationMs)} · опыт ${opt.xp}`),
+      el('p', { class: 'muted' },
+        `Оценка ASTRA ${opt.astra[0]}–${opt.astra[1]}, груз ${opt.units[0]}–${opt.units[1]}. Итог считает сервер.`),
+    ) : null,
     el('button', {
       type: 'button',
+      class: 'cta',
       disabled: !opt || !ship || state.frozen || state.balances.fuel < (opt?.fuel ?? 99) || ship.durability <= 0 ? '' : null,
       onClick: () => doStart(ship?.id, selected?.id, kind),
     }, 'Старт'),
