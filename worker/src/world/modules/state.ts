@@ -60,6 +60,9 @@ export function buildState(sql: SqlStorage, playerId: string, now: number) {
     resources: sql.exec('SELECT resource, amount FROM resources WHERE player_id = ? AND amount > 0 ORDER BY resource', playerId).toArray()
       .map((r) => ({ id: String(r.resource), name: RESOURCE_NAMES[String(r.resource)] ?? String(r.resource), amount: Number(r.amount) })),
     fuel: { cap, price: FUEL_UNIT_PRICE, boughtToday: daily.fuelBought, dailyMax: FUEL_DAILY_MAX, nextAt: nextFuelAt },
+    // Клиент строит список планет и варианты рейса из этого поля. Без него вкладка
+    // «Рейс» падала на state.planets.filter и экран оставался пустым.
+    planets,
     expeditions: listExpeditions(sql, playerId),
     frozen: isFrozen(sql),
     catalog: SHIP_ORDER.map((type) => {

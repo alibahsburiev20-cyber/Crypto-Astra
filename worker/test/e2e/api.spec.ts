@@ -68,6 +68,13 @@ if (!BASE) {
       expect(me.data.balances).toEqual({ astra: 500, fuel: 3, points: 0 });
       expect(me.data.ships).toHaveLength(1);
       expect(me.data.frozen).toBe(false);
+      // Вкладка «Рейс» строится из planets: если сервер не отдаёт их, старт рейса
+      // из интерфейса невозможен, хотя API работает.
+      expect(Array.isArray(me.data.planets)).toBe(true);
+      const open = (me.data.planets as Array<Record<string, any>>).filter((p) => !p.locked);
+      expect(open.length).toBeGreaterThan(0);
+      expect(open[0].options.map((o: Record<string, any>) => o.kind)).toEqual(['short', 'medium', 'long']);
+      expect(open[0].options[0].fuel).toBeGreaterThan(0);
       state.shipId = String(me.data.ships[0].id);
     });
 
