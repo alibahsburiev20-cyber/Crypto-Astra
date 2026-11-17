@@ -233,7 +233,7 @@ function fmtDur(ms) {
 }
 
 function shipArt(type) {
-  return el('div', { class: 'ship-viewer' }, el('img', { src: `/sprites/${type}.svg`, alt: '' }));
+  return el('div', { class: 'ship-viewer' }, el('img', { src: `/sprites/ships/${type}.png`, alt: '', width: '256', height: '128' }));
 }
 
 function cards() {
@@ -351,7 +351,7 @@ function renderFleet() {
     s.durability <= 70 && s.durability >= 50 ? el('p', { class: 'muted' }, 'Почините до следующего рейса, иначе можно просесть ниже 50%.') : null,
   ));
   const locked = state.catalog.filter((c) => !c.owned).map((c) => el('div', { class: 'block locked' },
-    el('img', { src: `/sprites/${c.type}.svg`, alt: '', width: '96', height: '60' }),
+    el('img', { src: `/sprites/ships/${c.type}.png`, alt: '', width: '96', class: 'sprite-thumb' }),
     el('h3', {}, c.name),
     el('p', { class: 'muted' }, `Уровень ${c.unlockLevel}. ${c.price == null ? 'Чертёж, не продаётся' : `${c.price} ASTRA — покупка на этапе 2`}`),
   ));
@@ -377,7 +377,11 @@ function renderWallet() {
       }, 'Купить 1'),
     ),
     state.resources.length ? el('div', { class: 'block' }, el('h3', {}, 'Трюм'), el('ul', { class: 'plain' },
-      ...state.resources.map((r) => el('li', {}, el('span', {}, r.name), el('span', {}, String(r.amount)))))) : el('p', { class: 'muted' }, 'Трюм пуст. Ресурсы привезёт рейс.'),
+      ...state.resources.map((r) => el('li', {},
+      el('span', { class: 'res-name' },
+        el('img', { src: `/icons/resources/${r.id}.png`, alt: '', width: '20', height: '20', class: 'icon', loading: 'lazy' }),
+        r.name),
+      el('span', {}, String(r.amount)))))) : el('p', { class: 'muted' }, 'Трюм пуст. Ресурсы привезёт рейс.'),
     note ? el('p', { class: 'ok' }, note) : null,
   );
 }
