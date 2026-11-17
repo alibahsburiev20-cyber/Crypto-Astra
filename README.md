@@ -61,6 +61,8 @@
 
 ## Деплой через дашборд Cloudflare (бесплатно)
 
+В `package.json` есть скрипт `build` (`npm run build`), потому что Cloudflare Workers Builds запускает его по умолчанию. Он пересобирает встроенный клиент, чтобы `site.ts` не отставал.
+
 1. Workers & Pages → Create → Import a repository → этот репозиторий.
 2. Deploy command: `npx wrangler deploy` (конфиг лежит в корне).
 3. Применить миграции D1: `npx wrangler d1 migrations apply DB --remote`.
