@@ -293,16 +293,19 @@ function renderFlight() {
     return el('div', {}, ...kids);
   }
   const last = state.expeditions.recent[0];
-  const open = state.planets.filter((p) => !p.locked);
+  // state.planets приходит с сервера; пустой массив — страховка от старого API,
+  // иначе вкладка «Рейс» падала бы на filter и экран оставался пустым.
+  const planets = Array.isArray(state.planets) ? state.planets : [];
+  const open = planets.filter((p) => !p.locked);
   const planetId = open[0]?.id;
-  const selected = state.planets.find((p) => p.id === (window.__planet || planetId)) || open[0];
+  const selected = planets.find((p) => p.id === (window.__planet || planetId)) || open[0];
   const kind = window.__kind || 'short';
   const opt = selected?.options.find((o) => o.kind === kind);
   return el('div', {},
     shipArt(ship?.type || 'scout'),
     el('h2', {}, 'Новый рейс'),
     el('label', {}, 'Планета', el('select', { onChange: (e) => { window.__planet = e.target.value; render(); } },
-      ...state.planets.map((p) => el('option', { value: p.id, selected: p.id === selected?.id ? '' : null, disabled: p.locked ? '' : null },
+      ...planets.map((p) => el('option', { value: p.id, selected: p.id === selected?.id ? '' : null, disabled: p.locked ? '' : null },
         p.locked ? `${p.name} — ${p.lock}` : p.name)))),
     el('div', { class: 'choices' }, ...['short', 'medium', 'long'].map((k) => {
       const o = selected?.options.find((x) => x.kind === k);
