@@ -238,10 +238,12 @@ function shipArt(type) {
 
 function cards() {
   const b = state.balances;
+  const label = (icon, text) => el('span', { class: 'label' },
+    el('img', { src: `/icons/currency/${icon}.png`, alt: '', width: '18', height: '18', class: 'icon-sm' }), text);
   return el('div', { class: 'cards' },
-    el('div', { class: 'card' }, el('span', { class: 'label' }, 'ASTRA'), el('span', { class: 'value' }, b.astra)),
-    el('div', { class: 'card' }, el('span', { class: 'label' }, 'Топливо'), el('span', { class: 'value' }, `${b.fuel}/${state.fuel.cap}`)),
-    el('div', { class: 'card' }, el('span', { class: 'label' }, 'Очки'), el('span', { class: 'value' }, b.points)),
+    el('div', { class: 'card' }, label('astra', 'ASTRA'), el('span', { class: 'value' }, b.astra)),
+    el('div', { class: 'card' }, label('fuel', 'Топливо'), el('span', { class: 'value' }, `${b.fuel}/${state.fuel.cap}`)),
+    el('div', { class: 'card' }, label('points', 'Очки'), el('span', { class: 'value' }, b.points)),
     el('div', { class: 'card' }, el('span', { class: 'label' }, 'Уровень'), el('span', { class: 'value' }, `${state.level}`)),
   );
 }
@@ -254,7 +256,7 @@ function renderBridge() {
     shipArt(ship?.type || 'scout'),
     cards(),
     el('h2', {}, 'Claim'),
-    el('button', { type: 'button', 'data-claim': '', disabled: claimLeft > 0 || state.frozen ? '' : null, onClick: doClaim }, 'Забрать'),
+    el('button', { type: 'button', 'data-claim': '', disabled: claimLeft > 0 || state.frozen ? '' : null, onClick: doClaim }, el('img', { src: '/icons/ui/claim.png', alt: '', width: '22', height: '22', class: 'icon-sm' }), 'Забрать'),
     el('p', { class: 'muted', 'data-claim-note': '' }, claimLeft > 0 ? `Следующий Claim через ${fmtLeft(claimLeft)}` : 'Claim доступен. +5 ASTRA, не чаще раза в 15 минут.'),
     active ? el('div', { class: 'block' },
       el('h3', {}, 'Рейс идёт'),
