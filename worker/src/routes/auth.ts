@@ -1,6 +1,10 @@
 import { signJwt } from '../auth/jwt';
 import { requireSecret } from '../auth/guards';
 import { hashPassword, verifyPassword } from '../auth/password';
+import {
+  LOGIN_EMAIL_POLICY, LOGIN_IP_POLICY, LOGIN_TURNSTILE_AFTER, REGISTER_IP_POLICY,
+  clearAttempts, currentBlock, ipOf, loginKeys, readState, recordAttempt, registerKeys,
+} from '../auth/rateLimit';
 import { createSession, revokeSession, rotateSession } from '../auth/sessions';
 import { verifyTurnstile } from '../auth/turnstile';
 import { WORLD_CAPACITY } from '../shared/constants';
@@ -22,12 +26,28 @@ function creds(body: Record<string, unknown>): { email: string; password: string
   return { email, password };
 }
 
+export function turnstileEnabled(env: Env): boolean {
+  return Boolean(env.TURNSTILE_SECRET);
+}
+
 async function checkTurnstile(env: Env, request: Request, body: Record<string, unknown>): Promise<void> {
-  // Если секрет Turnstile не задан, проверка пропускается. Это только для локальной разработки:
-  // перед публичным запуском секрет обязательно задать (wrangler secret put TURNSTILE_SECRET).
-  if (!env.TURNSTILE_SECRET) return;
-  const ok = await verifyTurnstile(env.TURNSTILE_SECRET, body.turnstileToken, request.headers.get('CF-Connecting-IP'));
+  // Секрет не задан — проверка пропускается (локальная разработка и тесты).
+  if (!turnstileEnabled(env)) return;
+  if (!env.TURNSTILE_SITE_KEY) console.warn('TURNSTILE_SECRET задан, но TURNSTILE_SITE_KEY пуст: клиент не сможет получить токен');
+  const token = body.turnstileToken;
+  if (typeof token !== 'string' || !token) throw new ApiError(403, 'turnstile_required');
+  const ok = await verifyTurnstile(env.TURNSTILE_SECRET, token, ipOf(request));
   if (!ok) throw new ApiError(403, 'turnstile_failed');
+}
+
+// Публичная конфигурация клиента: site key Turnstile и серверное время.
+export function config(env: Env): Response {
+  const siteKey = turnstileEnabled(env) && env.TURNSTILE_SITE_KEY ? env.TURNSTILE_SITE_KEY.trim() : '';
+  return json(
+    { turnstile_site_key: siteKey || null, login_turnstile_after: LOGIN_TURNSTILE_AFTER, server_time: Date.now() },
+    200,
+    { 'Cache-Control': 'public, max-age=300' },
+  );
 }
 
 async function issue(env: Env, userId: string, worldId: string, now: number): Promise<Response> {
@@ -41,9 +61,13 @@ async function issue(env: Env, userId: string, worldId: string, now: number): Pr
 export async function register(request: Request, env: Env): Promise<Response> {
   const body = await readJson(request);
   const { email, password } = creds(body);
+  const now = Date.now();
+
+  // Частоту считаем до Turnstile: иначе неудачные проверки можно слать без ограничений.
+  const gate = await recordAttempt(env.DB, registerKeys(ipOf(request)), now, REGISTER_IP_POLICY);
+  if (gate.retryAfterSec > 0) throw new ApiError(429, 'too_many_attempts', gate.retryAfterSec);
   await checkTurnstile(env, request, body);
 
-  const now = Date.now();
   const userId = crypto.randomUUID();
   const passwordHash = await hashPassword(password);
 
@@ -113,13 +137,35 @@ export async function register(request: Request, env: Env): Promise<Response> {
 export async function login(request: Request, env: Env): Promise<Response> {
   const body = await readJson(request);
   const { email, password } = creds(body);
+  const now = Date.now();
+  const keys = loginKeys(ipOf(request), email);
+
+  const blocked = await currentBlock(env.DB, keys, now);
+  if (blocked > 0) throw new ApiError(429, 'too_many_attempts', blocked);
+
+  // После трёх неудач по этому email или с этого IP просим Turnstile (II.9).
+  const [ipState, emailState] = await Promise.all([readState(env.DB, keys[0]), readState(env.DB, keys[1])]);
+  const requireTurnstile = turnstileEnabled(env)
+    && Math.max(ipState?.attempts ?? 0, emailState?.attempts ?? 0) >= LOGIN_TURNSTILE_AFTER;
+  if (requireTurnstile) await checkTurnstile(env, request, body);
+
   const row = await env.DB
     .prepare('SELECT id, password_hash, world_id, status FROM users WHERE email = ?')
     .bind(email)
     .first<{ id: string; password_hash: string | null; world_id: string | null; status: string }>();
 
   const ok = row?.password_hash ? await verifyPassword(password, row.password_hash) : (await verifyPassword(password, DUMMY_HASH), false);
-  if (!row || !ok || row.status !== 'active' || !row.world_id) throw new ApiError(401, 'invalid_credentials');
+  if (!row || !ok || row.status !== 'active' || !row.world_id) {
+    const ip = await recordAttempt(env.DB, [keys[0]], now, LOGIN_IP_POLICY);
+    const mail = await recordAttempt(env.DB, [keys[1]], now, LOGIN_EMAIL_POLICY);
+    const retry = Math.max(ip.retryAfterSec, mail.retryAfterSec);
+    if (retry > 0) throw new ApiError(429, 'too_many_attempts', retry);
+    const attempts = Math.max(ip.states[0].attempts, mail.states[0].attempts);
+    const nextTurnstile = turnstileEnabled(env) && attempts >= LOGIN_TURNSTILE_AFTER;
+    return json({ error: 'invalid_credentials', turnstile_required: nextTurnstile }, 401);
+  }
+
+  await clearAttempts(env.DB, keys);
   return issue(env, row.id, row.world_id, Date.now());
 }
 

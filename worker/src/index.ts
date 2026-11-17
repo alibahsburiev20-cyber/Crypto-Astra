@@ -1,3 +1,4 @@
+import { cleanupAuthLimits } from './auth/rateLimit';
 import { cleanupSessions } from './auth/sessions';
 import type { Env } from './env';
 import { route } from './http/router';
@@ -9,7 +10,8 @@ export { World, WorldLobby };
 export type { Env };
 
 const SECURITY: Record<string, string> = {
-  'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+  // Turnstile грузит скрипт и iframe с challenges.cloudflare.com. Больше внешних источников нет.
+  'Content-Security-Policy': "default-src 'self'; script-src 'self' https://challenges.cloudflare.com; style-src 'self'; img-src 'self' data:; connect-src 'self' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
   'Referrer-Policy': 'same-origin',
   'X-Content-Type-Options': 'nosniff',
   'X-Frame-Options': 'DENY',
@@ -63,11 +65,13 @@ export default {
         console.error('poke failed', id, e);
       }
     }
-    // Гигиена D1: истёкшие refresh-сессии больше не нужны.
+    // Гигиена D1: истёкшие refresh-сессии и старые счётчики частоты.
+    const now = Date.now();
     try {
-      await cleanupSessions(env.DB, Date.now());
+      await cleanupSessions(env.DB, now);
     } catch (e) {
       console.error('session cleanup failed', e);
     }
+    await cleanupAuthLimits(env.DB, now);
   },
 };

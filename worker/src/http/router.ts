@@ -1,6 +1,6 @@
 import { requireAuth } from '../auth/guards';
 import type { Env } from '../env';
-import { login, logout, refresh, register } from '../routes/auth';
+import { config, login, logout, refresh, register } from '../routes/auth';
 import { buyFuel, cancelExpedition, chooseEvent, claim, ledger, me, repair, startExpedition } from '../routes/game';
 import { errorResponse, json } from './response';
 
@@ -10,6 +10,7 @@ export async function route(request: Request, env: Env): Promise<Response> {
   const m = request.method;
   try {
     if (p === '/health') return json({ ok: true, service: 'crypto-astra-api', now: Date.now() });
+    if (m === 'GET' && p === '/config') return config(env);
 
     if (m === 'POST' && p === '/auth/register') return await register(request, env);
     if (m === 'POST' && p === '/auth/login') return await login(request, env);

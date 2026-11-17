@@ -15,6 +15,8 @@ const ERRORS = {
   internal: 'Ошибка сервера, попробуйте позже',
   server_misconfigured: 'Сервер не настроен',
   registration_incomplete: 'Регистрация не завершилась, попробуйте войти или обратитесь в поддержку',
+  turnstile_required: 'Подтвердите, что вы не робот',
+  too_many_attempts: 'Слишком много попыток. Подождите и попробуйте снова',
   world_frozen: 'Мир заморожен: журнал не сходится',
   ship_busy: 'Корабль уже в рейсе',
   ship_broken: 'Прочность 0%. Нужен ремонт',
@@ -65,6 +67,14 @@ let clock = 0;
 // Разница «серверное время − часы устройства». Все таймеры считаются по серверу,
 // иначе при сбитых часах Claim и рейс выглядят недоступными.
 let serverOffset = 0;
+
+// Turnstile включается только если сервер отдал site key в /config.
+// Без ключей (локальная разработка) виджет не грузится вообще.
+let config = { turnstile_site_key: null };
+let turnstileToken = null;
+let turnstileWidget = null;
+let turnstileScript = null;
+let loginNeedsTurnstile = false;
 
 function syncServerTime(serverNow) {
   if (typeof serverNow === 'number' && Number.isFinite(serverNow)) serverOffset = serverNow - Date.now();
@@ -126,6 +136,64 @@ function setMode(m) {
   $('#auth-submit').textContent = m === 'register' ? 'Зарегистрироваться' : 'Войти';
   $('#password').autocomplete = m === 'register' ? 'new-password' : 'current-password';
   $('#auth-error').textContent = '';
+  refreshTurnstileVisibility();
+}
+
+async function loadConfig() {
+  const res = await request('/config').catch(() => null);
+  if (res?.status === 200) config = res.data;
+  refreshTurnstileVisibility();
+}
+
+function showTurnstile() {
+  const box = $('#turnstile');
+  if (!config.turnstile_site_key) return false;
+  box.hidden = false;
+  if (turnstileWidget !== null) return true;
+  if (!turnstileScript) {
+    turnstileScript = new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+      s.async = true;
+      s.defer = true;
+      s.onload = resolve;
+      s.onerror = reject;
+      document.head.append(s);
+    });
+  }
+  turnstileScript.then(() => {
+    if (!window.turnstile || turnstileWidget !== null || box.hidden) return;
+    turnstileWidget = window.turnstile.render(box, {
+      sitekey: config.turnstile_site_key,
+      theme: 'dark',
+      callback: (token) => { turnstileToken = token; },
+      'expired-callback': () => { turnstileToken = null; },
+      'error-callback': () => { turnstileToken = null; },
+    });
+  }).catch(() => {
+    // Сбросить промис, чтобы следующая попытка снова попробовала загрузить скрипт.
+    turnstileScript = null;
+    $('#auth-error').textContent = 'Не удалось загрузить проверку Cloudflare';
+  });
+  return true;
+}
+
+function resetTurnstile() {
+  turnstileToken = null;
+  if (turnstileWidget !== null && window.turnstile) {
+    try { window.turnstile.reset(turnstileWidget); } catch { /* виджет уже снят */ }
+  }
+}
+
+function refreshTurnstileVisibility() {
+  const box = $('#turnstile');
+  const need = Boolean(config.turnstile_site_key) && (mode === 'register' || loginNeedsTurnstile);
+  if (!need) {
+    box.hidden = true;
+    resetTurnstile();
+    return;
+  }
+  showTurnstile();
 }
 
 function left(ts) { return ts ? Math.max(0, ts - (Date.now() + serverOffset)) : 0; }
@@ -370,13 +438,25 @@ $('#auth-form').addEventListener('submit', async (e) => {
   const btn = $('#auth-submit');
   btn.disabled = true;
   $('#auth-error').textContent = '';
-  const { status, data } = await request(`/auth/${mode}`, { method: 'POST', body: { email: $('#email').value, password: $('#password').value } });
+  const body = { email: $('#email').value, password: $('#password').value };
+  if (config.turnstile_site_key && turnstileToken) body.turnstileToken = turnstileToken;
+  const { status, data } = await request(`/auth/${mode}`, { method: 'POST', body });
   btn.disabled = false;
+  resetTurnstile();
   if (status === 200) {
     token = data.access_token;
+    loginNeedsTurnstile = false;
     $('#password').value = '';
     await loadGame();
-  } else $('#auth-error').textContent = errText(data.error);
+    return;
+  }
+  if (data.turnstile_required) {
+    loginNeedsTurnstile = true;
+    refreshTurnstileVisibility();
+  }
+  $('#auth-error').textContent = data.error === 'turnstile_required'
+    ? 'Подтвердите, что вы не робот, и отправьте ещё раз'
+    : errText(data.error);
 });
 $('#logout').addEventListener('click', async () => {
   await request('/auth/logout', { method: 'POST' });
@@ -398,6 +478,7 @@ setInterval(() => {
 (async () => {
   const health = await request('/health').catch(() => null);
   if (health?.status === 200) syncServerTime(health.data.now);
+  await loadConfig();
   if (await refresh()) await loadGame();
   else show('auth');
 })();

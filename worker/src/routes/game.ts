@@ -35,7 +35,8 @@ export async function ledger(url: URL, env: Env, a: AuthContext): Promise<Respon
 export async function claim(request: Request, env: Env, a: AuthContext): Promise<Response> {
   const key = idemKey(request);
   const r = await world(env, a).claim(a.userId, key);
-  if (r.ok) return json({ reward: r.reward, balance: r.balance, next_claim_at: r.nextClaimAt, server_time: Date.now() });
+  // Никаких полей, меняющихся от вызова к вызову: повтор с тем же ключом должен вернуть байт-в-байт тот же ответ.
+  if (r.ok) return json({ reward: r.reward, balance: r.balance, next_claim_at: r.nextClaimAt });
   const retry = Math.max(1, Math.ceil((r.nextClaimAt - Date.now()) / 1000));
   return json({ error: r.code, next_claim_at: r.nextClaimAt }, 429, { 'Retry-After': String(retry) });
 }

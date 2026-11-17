@@ -43,7 +43,9 @@ export function json(data: unknown, status = 200, headers: Record<string, string
 }
 
 export function errorResponse(e: unknown): Response {
-  if (e instanceof ApiError) return json({ error: e.code }, e.status);
+  if (e instanceof ApiError) {
+    return json({ error: e.code }, e.status, e.retryAfter ? { 'Retry-After': String(Math.max(1, e.retryAfter)) } : {});
+  }
   const msg = e instanceof Error ? e.message : '';
   const status = STATUS_BY_CODE[msg];
   if (status) return json({ error: msg }, status);
