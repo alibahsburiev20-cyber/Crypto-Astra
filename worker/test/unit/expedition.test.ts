@@ -232,3 +232,12 @@ describe('ремонт, топливо, заморозка', () => {
     expect(() => tx(() => claim(sql, 'p1', 'c', T0))).toThrow(/world_frozen/);
   });
 });
+
+describe('топливо на полном баке', () => {
+  it('regenPlan не выдаёт сверх бака и не ставит задачу в прошлое', () => {
+    const step = 2 * 60 * 60 * 1000;
+    const plan = regenPlan(0, step * 10, 5, 5);
+    expect(plan.grant).toBe(0);
+    expect(plan.nextAt).toBeGreaterThan(step * 10);
+  });
+});

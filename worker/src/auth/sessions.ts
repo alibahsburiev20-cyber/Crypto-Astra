@@ -47,3 +47,13 @@ export async function rotateSession(db: D1Database, presented: string, now: numb
 export async function revokeSession(db: D1Database, presented: string, now: number): Promise<void> {
   await db.prepare('UPDATE sessions SET revoked_at = ? WHERE token_hash = ? AND revoked_at IS NULL').bind(now, sha256Hex(presented)).run();
 }
+
+/** Удаляет из D1 истёкшие и давно отозванные сессии. Раз в сутки из cron. */
+export async function cleanupSessions(db: D1Database, now: number): Promise<number> {
+  const cutoff = now - REFRESH_TTL_MS;
+  const r = await db
+    .prepare('DELETE FROM sessions WHERE expires_at < ? OR (revoked_at IS NOT NULL AND revoked_at < ?)')
+    .bind(cutoff, cutoff)
+    .run();
+  return r.meta.changes ?? 0;
+}

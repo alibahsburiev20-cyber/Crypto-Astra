@@ -32,7 +32,13 @@ const STATUS_BY_CODE: Record<string, number> = {
 export function json(data: unknown, status = 200, headers: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...headers },
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+      'Referrer-Policy': 'same-origin',
+      ...headers,
+    },
   });
 }
 
@@ -45,7 +51,12 @@ export function errorResponse(e: unknown): Response {
   return json({ error: 'internal' }, 500);
 }
 
+const MAX_JSON_BYTES = 16 * 1024;
+
 export async function readJson(request: Request): Promise<Record<string, unknown>> {
+  // Тело больше 16 КиБ на этих маршрутах не нужно: это защита от раздутых запросов.
+  const length = Number(request.headers.get('Content-Length') ?? '0');
+  if (Number.isFinite(length) && length > MAX_JSON_BYTES) throw new ApiError(413, 'payload_too_large');
   const body = await request.json().catch(() => null);
   if (!body || typeof body !== 'object' || Array.isArray(body)) throw new ApiError(400, 'bad_request');
   return body as Record<string, unknown>;

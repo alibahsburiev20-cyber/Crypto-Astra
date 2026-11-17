@@ -83,11 +83,19 @@ export class WorldLobby extends DurableObject<Env> {
   }
 
   // Шаг 3 не прошёл: место возвращается сразу, не дожидаясь таймаута.
+  // Подтверждённый резерв тоже можно вернуть: это нужно, если после confirm мир не создал игрока.
   release(reservationId: string): void {
     this.ctx.storage.transactionSync(() => {
       const r = this.sql.exec('SELECT world_id, status FROM lobby_reservations WHERE id = ?', reservationId).toArray();
-      if (!r.length || r[0].status !== 'pending') return;
-      this.sql.exec('UPDATE lobby_worlds SET reserved = reserved - 1 WHERE world_id = ?', String(r[0].world_id));
+      if (!r.length) return;
+      const status = String(r[0].status);
+      if (status === 'pending') {
+        this.sql.exec('UPDATE lobby_worlds SET reserved = reserved - 1 WHERE world_id = ?', String(r[0].world_id));
+      } else if (status === 'confirmed') {
+        this.sql.exec('UPDATE lobby_worlds SET taken = MAX(0, taken - 1) WHERE world_id = ?', String(r[0].world_id));
+      } else {
+        return;
+      }
       this.sql.exec(`UPDATE lobby_reservations SET status = 'released' WHERE id = ?`, reservationId);
     });
   }

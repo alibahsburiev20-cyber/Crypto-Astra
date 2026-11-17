@@ -14,11 +14,20 @@ function idemKey(request: Request): string {
 }
 
 export async function me(env: Env, a: AuthContext): Promise<Response> {
-  return json({ world_id: a.worldId, ...(await world(env, a).getState(a.userId)) });
+  // server_time нужен клиенту, чтобы таймеры не зависели от часов устройства.
+  return json({ world_id: a.worldId, server_time: Date.now(), ...(await world(env, a).getState(a.userId)) });
+}
+
+// limit приходит строкой. Битое значение раньше уходило в SQL как NaN и на D1 давало 500.
+export function parseLimit(raw: string | null, fallback = 30): number {
+  if (raw === null || raw.trim() === '') return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(50, Math.max(1, Math.floor(n)));
 }
 
 export async function ledger(url: URL, env: Env, a: AuthContext): Promise<Response> {
-  const limit = Number(url.searchParams.get('limit') ?? '30');
+  const limit = parseLimit(url.searchParams.get('limit'));
   return json({ entries: await world(env, a).listLedger(a.userId, limit) });
 }
 
@@ -26,8 +35,9 @@ export async function ledger(url: URL, env: Env, a: AuthContext): Promise<Respon
 export async function claim(request: Request, env: Env, a: AuthContext): Promise<Response> {
   const key = idemKey(request);
   const r = await world(env, a).claim(a.userId, key);
-  if (r.ok) return json({ reward: r.reward, balance: r.balance, next_claim_at: r.nextClaimAt });
-  return json({ error: r.code, next_claim_at: r.nextClaimAt }, 429);
+  if (r.ok) return json({ reward: r.reward, balance: r.balance, next_claim_at: r.nextClaimAt, server_time: Date.now() });
+  const retry = Math.max(1, Math.ceil((r.nextClaimAt - Date.now()) / 1000));
+  return json({ error: r.code, next_claim_at: r.nextClaimAt }, 429, { 'Retry-After': String(retry) });
 }
 
 export async function startExpedition(request: Request, env: Env, a: AuthContext): Promise<Response> {

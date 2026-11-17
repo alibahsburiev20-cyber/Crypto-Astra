@@ -42,3 +42,12 @@ export function dropExpeditionJobs(sql: SqlStorage, expeditionId: string): void 
 export function parsePayload<T>(raw: string): T {
   return JSON.parse(raw) as T;
 }
+
+/** Ближайший run_at среди pending-задач. null — задач нет, будильник можно снять. */
+export function nextAlarmAt(sql: SqlStorage): number | null {
+  const row = sql.exec(`SELECT MIN(run_at) AS t FROM jobs WHERE status = 'pending'`).toArray()[0];
+  const raw = row?.t;
+  if (raw === null || raw === undefined) return null;
+  const t = Number(raw);
+  return Number.isFinite(t) ? t : null;
+}

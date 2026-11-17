@@ -3,6 +3,7 @@ import { requireSecret } from '../auth/guards';
 import { hashPassword, verifyPassword } from '../auth/password';
 import { createSession, revokeSession, rotateSession } from '../auth/sessions';
 import { verifyTurnstile } from '../auth/turnstile';
+import { WORLD_CAPACITY } from '../shared/constants';
 import type { Env } from '../env';
 import { clearRefreshCookie, readRefreshCookie, refreshCookie } from '../http/cookies';
 import { json, readJson } from '../http/response';
@@ -58,28 +59,54 @@ export async function register(request: Request, env: Env): Promise<Response> {
 
   const lobby = env.LOBBY.get(env.LOBBY.idFromName('main'));
   let reservationId: string | null = null;
-  let worldId: string;
+  let worldId: string | null = null;
+  let playerCreated = false;
   try {
-    const ref = typeof body.ref === 'string' && body.ref.length <= 32 ? body.ref : undefined;
+    // ref — id мира пригласившего (реферальная ссылка). Формат проверяем, чтобы не тащить мусор в лобби.
+    const ref = typeof body.ref === 'string' && /^[a-z0-9_-]{1,32}$/i.test(body.ref) ? body.ref : undefined;
     const r = await lobby.reserve(userId, ref);
     reservationId = r.reservationId;
     worldId = r.worldId;
     await env.WORLD.get(env.WORLD.idFromName(worldId)).createPlayer(userId);
-    await lobby.confirm(reservationId);
+    playerCreated = true;
   } catch (e) {
-    // Шаг не прошёл: место возвращается в лобби, учётная запись удаляется.
+    // До создания игрока мир не изменился: место возвращается, учётная запись удаляется.
     if (reservationId) await lobby.release(reservationId).catch(() => {});
-    await env.DB.prepare('DELETE FROM users WHERE id = ?').bind(userId).run();
+    await env.DB.prepare('DELETE FROM users WHERE id = ?').bind(userId).run().catch(() => {});
     throw e;
   }
 
-  await env.DB.batch([
-    env.DB.prepare(`UPDATE users SET world_id = ?, status = 'active' WHERE id = ?`).bind(worldId, userId),
-    env.DB
-      .prepare(`INSERT INTO world_seats (world_id, capacity, taken, updated_at) VALUES (?, 100, 1, ?)
-                ON CONFLICT (world_id) DO UPDATE SET taken = taken + 1, updated_at = excluded.updated_at`)
-      .bind(worldId, now),
-  ]);
+  const activate = async (): Promise<void> => {
+    await env.DB.batch([
+      env.DB.prepare(`UPDATE users SET world_id = ?, status = 'active' WHERE id = ?`).bind(worldId, userId),
+      env.DB
+        .prepare(`INSERT INTO world_seats (world_id, capacity, taken, updated_at) VALUES (?, ?, 1, ?)
+                  ON CONFLICT (world_id) DO UPDATE SET taken = taken + 1, updated_at = excluded.updated_at`)
+        .bind(worldId, WORLD_CAPACITY, now),
+    ]);
+  };
+
+  let activated = false;
+  try {
+    await activate();
+    activated = true;
+    if (reservationId) await lobby.confirm(reservationId);
+  } catch (e) {
+    // Игрок в мире уже создан: удалять учётную запись нельзя, иначе останется сирота,
+    // который навсегда занимает место и хранит стартовый баланс. Пробуем активацию ещё раз.
+    console.error('registration activation failed', userId, worldId, e);
+    if (!activated) {
+      try {
+        await activate();
+        activated = true;
+      } catch (e2) {
+        console.error('registration retry failed', userId, worldId, e2);
+      }
+    }
+    if (activated && reservationId) await lobby.confirm(reservationId).catch(() => {});
+  }
+  // Без active учётная запись не сможет войти и обновить сессию — лучше честная ошибка.
+  if (!activated) throw new ApiError(503, 'registration_incomplete');
   return issue(env, userId, worldId, now);
 }
 

@@ -1,3 +1,4 @@
+import { cleanupSessions } from './auth/sessions';
 import type { Env } from './env';
 import { route } from './http/router';
 import { WorldLobby } from './lobby/WorldLobby';
@@ -13,6 +14,25 @@ const SECURITY: Record<string, string> = {
   'X-Content-Type-Options': 'nosniff',
   'X-Frame-Options': 'DENY',
 };
+
+// Список миров берём у лобби. Если лобби недоступно, падаем на зеркало world_seats в D1:
+// cron не должен терять миры из-за одной ошибки.
+async function worldIds(env: Env): Promise<string[]> {
+  try {
+    const seats = await env.LOBBY.get(env.LOBBY.idFromName('main')).seats();
+    const ids = seats.map((w) => String(w.world_id)).filter(Boolean);
+    if (ids.length) return ids;
+  } catch (e) {
+    console.error('lobby seats failed', e);
+  }
+  try {
+    const rows = await env.DB.prepare('SELECT world_id FROM world_seats').all<{ world_id: string }>();
+    return (rows.results ?? []).map((r) => String(r.world_id)).filter(Boolean);
+  } catch (e) {
+    console.error('world_seats fallback failed', e);
+    return [];
+  }
+}
 
 function staticResponse(pathname: string, method: string): Response | null {
   const path = pathname === '/' ? '/index.html' : pathname;
@@ -35,15 +55,19 @@ export default {
   },
   // Часовой cron — страховка, если будильник мира не сработал. Сверка и рейсы живут в alarm мира.
   async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
-    const lobby = env.LOBBY.get(env.LOBBY.idFromName('main'));
-    const worlds = await lobby.seats();
-    for (const w of worlds) {
-      const id = String(w.world_id);
+    const ids = await worldIds(env);
+    for (const id of ids) {
       try {
         await env.WORLD.get(env.WORLD.idFromName(id)).poke();
       } catch (e) {
         console.error('poke failed', id, e);
       }
+    }
+    // Гигиена D1: истёкшие refresh-сессии больше не нужны.
+    try {
+      await cleanupSessions(env.DB, Date.now());
+    } catch (e) {
+      console.error('session cleanup failed', e);
     }
   },
 };
