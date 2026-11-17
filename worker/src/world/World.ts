@@ -8,6 +8,7 @@ import { buildState, listLedger } from './modules/state';
 import { buyFuel, repairShip } from './modules/upkeep';
 import { verifyLedger, type LedgerReport } from './ledger';
 import { migrateLegacyExpeditions } from './migrate';
+import { nextAlarmAt } from './scheduler';
 import { WORLD_SCHEMA } from './schema';
 
 // Один мир = один объект. Запросы обрабатываются по одному, а каждое действие
@@ -99,12 +100,15 @@ export class World extends DurableObject<Env> {
   }
 
   private async arm(): Promise<void> {
-    const rows = this.sql.exec(`SELECT MIN(run_at) AS t FROM jobs WHERE status = 'pending'`).toArray();
-    const raw = rows[0]?.t;
-    if (raw === null || raw === undefined) {
+    const target = nextAlarmAt(this.sql);
+    if (target === null) {
       try { await this.ctx.storage.deleteAlarm(); } catch { /* будильника не было */ }
       return;
     }
-    await this.ctx.storage.setAlarm(Number(raw));
+    // Между чтением очереди и setAlarm могла прийти задача с более ранним run_at.
+    // Не отодвигаем уже стоящий будильник: иначе задача ждала бы следующего poke.
+    const current = await this.ctx.storage.getAlarm();
+    if (current !== null && current <= target) return;
+    await this.ctx.storage.setAlarm(target);
   }
 }

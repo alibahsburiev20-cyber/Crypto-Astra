@@ -45,6 +45,8 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 button.link, button.ghost { background: none; color: var(--muted); font-weight: 500; }
 button.ghost { border: 1px solid var(--line); color: var(--text); }
 
+.turnstile { display: flex; justify-content: center; margin: 0 0 14px; }
+
 .tabs, .choices, .stack { display: flex; gap: 8px; flex-wrap: wrap; }
 .tabs { margin-bottom: 16px; }
 .tab, .dock button { background: var(--bg); color: var(--muted); border: 1px solid var(--line); }

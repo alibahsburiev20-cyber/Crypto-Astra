@@ -1,3 +1,5 @@
+import { cleanupAuthLimits } from './auth/rateLimit';
+import { cleanupSessions } from './auth/sessions';
 import type { Env } from './env';
 import { route } from './http/router';
 import { WorldLobby } from './lobby/WorldLobby';
@@ -8,11 +10,31 @@ export { World, WorldLobby };
 export type { Env };
 
 const SECURITY: Record<string, string> = {
-  'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+  // Turnstile грузит скрипт и iframe с challenges.cloudflare.com. Больше внешних источников нет.
+  'Content-Security-Policy': "default-src 'self'; script-src 'self' https://challenges.cloudflare.com; style-src 'self'; img-src 'self' data:; connect-src 'self' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
   'Referrer-Policy': 'same-origin',
   'X-Content-Type-Options': 'nosniff',
   'X-Frame-Options': 'DENY',
 };
+
+// Список миров берём у лобби. Если лобби недоступно, падаем на зеркало world_seats в D1:
+// cron не должен терять миры из-за одной ошибки.
+async function worldIds(env: Env): Promise<string[]> {
+  try {
+    const seats = await env.LOBBY.get(env.LOBBY.idFromName('main')).seats();
+    const ids = seats.map((w) => String(w.world_id)).filter(Boolean);
+    if (ids.length) return ids;
+  } catch (e) {
+    console.error('lobby seats failed', e);
+  }
+  try {
+    const rows = await env.DB.prepare('SELECT world_id FROM world_seats').all<{ world_id: string }>();
+    return (rows.results ?? []).map((r) => String(r.world_id)).filter(Boolean);
+  } catch (e) {
+    console.error('world_seats fallback failed', e);
+    return [];
+  }
+}
 
 function staticResponse(pathname: string, method: string): Response | null {
   const path = pathname === '/' ? '/index.html' : pathname;
@@ -35,15 +57,21 @@ export default {
   },
   // Часовой cron — страховка, если будильник мира не сработал. Сверка и рейсы живут в alarm мира.
   async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
-    const lobby = env.LOBBY.get(env.LOBBY.idFromName('main'));
-    const worlds = await lobby.seats();
-    for (const w of worlds) {
-      const id = String(w.world_id);
+    const ids = await worldIds(env);
+    for (const id of ids) {
       try {
         await env.WORLD.get(env.WORLD.idFromName(id)).poke();
       } catch (e) {
         console.error('poke failed', id, e);
       }
     }
+    // Гигиена D1: истёкшие refresh-сессии и старые счётчики частоты.
+    const now = Date.now();
+    try {
+      await cleanupSessions(env.DB, now);
+    } catch (e) {
+      console.error('session cleanup failed', e);
+    }
+    await cleanupAuthLimits(env.DB, now);
   },
 };

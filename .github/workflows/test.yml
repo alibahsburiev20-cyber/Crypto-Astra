@@ -1,0 +1,47 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Подготовить локальную D1
+        run: |
+          printf 'JWT_SECRET=ci-secret-ci-secret-ci-secret-12345678\n' > worker/.dev.vars
+          npx wrangler d1 migrations apply DB --local --config worker/wrangler.toml
+      - name: E2E против wrangler dev
+        run: |
+          set -euo pipefail
+          npx wrangler dev --config worker/wrangler.toml --ip 127.0.0.1 --port 8787 > /tmp/wrangler.log 2>&1 &
+          PID=$!
+          trap 'kill $PID 2>/dev/null || true' EXIT
+          for i in $(seq 1 90); do
+            if curl -sf http://127.0.0.1:8787/health > /dev/null; then break; fi
+            if ! kill -0 $PID 2>/dev/null; then cat /tmp/wrangler.log; exit 1; fi
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:8787/health > /dev/null
+          E2E_BASE_URL=http://127.0.0.1:8787 npm run test:e2e

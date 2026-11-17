@@ -1,0 +1,27 @@
+name: lint
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run typecheck:scripts
+      - run: node --check client/app.js
+      # site.ts генерируется из client/. Если он отстал, деплой отдаст старый клиент.
+      - run: node scripts/embed-client.mjs
+      - run: git diff --exit-code -- worker/src/static/site.ts
+      # Проверяем, что скрипты хотя бы запускаются без сети.
+      - run: npm run simulate -- --players 5 --days 1

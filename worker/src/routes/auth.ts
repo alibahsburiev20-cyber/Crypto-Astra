@@ -1,8 +1,13 @@
 import { signJwt } from '../auth/jwt';
 import { requireSecret } from '../auth/guards';
 import { hashPassword, verifyPassword } from '../auth/password';
+import {
+  LOGIN_EMAIL_POLICY, LOGIN_IP_POLICY, LOGIN_TURNSTILE_AFTER, REGISTER_IP_POLICY,
+  clearAttempts, currentBlock, ipOf, loginKeys, readState, recordAttempt, registerKeys,
+} from '../auth/rateLimit';
 import { createSession, revokeSession, rotateSession } from '../auth/sessions';
 import { verifyTurnstile } from '../auth/turnstile';
+import { WORLD_CAPACITY } from '../shared/constants';
 import type { Env } from '../env';
 import { clearRefreshCookie, readRefreshCookie, refreshCookie } from '../http/cookies';
 import { json, readJson } from '../http/response';
@@ -21,12 +26,28 @@ function creds(body: Record<string, unknown>): { email: string; password: string
   return { email, password };
 }
 
+export function turnstileEnabled(env: Env): boolean {
+  return Boolean(env.TURNSTILE_SECRET);
+}
+
 async function checkTurnstile(env: Env, request: Request, body: Record<string, unknown>): Promise<void> {
-  // Если секрет Turnstile не задан, проверка пропускается. Это только для локальной разработки:
-  // перед публичным запуском секрет обязательно задать (wrangler secret put TURNSTILE_SECRET).
-  if (!env.TURNSTILE_SECRET) return;
-  const ok = await verifyTurnstile(env.TURNSTILE_SECRET, body.turnstileToken, request.headers.get('CF-Connecting-IP'));
+  // Секрет не задан — проверка пропускается (локальная разработка и тесты).
+  if (!turnstileEnabled(env)) return;
+  if (!env.TURNSTILE_SITE_KEY) console.warn('TURNSTILE_SECRET задан, но TURNSTILE_SITE_KEY пуст: клиент не сможет получить токен');
+  const token = body.turnstileToken;
+  if (typeof token !== 'string' || !token) throw new ApiError(403, 'turnstile_required');
+  const ok = await verifyTurnstile(env.TURNSTILE_SECRET, token, ipOf(request));
   if (!ok) throw new ApiError(403, 'turnstile_failed');
+}
+
+// Публичная конфигурация клиента: site key Turnstile и серверное время.
+export function config(env: Env): Response {
+  const siteKey = turnstileEnabled(env) && env.TURNSTILE_SITE_KEY ? env.TURNSTILE_SITE_KEY.trim() : '';
+  return json(
+    { turnstile_site_key: siteKey || null, login_turnstile_after: LOGIN_TURNSTILE_AFTER, server_time: Date.now() },
+    200,
+    { 'Cache-Control': 'public, max-age=300' },
+  );
 }
 
 async function issue(env: Env, userId: string, worldId: string, now: number): Promise<Response> {
@@ -40,9 +61,13 @@ async function issue(env: Env, userId: string, worldId: string, now: number): Pr
 export async function register(request: Request, env: Env): Promise<Response> {
   const body = await readJson(request);
   const { email, password } = creds(body);
+  const now = Date.now();
+
+  // Частоту считаем до Turnstile: иначе неудачные проверки можно слать без ограничений.
+  const gate = await recordAttempt(env.DB, registerKeys(ipOf(request)), now, REGISTER_IP_POLICY);
+  if (gate.retryAfterSec > 0) throw new ApiError(429, 'too_many_attempts', gate.retryAfterSec);
   await checkTurnstile(env, request, body);
 
-  const now = Date.now();
   const userId = crypto.randomUUID();
   const passwordHash = await hashPassword(password);
 
@@ -58,41 +83,89 @@ export async function register(request: Request, env: Env): Promise<Response> {
 
   const lobby = env.LOBBY.get(env.LOBBY.idFromName('main'));
   let reservationId: string | null = null;
-  let worldId: string;
+  let worldId: string | null = null;
+  let playerCreated = false;
   try {
-    const ref = typeof body.ref === 'string' && body.ref.length <= 32 ? body.ref : undefined;
+    // ref — id мира пригласившего (реферальная ссылка). Формат проверяем, чтобы не тащить мусор в лобби.
+    const ref = typeof body.ref === 'string' && /^[a-z0-9_-]{1,32}$/i.test(body.ref) ? body.ref : undefined;
     const r = await lobby.reserve(userId, ref);
     reservationId = r.reservationId;
     worldId = r.worldId;
     await env.WORLD.get(env.WORLD.idFromName(worldId)).createPlayer(userId);
-    await lobby.confirm(reservationId);
+    playerCreated = true;
   } catch (e) {
-    // Шаг не прошёл: место возвращается в лобби, учётная запись удаляется.
+    // До создания игрока мир не изменился: место возвращается, учётная запись удаляется.
     if (reservationId) await lobby.release(reservationId).catch(() => {});
-    await env.DB.prepare('DELETE FROM users WHERE id = ?').bind(userId).run();
+    await env.DB.prepare('DELETE FROM users WHERE id = ?').bind(userId).run().catch(() => {});
     throw e;
   }
 
-  await env.DB.batch([
-    env.DB.prepare(`UPDATE users SET world_id = ?, status = 'active' WHERE id = ?`).bind(worldId, userId),
-    env.DB
-      .prepare(`INSERT INTO world_seats (world_id, capacity, taken, updated_at) VALUES (?, 100, 1, ?)
-                ON CONFLICT (world_id) DO UPDATE SET taken = taken + 1, updated_at = excluded.updated_at`)
-      .bind(worldId, now),
-  ]);
+  const activate = async (): Promise<void> => {
+    await env.DB.batch([
+      env.DB.prepare(`UPDATE users SET world_id = ?, status = 'active' WHERE id = ?`).bind(worldId, userId),
+      env.DB
+        .prepare(`INSERT INTO world_seats (world_id, capacity, taken, updated_at) VALUES (?, ?, 1, ?)
+                  ON CONFLICT (world_id) DO UPDATE SET taken = taken + 1, updated_at = excluded.updated_at`)
+        .bind(worldId, WORLD_CAPACITY, now),
+    ]);
+  };
+
+  let activated = false;
+  try {
+    await activate();
+    activated = true;
+    if (reservationId) await lobby.confirm(reservationId);
+  } catch (e) {
+    // Игрок в мире уже создан: удалять учётную запись нельзя, иначе останется сирота,
+    // который навсегда занимает место и хранит стартовый баланс. Пробуем активацию ещё раз.
+    console.error('registration activation failed', userId, worldId, e);
+    if (!activated) {
+      try {
+        await activate();
+        activated = true;
+      } catch (e2) {
+        console.error('registration retry failed', userId, worldId, e2);
+      }
+    }
+    if (activated && reservationId) await lobby.confirm(reservationId).catch(() => {});
+  }
+  // Без active учётная запись не сможет войти и обновить сессию — лучше честная ошибка.
+  if (!activated) throw new ApiError(503, 'registration_incomplete');
   return issue(env, userId, worldId, now);
 }
 
 export async function login(request: Request, env: Env): Promise<Response> {
   const body = await readJson(request);
   const { email, password } = creds(body);
+  const now = Date.now();
+  const keys = loginKeys(ipOf(request), email);
+
+  const blocked = await currentBlock(env.DB, keys, now);
+  if (blocked > 0) throw new ApiError(429, 'too_many_attempts', blocked);
+
+  // После трёх неудач по этому email или с этого IP просим Turnstile (II.9).
+  const [ipState, emailState] = await Promise.all([readState(env.DB, keys[0]), readState(env.DB, keys[1])]);
+  const requireTurnstile = turnstileEnabled(env)
+    && Math.max(ipState?.attempts ?? 0, emailState?.attempts ?? 0) >= LOGIN_TURNSTILE_AFTER;
+  if (requireTurnstile) await checkTurnstile(env, request, body);
+
   const row = await env.DB
     .prepare('SELECT id, password_hash, world_id, status FROM users WHERE email = ?')
     .bind(email)
     .first<{ id: string; password_hash: string | null; world_id: string | null; status: string }>();
 
   const ok = row?.password_hash ? await verifyPassword(password, row.password_hash) : (await verifyPassword(password, DUMMY_HASH), false);
-  if (!row || !ok || row.status !== 'active' || !row.world_id) throw new ApiError(401, 'invalid_credentials');
+  if (!row || !ok || row.status !== 'active' || !row.world_id) {
+    const ip = await recordAttempt(env.DB, [keys[0]], now, LOGIN_IP_POLICY);
+    const mail = await recordAttempt(env.DB, [keys[1]], now, LOGIN_EMAIL_POLICY);
+    const retry = Math.max(ip.retryAfterSec, mail.retryAfterSec);
+    if (retry > 0) throw new ApiError(429, 'too_many_attempts', retry);
+    const attempts = Math.max(ip.states[0].attempts, mail.states[0].attempts);
+    const nextTurnstile = turnstileEnabled(env) && attempts >= LOGIN_TURNSTILE_AFTER;
+    return json({ error: 'invalid_credentials', turnstile_required: nextTurnstile }, 401);
+  }
+
+  await clearAttempts(env.DB, keys);
   return issue(env, row.id, row.world_id, Date.now());
 }
 

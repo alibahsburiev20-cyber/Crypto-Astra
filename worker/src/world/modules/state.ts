@@ -75,7 +75,7 @@ export function buildState(sql: SqlStorage, playerId: string, now: number) {
 }
 
 export function listLedger(sql: SqlStorage, playerId: string, limit: number) {
-  const n = Math.min(50, Math.max(1, Math.floor(limit) || 20));
+  const n = Number.isFinite(limit) ? Math.min(50, Math.max(1, Math.floor(limit))) : 20;
   return sql.exec(
     `SELECT seq, asset, delta, reason, source_ref, created_at FROM ledger WHERE player_id = ? ORDER BY seq DESC LIMIT ?`,
     playerId, n,

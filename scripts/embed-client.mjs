@@ -1,14 +1,23 @@
 // Кладёт файлы client/ внутрь воркера. Так деплой не зависит от отдельной загрузки ассетов.
 import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { dirname, join, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const root = new URL('..', import.meta.url).pathname;
+// fileURLToPath, а не pathname: pathname ломается на пробелах и Windows-путях.
+const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const client = join(root, 'client');
 const types = {
   '.html': 'text/html; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.webmanifest': 'application/manifest+json; charset=utf-8',
+  '.txt': 'text/plain; charset=utf-8',
   '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.webp': 'image/webp',
+  '.ico': 'image/x-icon',
+  '.woff2': 'font/woff2',
 };
 
 function walk(dir, acc = []) {
@@ -21,10 +30,12 @@ function walk(dir, acc = []) {
 }
 
 const files = {};
-for (const path of walk(client)) {
-  const ext = path.slice(path.lastIndexOf('.'));
+for (const path of walk(client).sort()) {
+  const ext = path.slice(path.lastIndexOf('.')).toLowerCase();
   if (!types[ext]) continue;
   const urlPath = '/' + relative(client, path).split('\\').join('/');
+  // Бинарные файлы (png/webp/ico/woff2) в JSON-строку не положить без потерь.
+  if (!['.html', '.css', '.js', '.json', '.webmanifest', '.txt', '.svg'].includes(ext)) continue;
   files[urlPath] = { type: types[ext], body: readFileSync(path, 'utf8') };
 }
 
