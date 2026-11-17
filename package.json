@@ -14,7 +14,8 @@
     "simulate": "tsx scripts/simulate-economy.ts",
     "check-ledger": "tsx scripts/check-ledger.ts",
     "typecheck:scripts": "tsc -p tsconfig.scripts.json",
-    "test:e2e": "vitest run --config vitest.e2e.config.ts"
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "config:sync": "node scripts/sync-wrangler.mjs"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261110.1",

@@ -1,0 +1,43 @@
+## СГЕНЕРИРОВАНО из ../wrangler.toml скриптом scripts/sync-wrangler.mjs.
+## Не редактируйте вручную: измените корневой конфиг и запустите npm run config:sync.
+## Нужен для сборки Cloudflare, настроенной на --config worker/wrangler.toml.
+name = "crypto-astra"
+main = "src/index.ts"
+compatibility_date = "2026-11-01"
+
+# Публичный site key Turnstile (можно хранить в репозитории). Секрет — только через
+# `wrangler secret put TURNSTILE_SECRET`. Пустые значения означают «проверка выключена»:
+# так работают локальная разработка и тесты.
+[vars]
+TURNSTILE_SITE_KEY = ""
+
+# Клиент отдаётся тем же Worker (бесплатно). Один адрес для сайта и API: не нужны CORS, кука refresh работает.
+# Запросы, для которых нет файла в client/ (/auth/*, /me, /claim), идут в Worker.
+[assets]
+directory = "../client"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "astra-global"
+database_id = "49cf3fff-baaa-4c06-b750-9946778e7380"
+migrations_dir = "migrations/d1"
+
+[[durable_objects.bindings]]
+name = "WORLD"
+class_name = "World"
+
+[[durable_objects.bindings]]
+name = "LOBBY"
+class_name = "WorldLobby"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["World", "WorldLobby"]
+
+[triggers]
+crons = ["0 * * * *", "0 3 * * *"]
+
+# R2 (архив и бэкапы) включается позже, когда появится доход:
+# [[r2_buckets]]
+# binding = "ARCHIVE"
+# bucket_name = "astra-archive"

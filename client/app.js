@@ -41,6 +41,7 @@ const ERRORS = {
   idempotency_key_reused: 'Ключ запроса уже использован',
   reservation_expired: 'Место в мире истекло, попробуйте снова',
   bad_planet: 'Планета не найдена',
+  network: 'Нет связи с сервером. Проверьте интернет и попробуйте снова',
 };
 const REASONS = {
   start_bonus: 'Стартовый бонус',
@@ -98,9 +99,14 @@ async function request(path, { method = 'GET', body, headers = {} } = {}) {
   const h = { ...headers };
   if (token) h.Authorization = `Bearer ${token}`;
   if (body) h['Content-Type'] = 'application/json';
-  const r = await fetch(path, { method, headers: h, body: body ? JSON.stringify(body) : undefined, credentials: 'same-origin' });
-  const data = await r.json().catch(() => ({}));
-  return { status: r.status, data };
+  try {
+    const r = await fetch(path, { method, headers: h, body: body ? JSON.stringify(body) : undefined, credentials: 'same-origin' });
+    const data = await r.json().catch(() => ({}));
+    return { status: r.status, data };
+  } catch {
+    // Обрыв сети не должен оставлять кнопку заблокированной и «выкидывать» из игры.
+    return { status: 0, data: { error: 'network' } };
+  }
 }
 
 async function refresh() {
@@ -298,7 +304,10 @@ function renderFlight() {
   const planets = Array.isArray(state.planets) ? state.planets : [];
   const open = planets.filter((p) => !p.locked);
   const planetId = open[0]?.id;
-  const selected = planets.find((p) => p.id === (window.__planet || planetId)) || open[0];
+  let selected = planets.find((p) => p.id === (window.__planet || planetId)) || open[0];
+  // window.__planet переживает перезагрузку, а уровень/корабль могли измениться.
+  // Закрытую планету молча заменяем первой доступной, иначе «Старт» всегда выключен.
+  if (!selected || selected.locked) selected = open[0];
   const kind = window.__kind || 'short';
   const opt = selected?.options.find((o) => o.kind === kind);
   return el('div', {},
@@ -397,7 +406,13 @@ function render() {
 
 async function loadGame() {
   const { status, data } = await authed('/me');
-  if (status !== 200) { show('auth'); return; }
+  if (status === 401) { show('auth'); return; }
+  if (status !== 200) {
+    // 0 — сеть, истёкший токен уже обработан выше. Не сбрасываем экран молча.
+    note = `Ошибка: ${errText(data.error)}`;
+    if (state) render(); else show('auth');
+    return;
+  }
   state = data;
   syncServerTime(data.server_time);
   if (view === 'ledger') {
@@ -479,9 +494,15 @@ setInterval(() => {
 }, 1000);
 
 (async () => {
-  const health = await request('/health').catch(() => null);
-  if (health?.status === 200) syncServerTime(health.data.now);
-  await loadConfig();
-  if (await refresh()) await loadGame();
-  else show('auth');
+  try {
+    const health = await request('/health');
+    if (health.status === 200) syncServerTime(health.data.now);
+    await loadConfig();
+    if (await refresh()) await loadGame();
+    else show('auth');
+  } catch (e) {
+    console.error('boot failed', e);
+    show('auth');
+    $('#auth-error').textContent = errText('network');
+  }
 })();

@@ -17,6 +17,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # worker/wrangler.toml генерируется из корневого; проверяем, что не отстал.
+      - run: npm run config:sync -- --check
       - run: npm run typecheck
       - run: npm run typecheck:scripts
       - run: node --check client/app.js

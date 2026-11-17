@@ -17,6 +17,7 @@
 - `wrangler.toml` — единственный конфиг Worker (в корне; wrangler запускается из корня)
 - `client/` — сайт (статика, без сборки); отдаётся тем же Worker
 - `worker/src/` — API, Durable Objects `World` и `WorldLobby`
+- `worker/wrangler.toml` — генерируется из корневого (`npm run config:sync`), нужен только сборке Cloudflare, настроенной на этот путь
 - `worker/migrations/d1/` — миграции глобальной базы D1
 - `worker/schema/world/` — справочная схема SQLite мира (рабочая копия — `worker/src/world/schema.ts`)
 - `worker/test/` — unit и e2e тесты
