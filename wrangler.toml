@@ -1,5 +1,7 @@
+## Единственный конфиг Worker. Запускайте wrangler из корня репозитория:
+## `npx wrangler deploy`, `npm run dev`, `npx wrangler d1 migrations apply ...`.
 name = "crypto-astra"
-main = "src/index.ts"
+main = "worker/src/index.ts"
 compatibility_date = "2026-11-01"
 
 # Публичный site key Turnstile (можно хранить в репозитории). Секрет — только через
@@ -11,13 +13,13 @@ TURNSTILE_SITE_KEY = ""
 # Клиент отдаётся тем же Worker (бесплатно). Один адрес для сайта и API: не нужны CORS, кука refresh работает.
 # Запросы, для которых нет файла в client/ (/auth/*, /me, /claim), идут в Worker.
 [assets]
-directory = "../client"
+directory = "client"
 
 [[d1_databases]]
 binding = "DB"
 database_name = "astra-global"
 database_id = "49cf3fff-baaa-4c06-b750-9946778e7380"
-migrations_dir = "migrations/d1"
+migrations_dir = "worker/migrations/d1"
 
 [[durable_objects.bindings]]
 name = "WORLD"

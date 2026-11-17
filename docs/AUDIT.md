@@ -142,8 +142,8 @@ npm run check            # типы + тесты
 npm audit                # должно быть 0
 
 # живой прогон
-printf 'JWT_SECRET=dev-secret-dev-secret-dev-secret-123456\n' > worker/.dev.vars
-npx wrangler d1 migrations apply DB --local --config worker/wrangler.toml
+printf 'JWT_SECRET=dev-secret-dev-secret-dev-secret-123456\n' > .dev.vars
+npx wrangler d1 migrations apply DB --local
 npm run dev              # http://127.0.0.1:8787
 
 # отдельно

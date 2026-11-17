@@ -30,12 +30,12 @@ jobs:
       - run: npm ci
       - name: Подготовить локальную D1
         run: |
-          printf 'JWT_SECRET=ci-secret-ci-secret-ci-secret-12345678\n' > worker/.dev.vars
-          npx wrangler d1 migrations apply DB --local --config worker/wrangler.toml
+          printf 'JWT_SECRET=ci-secret-ci-secret-ci-secret-12345678\n' > .dev.vars
+          npx wrangler d1 migrations apply DB --local
       - name: E2E против wrangler dev
         run: |
           set -euo pipefail
-          npx wrangler dev --config worker/wrangler.toml --ip 127.0.0.1 --port 8787 > /tmp/wrangler.log 2>&1 &
+          npx wrangler dev --ip 127.0.0.1 --port 8787 > /tmp/wrangler.log 2>&1 &
           PID=$!
           trap 'kill $PID 2>/dev/null || true' EXIT
           for i in $(seq 1 90); do
