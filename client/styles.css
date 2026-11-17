@@ -72,6 +72,9 @@ button.ghost { border: 1px solid var(--line); color: var(--text); }
 .sprite-thumb { height: auto; image-rendering: pixelated; }
 .icon { width: 20px; height: 20px; object-fit: contain; image-rendering: pixelated; vertical-align: -4px; }
 .res-name { display: inline-flex; align-items: center; gap: 6px; }
+.icon-sm { width: 18px; height: 18px; object-fit: contain; image-rendering: pixelated; vertical-align: -4px; margin-right: 6px; }
+.card .label { display: inline-flex; align-items: center; }
+button .icon-sm { margin-right: 8px; }
 @keyframes hover {
   0%, 100% { transform: translateY(0); }
   50% { transform: translateY(-8px); }
