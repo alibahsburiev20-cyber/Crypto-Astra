@@ -68,7 +68,10 @@ button.ghost { border: 1px solid var(--line); color: var(--text); }
   display: grid; place-items: center; height: 120px; margin-bottom: 8px;
   background: radial-gradient(circle at 50% 60%, #1c2a52, transparent 70%);
 }
-.ship-viewer img { width: 180px; height: 112px; object-fit: contain; animation: hover 3.2s ease-in-out infinite; }
+.ship-viewer img { width: 220px; height: 120px; object-fit: contain; image-rendering: pixelated; animation: hover 3.2s ease-in-out infinite; }
+.sprite-thumb { height: auto; image-rendering: pixelated; }
+.icon { width: 20px; height: 20px; object-fit: contain; image-rendering: pixelated; vertical-align: -4px; }
+.res-name { display: inline-flex; align-items: center; gap: 6px; }
 @keyframes hover {
   0%, 100% { transform: translateY(0); }
   50% { transform: translateY(-8px); }
