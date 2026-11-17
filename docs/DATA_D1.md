@@ -34,8 +34,8 @@ HttpOnly-cookie. Истёкшие и отозванные строки стар�
 Каталог `worker/migrations/d1`, применяются по порядку:
 
 ```
-npx wrangler d1 migrations apply DB --local --config worker/wrangler.toml
-npx wrangler d1 migrations apply DB --remote --config worker/wrangler.toml
+npx wrangler d1 migrations apply DB --local
+npx wrangler d1 migrations apply DB --remote
 ```
 
 | Файл | Что создаёт |

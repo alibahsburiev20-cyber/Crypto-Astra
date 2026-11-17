@@ -58,7 +58,7 @@
 
 ## Cron
 
-`worker/wrangler.toml`:
+`wrangler.toml` (корень репозитория):
 
 ```
 [triggers]

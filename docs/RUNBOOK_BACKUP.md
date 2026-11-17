@@ -15,11 +15,11 @@
 
 ```bash
 # снимок в файл (SQL)
-npx wrangler d1 export DB --remote --config worker/wrangler.toml --output backup-$(date +%F).sql
+npx wrangler d1 export DB --remote --output backup-$(date +%F).sql
 
 # точка восстановления (Time Travel)
-npx wrangler d1 time-travel info DB --config worker/wrangler.toml
-npx wrangler d1 time-travel restore DB --config worker/wrangler.toml --timestamp <ISO>
+npx wrangler d1 time-travel info DB
+npx wrangler d1 time-travel restore DB --timestamp <ISO>
 ```
 
 Перед восстановлением: остановить регистрацию (флаг в клиенте/правило Cloudflare),

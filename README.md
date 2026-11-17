@@ -14,6 +14,7 @@
 
 ## Структура
 
+- `wrangler.toml` — единственный конфиг Worker (в корне; wrangler запускается из корня)
 - `client/` — сайт (статика, без сборки); отдаётся тем же Worker
 - `worker/src/` — API, Durable Objects `World` и `WorldLobby`
 - `worker/migrations/d1/` — миграции глобальной базы D1
@@ -60,8 +61,8 @@
 ## Деплой через дашборд Cloudflare (бесплатно)
 
 1. Workers & Pages → Create → Import a repository → этот репозиторий.
-2. Deploy command: `npx wrangler deploy --config worker/wrangler.toml`.
-3. Применить миграции D1: `npx wrangler d1 migrations apply DB --remote --config worker/wrangler.toml`.
+2. Deploy command: `npx wrangler deploy` (конфиг лежит в корне).
+3. Применить миграции D1: `npx wrangler d1 migrations apply DB --remote`.
 4. Settings → Variables and Secrets:
    - секрет `JWT_SECRET` — случайная строка от 32 символов, обязателен;
    - для Turnstile: публичный `TURNSTILE_SITE_KEY` (можно в `wrangler.toml`, `[vars]`) и секрет `TURNSTILE_SECRET`. Без них проверка выключена — только для разработки.
@@ -73,11 +74,11 @@
 ```
 npm ci
 npm run check                    # типы (включая скрипты) + тесты
-npx wrangler d1 migrations apply DB --local --config worker/wrangler.toml
+npx wrangler d1 migrations apply DB --local
 npm run dev
 ```
 
-Для `npm run dev` создайте `worker/.dev.vars` со строкой `JWT_SECRET=<от 32 символов>` (файл в `.gitignore`). Секреты: см. `.env.example`.
+Для `npm run dev` создайте `.dev.vars` в корне со строкой `JWT_SECRET=<от 32 символов>` (файл в `.gitignore`). Секреты: см. `.env.example`.
 
 ### Скрипты
 

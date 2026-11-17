@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev --config worker/wrangler.toml",
-    "deploy": "node scripts/embed-client.mjs && wrangler deploy --config worker/wrangler.toml",
+    "dev": "wrangler dev",
+    "deploy": "node scripts/embed-client.mjs && wrangler deploy",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "embed": "node scripts/embed-client.mjs",
