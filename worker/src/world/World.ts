@@ -7,6 +7,7 @@ import { cancelExpedition, chooseExpeditionEvent, startExpedition } from './modu
 import { createPlayer } from './modules/players';
 import { buildState, listLedger } from './modules/state';
 import { installModule } from './modules/shipModules';
+import { buyShip } from './modules/ships';
 import { buyFuel, repairShip } from './modules/upkeep';
 import { verifyLedger, type LedgerReport } from './ledger';
 import { backfillProgressLedger, backfillResourceLedger, migrateLegacyExpeditions } from './migrate';
@@ -60,6 +61,13 @@ export class World extends DurableObject<Env> {
   async installModule(playerId: string, idemKey: string, body: { shipId: string; module: string }) {
     const now = Date.now();
     const result = this.ctx.storage.transactionSync(() => installModule(this.sql, playerId, idemKey, body, now));
+    await this.arm();
+    return result;
+  }
+
+  async buyShip(playerId: string, idemKey: string, type: string) {
+    const now = Date.now();
+    const result = this.ctx.storage.transactionSync(() => buyShip(this.sql, playerId, idemKey, type, now));
     await this.arm();
     return result;
   }

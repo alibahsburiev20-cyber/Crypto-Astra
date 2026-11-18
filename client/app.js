@@ -37,6 +37,10 @@ const ERRORS = {
   bad_module: 'Такого модуля нет',
   module_slots_full: 'Свободных слотов на корабле нет',
   module_max_level: 'У модуля уже максимальный уровень',
+  bad_ship_type: 'Такого корабля нет',
+  ship_not_for_sale: 'Этот корабль не продаётся за ASTRA',
+  ship_locked: 'Уровень ещё мал для этого корабля',
+  ship_owned: 'Такой корабль уже в ангаре',
   too_early: 'Claim ещё не готов',
   daily_limit: 'Суточный лимит Claim исчерпан',
   expedition_not_found: 'Рейс не найден',
@@ -68,6 +72,7 @@ const REASONS = {
   repair_plate: 'Пластина в ремонт',
   module_buy: 'Покупка модуля',
   module_parts: 'Компоненты модуля',
+  ship_purchase: 'Покупка корабля',
   migration: 'Перенос истории',
 };
 const ASSETS = { astra: 'ASTRA', fuel: 'Топливо', points: 'Очки' };
@@ -499,51 +504,75 @@ function renderFleet() {
       `Ремонт за ${s.repair.cost} ASTRA${s.repair.plate ? ' + пластина' : ''}`) : null,
     s.repair.blocked === 'needs_plate' ? el('p', { class: 'error' }, 'Ниже 50% нужна сплавная пластина — скрафтите её в «Кошельке» (3 руды + 1 титан, 60 ASTRA).') : null,
     el('button', { type: 'button', class: 'ghost', onClick: () => setView('modules') },
-      el('img', { src: '/icons/nav/modules.svg', alt: '', width: '18', height: '18', class: 'icon-sm' }), 'Модули'),
+      el('img', { src: '/icons/nav/modules.png', alt: '', width: '18', height: '18', class: 'icon-sm' }), 'Модули'),
     s.durability <= 70 && s.durability >= 50 ? el('p', { class: 'muted' }, 'Почините до следующего рейса, иначе можно просесть ниже 50%.') : null,
   ));
-  const locked = state.catalog.filter((c) => !c.owned).map((c) => el('div', { class: 'block locked' },
-    el('img', { src: `/sprites/ships/${c.type}.png`, alt: '', width: '96', class: 'sprite-thumb' }),
-    el('h3', {},
-      el('img', { src: '/icons/ui/lock.png', alt: '', width: '14', height: '14', class: 'icon-xs', loading: 'lazy' }),
-      ` ${c.name}`),
-    el('p', { class: 'muted' }, `Уровень ${c.unlockLevel}. ${c.price == null ? 'Чертёж, не продаётся' : `${c.price} ASTRA — покупка на этапе 2`}`),
-  ));
+  // Покупка корабля: цена в ASTRA, уровень ворот, один корпус каждого типа.
+  const shop = state.catalog.filter((c) => !c.owned).map((c) => {
+    const tooLow = state.level < c.unlockLevel;
+    const noMoney = c.price != null && state.balances.astra < c.price;
+    const label = c.price == null ? 'Чертёж: крафт позже'
+      : tooLow ? `Нужен уровень ${c.unlockLevel}`
+        : noMoney ? `Не хватает ${astraNum(c.price - state.balances.astra)} ASTRA`
+          : `Купить за ${astraNum(c.price)} ASTRA`;
+    return el('div', { class: `block${tooLow || c.price == null ? ' locked' : ''}` },
+      el('img', { src: `/sprites/ships/${c.type}.png`, alt: '', width: '96', class: 'sprite-thumb' }),
+      el('h3', {},
+        tooLow ? el('img', { src: '/icons/ui/lock.png', alt: '', width: '14', height: '14', class: 'icon-xs', loading: 'lazy' }) : null,
+        ` ${c.name}`),
+      el('p', { class: 'muted' },
+        `Груз ${c.cargo} · бак ${c.tank} · добыча ×${c.mining} · уровень ${c.unlockLevel}`),
+      el('button', {
+        type: 'button',
+        disabled: state.frozen || tooLow || c.price == null || noMoney ? '' : null,
+        onClick: () => doBuyShip(c.type),
+      }, label),
+    );
+  });
   return el('div', { class: 'screen' },
     el('div', { class: 'screen-title' }, el('h2', {}, 'Флот'), el('span', { class: 'badge' }, `${state.ships.length} в строю`)),
     ...owned,
-    el('div', { class: 'screen-title' }, el('h2', {}, 'Закрыто'), el('span', { class: 'badge' }, 'этап 2')),
-    ...locked,
+    el('div', { class: 'screen-title' }, el('h2', {}, 'Верфь'), el('span', { class: 'badge' }, `${astraNum(state.balances.astra)} ASTRA`)),
+    el('p', { class: 'muted' }, 'Один корпус каждого типа. Новый корабль расширяет бак флота и открывает дальние сектора.'),
+    ...shop,
     note ? el('p', { class: 'ok' }, note) : null,
   );
 }
 
-// Крафт: три рецепта, один слот. Пока идёт задача, кнопки заблокированы —
-// очередь на сервере тоже одна, интерфейс это отражает.
-function renderCraft() {
+// Крафт — отдельный раздел. Три рецепта, один слот: пока идёт задача, кнопки
+// заблокированы, потому что очередь на сервере тоже одна.
+function renderCraftScreen() {
   const c = state.craft;
-  if (!c) return null;
+  if (!c) return el('div', { class: 'screen' }, el('p', { class: 'muted' }, 'Сервер ещё не отдаёт крафт.'));
   const busy = c.slots - c.running.length <= 0;
   const have = (id) => (state.resources.find((r) => r.id === id)?.amount ?? 0);
   const rows = c.recipes.map((r) => {
     const enough = r.inputs.every((i) => have(i.resource) >= i.amount) && state.balances.astra >= r.fee;
-    return el('div', { class: 'block' },
-      el('h3', {}, r.name),
-      el('p', { class: 'muted' }, `${r.inputs.map((i) => `${RESOURCES[i.resource] || i.resource} ${have(i.resource)}/${i.amount}`).join(' · ')}`),
-      el('p', { class: 'muted' }, `Плата ${r.fee} ASTRA · ${fmtDur(r.ms)}`),
-      el('button', {
-        type: 'button',
-        disabled: state.frozen || busy || !enough ? '' : null,
-        onClick: () => doCraft(r.id),
-      }, busy ? 'Очередь занята' : enough ? 'Скрафтить' : 'Не хватает'),
+    return el('div', { class: 'block craft-card' },
+      el('img', { src: `/icons/resources/${r.id}.png`, alt: '', width: '56', height: '56', class: 'craft-art', loading: 'lazy' }),
+      el('div', { class: 'craft-info' },
+        el('h3', {}, r.name),
+        el('p', { class: 'muted' }, r.inputs.map((i) => `${RESOURCES[i.resource] || i.resource} ${have(i.resource)}/${i.amount}`).join(' · ')),
+        el('p', { class: 'muted' }, `Плата ${r.fee} ASTRA · ${fmtDur(r.ms)}`),
+        el('button', {
+          type: 'button',
+          disabled: state.frozen || busy || !enough ? '' : null,
+          onClick: () => doCraft(r.id),
+        }, busy ? 'Очередь занята' : enough ? 'Скрафтить' : 'Не хватает'),
+      ),
     );
   });
-  return el('div', { class: 'block' },
-    el('h3', {}, 'Крафт'),
-    c.running.length
-      ? el('p', { class: 'ok', 'data-prefix': 'Готовится: ', 'data-until': c.running[0].endsAt }, c.running[0].name)
-      : el('p', { class: 'muted' }, `Слотов ${c.slots}. Готовый компонент начислится сам.`),
+  return el('div', { class: 'screen' },
+    el('div', { class: 'screen-title' }, el('h2', {}, 'Крафт'), el('span', { class: 'badge' }, `слотов ${c.slots}` )),
+    el('p', { class: 'muted' }, 'Ресурсы и плата в ASTRA списываются сразу, компонент приходит по таймеру. Компоненты нужны модулям и крупному ремонту.'),
+    el('div', { class: 'block' },
+      el('h3', {}, 'Очередь'),
+      c.running.length
+        ? el('p', { class: 'ok', 'data-prefix': 'Готовится: ', 'data-until': c.running[0].endsAt }, c.running[0].name)
+        : el('p', { class: 'muted' }, 'Пусто. Готовый компонент начислится сам, даже если экран закрыт.'),
+    ),
     ...rows,
+    note ? el('p', { class: note.startsWith('Ошибка') ? 'error' : 'ok' }, note) : null,
   );
 }
 
@@ -567,7 +596,7 @@ function moduleCard(ship, entry) {
     ? next.parts.map((p) => `${RESOURCES[p.resource] || p.resource} ${have(p.resource)}/${p.amount}`).join(' · ')
     : '';
   return el('div', { class: `block module-card${level ? ' installed' : ''}${blocked && !next ? ' locked' : ''}` },
-    el('img', { src: `/sprites/modules/${entry.id}.svg`, alt: '', width: '44', height: '44', class: 'module-art', loading: 'lazy' }),
+    el('img', { src: `/sprites/modules/${entry.id}.png`, alt: '', width: '52', height: '52', class: 'module-art', loading: 'lazy' }),
     el('div', { class: 'module-info' },
       el('h3', {}, entry.name, level ? el('span', { class: 'badge' }, `L${level}`) : null),
       el('p', { class: 'muted' }, owned ? owned.effectText : 'Не установлен'),
@@ -623,7 +652,12 @@ function renderWallet() {
         onClick: doBuyFuel,
       }, 'Купить 1'),
     ),
-    renderCraft(),
+    el('div', { class: 'block' },
+      el('h3', {}, 'Крафт'),
+      el('p', { class: 'muted' }, 'Энергоячейка, схема и сплавная пластина — в отдельном разделе.'),
+      el('button', { type: 'button', class: 'ghost', onClick: () => setView('craft') },
+        el('img', { src: '/icons/nav/craft.png', alt: '', width: '18', height: '18', class: 'icon-sm' }), 'Открыть крафт'),
+    ),
     state.resources.length ? el('div', { class: 'block' }, el('h3', {}, 'Трюм'), el('ul', { class: 'plain' },
       ...state.resources.map((r) => el('li', {},
       el('span', { class: 'res-name' },
@@ -661,9 +695,10 @@ function render() {
   panel.replaceChildren();
   const body = view === 'flight' ? renderFlight()
     : view === 'fleet' ? renderFleet()
-      : view === 'modules' ? renderModules()
-        : view === 'wallet' ? renderWallet()
-          : view === 'ledger' ? renderLedger() : renderBridge();
+      : view === 'craft' ? renderCraftScreen()
+        : view === 'modules' ? renderModules()
+          : view === 'wallet' ? renderWallet()
+            : view === 'ledger' ? renderLedger() : renderBridge();
   panel.append(body);
   for (const btn of document.querySelectorAll('[data-view]')) btn.classList.toggle('active', btn.dataset.view === view);
 }
@@ -730,6 +765,7 @@ function doRepair(id) { return act(`repair:${id}`, '/ships/repair', { shipId: id
 function doBuyFuel() { return act(`fuel:${state?.fuel.boughtToday}`, '/fuel/buy', {}); }
 function doCraft(recipe) { return act(`craft:${recipe}`, '/craft/start', { recipe }); }
 function doInstall(shipId, module) { return act(`module:${shipId}:${module}`, '/modules/install', { shipId, module }); }
+function doBuyShip(type) { return act(`buy-ship:${type}`, '/ships/buy', { type }); }
 
 function setView(v) {
   view = v;

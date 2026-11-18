@@ -109,3 +109,17 @@ curl -s -X POST https://<worker>/claim \
 Состояние модулей приходит в `/me` в блоке `modules`: `maxLevel`, `catalog`
 (все уровни с ценой и компонентами) и `ships` — по каждому кораблю `slots`,
 `used`, установленные модули с текущим и следующим уровнем и множители `fx`.
+
+## POST /ships/buy
+
+Покупка корабля. Требует `Idempotency-Key`, тело `{ "type": "hauler" | "miner" | "explorer" | "cruiser" }`.
+
+- цена из `SHIPS` спецификации (1 500 / 2 000 / 6 000 / 20 000), Flagship за ASTRA
+  не продаётся — чертёж и крафт отдельно;
+- один корпус каждого типа; уровень игрока не ниже `unlockLevel`;
+- списание ASTRA (`ship_purchase`) и выдача корабля (`ship_delivery`) — одна
+  транзакция, журнал сходится.
+
+Ответ: `{ "ship": { "id", "type", "name" }, "price", "astra" }`.
+Ошибки: `bad_ship_type`, `ship_not_for_sale` (400), `ship_locked` (403),
+`ship_owned`, `insufficient_funds` (409).
