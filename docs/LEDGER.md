@@ -88,6 +88,7 @@ cat snapshot.json | npm run check-ledger -- --file -
 | `res:<имя>` — `res:iron_ore`, `res:silicon`, … | `resources` | этап 2, срез 1 |
 | `xp` — опыт игрока | `players.xp` | этап 2, срез 2 |
 | `dur:<shipId>` — прочность корабля | `ships.durability` | этап 2, срез 2 |
+| `res:energy_cell`, `res:circuit`, `res:alloy_plate` — компоненты крафта | `resources` | этап 2, срез 3 |
 
 Ресурсы, опыт и прочность до этапа 2 менялись голым `UPDATE` и **в журнал не
 попадали**. Теперь у каждого свой вид актива, а сверка проверяет их наравне с

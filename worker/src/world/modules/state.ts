@@ -5,7 +5,8 @@ import {
 } from '../../shared/gameData';
 import { fuelCost, repairCost, rewardRange, xpThreshold } from './expeditionMath';
 import { listExpeditions } from './expeditions';
-import { dailyOf, fuelCap, isFrozen, verifyStatus } from './maintenance';
+import { craftCatalog, listCraftJobs, CRAFT_SLOTS } from './crafting';
+import { dailyOf, fuelCap, getResource, isFrozen, verifyStatus } from './maintenance';
 import { playerPayload } from '../scheduler';
 import { getPlayerState } from './players';
 
@@ -20,10 +21,17 @@ export function buildState(sql: SqlStorage, playerId: string, now: number) {
     const def = SHIPS[type];
     const durability = Number(raw.durability);
     const status = String(raw.status);
-    let repair: { blocked: 'ok' | 'busy' | 'full' | 'needs_plate'; cost: number | null } = { blocked: 'full', cost: null };
-    if (status !== 'idle') repair = { blocked: 'busy', cost: null };
-    else if (durability < 50) repair = { blocked: 'needs_plate', cost: null };
-    else if (durability < 100) repair = { blocked: 'ok', cost: repairCost(100 - durability, def.repairCoef) };
+    // Ниже 50 % ремонт требует alloy_plate. С этапа 2 пластину можно скрафтить,
+    // поэтому это уже не запрет, а цена: показываем её, если пластина есть.
+    const needsPlate = durability < 50;
+    const hasPlate = getResource(sql, playerId, 'alloy_plate') >= 1;
+    let repair: { blocked: 'ok' | 'busy' | 'full' | 'needs_plate'; cost: number | null; plate: boolean } = { blocked: 'full', cost: null, plate: false };
+    if (status !== 'idle') repair = { blocked: 'busy', cost: null, plate: needsPlate };
+    else if (needsPlate) {
+      repair = hasPlate
+        ? { blocked: 'ok', cost: repairCost(100 - durability, def.repairCoef), plate: true }
+        : { blocked: 'needs_plate', cost: null, plate: true };
+    } else if (durability < 100) repair = { blocked: 'ok', cost: repairCost(100 - durability, def.repairCoef), plate: false };
     return { id: String(raw.id), type, name: def.name, durability, status, repair };
   });
   const activeShip = ships[0];
@@ -66,6 +74,8 @@ export function buildState(sql: SqlStorage, playerId: string, now: number) {
     expeditions: listExpeditions(sql, playerId),
     frozen: isFrozen(sql),
     verify: verifyStatus(sql, now),
+    // Крафт: каталог рецептов и запущенные задачи. Очередь — один слот.
+    craft: { slots: CRAFT_SLOTS, running: listCraftJobs(sql, playerId), recipes: craftCatalog() },
     catalog: SHIP_ORDER.map((type) => {
       const def = SHIPS[type];
       return {

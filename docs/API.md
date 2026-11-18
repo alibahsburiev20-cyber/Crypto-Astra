@@ -82,3 +82,11 @@ curl -s -X POST https://<worker>/claim \
   -H "Idempotency-Key: $(uuidgen)" \
   -H 'Content-Type: application/json' -d '{}'
 ```
+
+## POST /craft/start
+
+Запуск крафта. Требует `Idempotency-Key`, тело `{ "recipe": "energy_cell" | "circuit" | "alloy_plate" }`.
+Списывает ресурсы и плату в ASTRA одной транзакцией и ставит задачу `craft_finish`;
+готовый компонент начисляется сам. Очередь — один слот, второй будет за Astra Pass.
+Ошибки: `bad_recipe` (400), `insufficient_resources` и `craft_queue_full` (409).
+Каталог рецептов и запущенные задачи приходят в `/me` в блоке `craft`.

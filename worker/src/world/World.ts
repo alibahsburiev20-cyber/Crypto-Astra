@@ -2,6 +2,7 @@ import { DurableObject } from 'cloudflare:workers';
 import type { Env } from '../env';
 import { runDueJobs } from './jobs';
 import { claim, type ClaimResult } from './modules/claim';
+import { startCraft } from './modules/crafting';
 import { cancelExpedition, chooseExpeditionEvent, startExpedition } from './modules/expeditions';
 import { createPlayer } from './modules/players';
 import { buildState, listLedger } from './modules/state';
@@ -46,6 +47,13 @@ export class World extends DurableObject<Env> {
     const state = this.ctx.storage.transactionSync(() => buildState(this.sql, playerId, now));
     await this.arm();
     return state;
+  }
+
+  async startCraft(playerId: string, idemKey: string, recipeId: string) {
+    const now = Date.now();
+    const result = this.ctx.storage.transactionSync(() => startCraft(this.sql, playerId, idemKey, recipeId, now));
+    await this.arm();
+    return result;
   }
 
   listLedger(playerId: string, limit: number) {

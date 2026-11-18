@@ -76,3 +76,10 @@ export async function repair(request: Request, env: Env, a: AuthContext): Promis
 export async function buyFuel(request: Request, env: Env, a: AuthContext): Promise<Response> {
   return json(await world(env, a).buyFuel(a.userId, idemKey(request)));
 }
+
+export async function craftStart(request: Request, env: Env, a: AuthContext): Promise<Response> {
+  const body = await readJson(request);
+  const recipe = typeof body.recipe === 'string' ? body.recipe : '';
+  if (!recipe) throw new ApiError(400, 'bad_recipe');
+  return json(await world(env, a).startCraft(a.userId, idemKey(request), recipe));
+}
