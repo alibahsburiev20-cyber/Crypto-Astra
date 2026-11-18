@@ -8,6 +8,7 @@ import {
 import { createSession, revokeSession, rotateSession } from '../auth/sessions';
 import { verifyTurnstile } from '../auth/turnstile';
 import { WORLD_CAPACITY } from '../shared/constants';
+import { adsConfig } from '../ads/config';
 import type { Env } from '../env';
 import { clearRefreshCookie, readRefreshCookie, refreshCookie } from '../http/cookies';
 import { json, readJson } from '../http/response';
@@ -44,7 +45,12 @@ async function checkTurnstile(env: Env, request: Request, body: Record<string, u
 export function config(env: Env): Response {
   const siteKey = turnstileEnabled(env) && env.TURNSTILE_SITE_KEY ? env.TURNSTILE_SITE_KEY.trim() : '';
   return json(
-    { turnstile_site_key: siteKey || null, login_turnstile_after: LOGIN_TURNSTILE_AFTER, server_time: Date.now() },
+    {
+      turnstile_site_key: siteKey || null,
+      login_turnstile_after: LOGIN_TURNSTILE_AFTER,
+      server_time: Date.now(),
+      ads: adsConfig(env),
+    },
     200,
     { 'Cache-Control': 'public, max-age=300' },
   );

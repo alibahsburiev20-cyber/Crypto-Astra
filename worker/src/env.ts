@@ -10,5 +10,10 @@ export interface Env {
   /** Публичный site key Turnstile. Пусто — виджет не показывается. */
   TURNSTILE_SITE_KEY?: string;
   TELEGRAM_BOT_TOKEN: string;
+  /** Реклама. По умолчанию выключена: без договора и сниппета слот не показывается. */
+  ADS_ENABLED?: string;
+  ADS_PROVIDER?: string;
+  ADS_UNIT_ID?: string;
+  ADS_SCRIPT_URL?: string;
   ADMIN_ACCESS_AUD: string;
 }
