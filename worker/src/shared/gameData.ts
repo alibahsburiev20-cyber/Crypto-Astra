@@ -192,3 +192,120 @@ export const RECIPE_ORDER: RecipeId[] = ['energy_cell', 'circuit', 'alloy_plate'
 export function isRecipeId(value: string): value is RecipeId {
   return (RECIPE_ORDER as string[]).includes(value);
 }
+
+// ── Модули корабля (этап 2, срез 4) ────────────────────────────────────────────
+// Модуль ставится на конкретный корабль и занимает слот (slots в ShipDef).
+// Уровень 1..5, цена уровня L = basePrice × 2^(L−1), компоненты × L.
+// Снять модуль нельзя: только поставить или улучшить. Это сознательно — иначе
+// слоты обходились бы перестановкой, а вложенная ASTRA возвращалась бы игроку.
+export type ModuleId = 'engine' | 'fuel_system' | 'scanner' | 'cargo_bay' | 'mining_drill' | 'shield' | 'repair_kit';
+export type ModuleEffect = 'duration' | 'tank' | 'scanner' | 'cargo' | 'mining' | 'wear' | 'repair';
+
+export const MODULE_MAX_LEVEL = 5;
+
+export interface ModuleDef {
+  id: ModuleId;
+  name: string;
+  /** Что меняет модуль. Один эффект на модуль, поэтому множители не складываются. */
+  effect: ModuleEffect;
+  /** Доля за уровень: 0.05 = 5 %. У топлива, износа, ремонта и длительности — снижение. */
+  perLevel: number;
+  /** Цена уровня 1. Уровень L стоит basePrice × 2^(L−1). */
+  basePrice: number;
+  /** Компоненты за уровень; на уровень L нужно amount × L. */
+  parts: { resource: string; amount: number }[];
+}
+
+export const MODULES: Record<ModuleId, ModuleDef> = {
+  engine: {
+    id: 'engine', name: 'Двигатель', effect: 'duration', perLevel: 0.03, basePrice: 1200,
+    parts: [{ resource: 'circuit', amount: 1 }],
+  },
+  // Топливо целое: −5 % от 1 единицы всё равно даёт 1, поэтому модуль не снижает
+  // расход, а расширяет бак — это видно сразу и работает на всех корпусах.
+  fuel_system: {
+    id: 'fuel_system', name: 'Топливная система', effect: 'tank', perLevel: 1, basePrice: 900,
+    parts: [{ resource: 'energy_cell', amount: 1 }, { resource: 'circuit', amount: 1 }],
+  },
+  scanner: {
+    id: 'scanner', name: 'Сканер', effect: 'scanner', perLevel: 0.15, basePrice: 1500,
+    parts: [{ resource: 'circuit', amount: 2 }, { resource: 'crystal', amount: 3 }],
+  },
+  cargo_bay: {
+    id: 'cargo_bay', name: 'Грузовой отсек', effect: 'cargo', perLevel: 0.1, basePrice: 2000,
+    parts: [{ resource: 'alloy_plate', amount: 2 }],
+  },
+  mining_drill: {
+    id: 'mining_drill', name: 'Бур', effect: 'mining', perLevel: 0.06, basePrice: 2500,
+    parts: [{ resource: 'alloy_plate', amount: 2 }, { resource: 'circuit', amount: 1 }],
+  },
+  shield: {
+    id: 'shield', name: 'Щит', effect: 'wear', perLevel: 0.08, basePrice: 3000,
+    parts: [{ resource: 'alloy_plate', amount: 3 }, { resource: 'energy_cell', amount: 1 }],
+  },
+  repair_kit: {
+    id: 'repair_kit', name: 'Ремкомплект', effect: 'repair', perLevel: 0.1, basePrice: 600,
+    parts: [{ resource: 'circuit', amount: 1 }, { resource: 'alloy_plate', amount: 1 }],
+  },
+};
+
+export const MODULE_ORDER: ModuleId[] = ['engine', 'fuel_system', 'scanner', 'cargo_bay', 'mining_drill', 'shield', 'repair_kit'];
+
+export function isModuleId(value: string): value is ModuleId {
+  return (MODULE_ORDER as string[]).includes(value);
+}
+
+/** Цена следующего уровня: base × 2^(L−1). */
+export function modulePrice(id: ModuleId, level: number): number {
+  return Math.round(MODULES[id].basePrice * Math.pow(2, level - 1));
+}
+
+/** Компоненты на уровень L: количество растёт линейно. */
+export function moduleParts(id: ModuleId, level: number): { resource: string; amount: number }[] {
+  return MODULES[id].parts.map((p) => ({ resource: p.resource, amount: p.amount * level }));
+}
+
+export interface ModuleFx {
+  duration: number;
+  cargo: number;
+  mining: number;
+  wear: number;
+  repair: number;
+  /** Прибавки, а не множители: к баку и к шансу редкой находки. */
+  tank: number;
+  scanner: number;
+}
+
+export const NEUTRAL_FX: ModuleFx = { duration: 1, cargo: 1, mining: 1, wear: 1, repair: 1, tank: 0, scanner: 0 };
+
+/** Множители от установленных модулей. Без модулей — ровно единицы. */
+export function moduleFx(installed: { module: ModuleId; level: number }[]): ModuleFx {
+  const fx: ModuleFx = { ...NEUTRAL_FX };
+  for (const m of installed) {
+    const def = MODULES[m.module];
+    if (!def || m.level <= 0) continue;
+    const level = Math.min(MODULE_MAX_LEVEL, Math.max(1, Math.round(m.level)));
+    const shift = def.perLevel * level;
+    if (def.effect === 'scanner') fx.scanner += shift;
+    else if (def.effect === 'tank') fx.tank += shift;
+    else if (def.effect === 'cargo' || def.effect === 'mining') fx[def.effect] *= 1 + shift;
+    else fx[def.effect] *= 1 - shift;
+  }
+  return fx;
+}
+
+/** Подпись эффекта для уровня: то, что видит игрок. */
+export function moduleEffectText(id: ModuleId, level: number): string {
+  const def = MODULES[id];
+  const pct = Math.round(def.perLevel * Math.min(MODULE_MAX_LEVEL, Math.max(0, level)) * 100);
+  switch (def.effect) {
+    case 'duration': return `−${pct} % длительности рейса`;
+    case 'tank': return `+${Math.round(def.perLevel * level)} к запасу топлива`;
+    case 'scanner': return `+${pct} % к шансу редкой находки`;
+    case 'cargo': return `+${pct} % грузоподъёмности`;
+    case 'mining': return `+${pct} % добычи`;
+    case 'wear': return `−${pct} % износа`;
+    case 'repair': return `−${pct} % стоимости ремонта`;
+    default: return '';
+  }
+}

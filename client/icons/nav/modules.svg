@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="Модули">
+  <rect x="7" y="7" width="18" height="18" rx="4" fill="none" stroke="#9EB6FF" stroke-width="2"/>
+  <rect x="12" y="12" width="8" height="8" rx="2" fill="#35D6E8"/>
+  <path d="M12 7 V3 M20 7 V3 M12 29 V25 M20 29 V25 M7 12 H3 M7 20 H3 M29 12 H25 M29 20 H25" stroke="#9EB6FF" stroke-width="2" stroke-linecap="round"/>
+</svg>

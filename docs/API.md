@@ -90,3 +90,22 @@ curl -s -X POST https://<worker>/claim \
 готовый компонент начисляется сам. Очередь — один слот, второй будет за Astra Pass.
 Ошибки: `bad_recipe` (400), `insufficient_resources` и `craft_queue_full` (409).
 Каталог рецептов и запущенные задачи приходят в `/me` в блоке `craft`.
+
+## POST /modules/install
+
+Постановка или улучшение модуля. Требует `Idempotency-Key`, тело
+`{ "shipId": "<id>", "module": "engine" | "fuel_system" | "scanner" | "cargo_bay" | "mining_drill" | "shield" | "repair_kit" }`.
+
+- уровень 1..5, цена уровня `L` = `basePrice × 2^(L−1)`, компоненты — `amount × L`;
+- ASTRA и компоненты списываются одной транзакцией (`module_buy`, `module_parts`);
+- корабль должен быть «на базе»: в полёте установка запрещена (`ship_busy`);
+- модуль занимает слот корпуса; снять его нельзя, только улучшить.
+
+Ответ: `{ "shipId", "module", "level", "price", "astra" }`.
+Ошибки: `bad_module` (400), `ship_not_found` (404), `ship_busy`,
+`insufficient_funds`, `insufficient_resources`, `module_slots_full`,
+`module_max_level` (409).
+
+Состояние модулей приходит в `/me` в блоке `modules`: `maxLevel`, `catalog`
+(все уровни с ценой и компонентами) и `ships` — по каждому кораблю `slots`,
+`used`, установленные модули с текущим и следующим уровнем и множители `fx`.

@@ -6,6 +6,7 @@ import { startCraft } from './modules/crafting';
 import { cancelExpedition, chooseExpeditionEvent, startExpedition } from './modules/expeditions';
 import { createPlayer } from './modules/players';
 import { buildState, listLedger } from './modules/state';
+import { installModule } from './modules/shipModules';
 import { buyFuel, repairShip } from './modules/upkeep';
 import { verifyLedger, type LedgerReport } from './ledger';
 import { backfillProgressLedger, backfillResourceLedger, migrateLegacyExpeditions } from './migrate';
@@ -52,6 +53,13 @@ export class World extends DurableObject<Env> {
   async startCraft(playerId: string, idemKey: string, recipeId: string) {
     const now = Date.now();
     const result = this.ctx.storage.transactionSync(() => startCraft(this.sql, playerId, idemKey, recipeId, now));
+    await this.arm();
+    return result;
+  }
+
+  async installModule(playerId: string, idemKey: string, body: { shipId: string; module: string }) {
+    const now = Date.now();
+    const result = this.ctx.storage.transactionSync(() => installModule(this.sql, playerId, idemKey, body, now));
     await this.arm();
     return result;
   }

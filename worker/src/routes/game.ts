@@ -83,3 +83,11 @@ export async function craftStart(request: Request, env: Env, a: AuthContext): Pr
   if (!recipe) throw new ApiError(400, 'bad_recipe');
   return json(await world(env, a).startCraft(a.userId, idemKey(request), recipe));
 }
+
+export async function moduleInstall(request: Request, env: Env, a: AuthContext): Promise<Response> {
+  const body = await readJson(request);
+  const shipId = typeof body.shipId === 'string' ? body.shipId : '';
+  const module = typeof body.module === 'string' ? body.module : '';
+  if (!shipId || !module) throw new ApiError(400, 'bad_module');
+  return json(await world(env, a).installModule(a.userId, idemKey(request), { shipId, module }));
+}

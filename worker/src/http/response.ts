@@ -33,6 +33,10 @@ const STATUS_BY_CODE: Record<string, number> = {
   bad_recipe: 400,
   craft_queue_full: 409,
   bad_delta: 409,
+  // Срез 4: модули. Те же правила — каждый код обязан быть в таблице.
+  bad_module: 400,
+  module_slots_full: 409,
+  module_max_level: 409,
 };
 
 export function json(data: unknown, status = 200, headers: Record<string, string> = {}): Response {
