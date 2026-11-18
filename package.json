@@ -16,7 +16,8 @@
     "typecheck:scripts": "tsc -p tsconfig.scripts.json",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "config:sync": "node scripts/sync-wrangler.mjs",
-    "build": "node scripts/embed-client.mjs"
+    "build": "node scripts/embed-client.mjs",
+    "ads-forecast": "tsx scripts/ads-forecast.ts"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261110.1",
