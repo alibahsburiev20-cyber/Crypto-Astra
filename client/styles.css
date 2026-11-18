@@ -1,9 +1,9 @@
 :root {
-  --bg: #070b18;
-  --bg-2: #0a1224;
-  --panel: #101a30;
-  --panel-2: #16233f;
-  --panel-3: #1d2c4d;
+  --bg: #050919;
+  --bg-2: #081128;
+  --panel: #0d1730;
+  --panel-2: #14203c;
+  --panel-3: #1b2b4e;
   --line: rgba(255, 255, 255, .08);
   --line-strong: rgba(255, 255, 255, .16);
   --text: #eef3ff;
@@ -11,16 +11,17 @@
   --accent: #35d6e8;
   --accent-2: #7c8cff;
   --violet: #9a6bff;
+  --green: #3ddc84;
   --amber: #ffb020;
   --error: #ff6b81;
   --ok: #4ade80;
-  --radius: 16px;
   --shadow: 0 18px 40px rgba(0, 0, 0, .45);
   color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
-
+/* display: grid у оболочки перебивает UA-правило [hidden], поэтому явно. */
+[hidden] { display: none !important; }
 html { background: var(--bg); }
 
 body {
@@ -29,57 +30,63 @@ body {
   color: var(--text);
   font: 15px/1.5 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   background:
-    radial-gradient(900px 520px at 12% -12%, rgba(53, 214, 232, .16), transparent 62%),
-    radial-gradient(820px 520px at 108% 4%, rgba(154, 107, 255, .18), transparent 58%),
-    radial-gradient(700px 480px at 50% 110%, rgba(124, 140, 255, .10), transparent 65%),
+    radial-gradient(1000px 620px at 8% -12%, rgba(53, 214, 232, .14), transparent 62%),
+    radial-gradient(900px 600px at 100% 0%, rgba(154, 107, 255, .16), transparent 58%),
+    radial-gradient(800px 500px at 50% 120%, rgba(124, 140, 255, .10), transparent 65%),
     var(--bg);
   background-attachment: fixed;
 }
 
-main { max-width: 620px; margin: 0 auto; padding: 20px 14px 104px; }
-
-/* Шапка */
-.brand { display: flex; align-items: center; gap: 12px; margin: 4px 0 18px; }
-.brand img { width: 44px; height: 44px; image-rendering: pixelated; filter: drop-shadow(0 4px 12px rgba(255, 176, 32, .35)); }
+/* ── Шапка сайта ─────────────────────────────── */
+.brandbar {
+  max-width: 1180px; margin: 0 auto; padding: 18px 22px 10px;
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+}
+.brand { display: flex; align-items: center; gap: 12px; }
+.brand img { width: 40px; height: 40px; image-rendering: pixelated; filter: drop-shadow(0 4px 12px rgba(255, 176, 32, .35)); }
 h1 {
-  margin: 0; font-size: 23px; letter-spacing: -.02em; font-weight: 800;
-  background: linear-gradient(92deg, #ffffff, #9fe9ff 45%, #b9a8ff);
+  margin: 0; font-size: 22px; letter-spacing: -.02em; font-weight: 800;
+  background: linear-gradient(92deg, #ffffff, #9fe9ff 45%, #c3b2ff);
   -webkit-background-clip: text; background-clip: text; color: transparent;
 }
-.tagline { margin: 1px 0 0; color: var(--muted); font-size: 12px; letter-spacing: .06em; text-transform: uppercase; }
-
-h2 { margin: 0 0 10px; font-size: 17px; letter-spacing: -.01em; }
-.muted { color: var(--muted); }
-.error { color: var(--error); min-height: 1.35em; margin: 8px 0 0; font-size: 14px; }
-.ok { color: var(--ok); font-size: 14px; }
-
-/* Панели */
-section {
-  background: linear-gradient(180deg, rgba(28, 42, 72, .92), rgba(13, 22, 41, .96));
-  border: 1px solid var(--line);
-  border-radius: 20px;
-  padding: 16px;
-  box-shadow: var(--shadow), inset 0 1px 0 rgba(255, 255, 255, .05);
+.tagline { margin: 1px 0 0; color: var(--muted); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; }
+.stage-pill {
+  font-size: 10px; letter-spacing: .09em; text-transform: uppercase; color: var(--accent);
+  border: 1px solid rgba(53, 214, 232, .32); background: rgba(53, 214, 232, .08);
+  padding: 6px 10px; border-radius: 999px; white-space: nowrap;
 }
 
-label { display: block; margin-bottom: 12px; color: var(--muted); font-size: 12px; letter-spacing: .06em; text-transform: uppercase; }
+/* ── Общие элементы ──────────────────────────── */
+h2 { margin: 0 0 10px; font-size: 17px; letter-spacing: -.01em; }
+.muted { color: var(--muted); }
+.error { color: var(--error); min-height: 1.35em; margin: 8px 0 0; font-size: 13px; }
+.ok { color: var(--ok); font-size: 13px; }
+
+.auth-card {
+  position: relative; max-width: 460px; margin: 26px auto 40px; padding: 20px;
+  background: linear-gradient(180deg, rgba(28, 42, 72, .95), rgba(11, 19, 37, .98));
+  border: 1px solid var(--line); border-radius: 20px;
+  box-shadow: var(--shadow), inset 0 1px 0 rgba(255, 255, 255, .05);
+}
+.auth-note { margin: 12px 0 0; color: var(--muted); font-size: 11px; }
+
+label { display: block; margin-bottom: 12px; color: var(--muted); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
 input, select {
   display: block; width: 100%; margin-top: 6px; padding: 12px 14px;
-  background: rgba(5, 10, 22, .7); color: var(--text);
+  background: rgba(4, 9, 20, .75); color: var(--text);
   border: 1px solid var(--line-strong); border-radius: 12px; font: inherit;
   letter-spacing: normal; text-transform: none;
 }
 input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-/* Кнопки */
 button {
-  padding: 12px 16px; border: 0; border-radius: 12px;
+  padding: 11px 16px; border: 0; border-radius: 12px;
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
   color: #041019; font: inherit; font-weight: 700; cursor: pointer;
-  box-shadow: 0 10px 24px rgba(53, 214, 232, .18);
+  box-shadow: 0 10px 24px rgba(53, 214, 232, .16);
   transition: transform .15s ease, box-shadow .15s ease, filter .15s ease;
 }
-button:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 14px 28px rgba(53, 214, 232, .26); }
+button:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 14px 28px rgba(53, 214, 232, .24); }
 button:active:not(:disabled) { transform: translateY(0); }
 button:disabled { opacity: .38; cursor: not-allowed; box-shadow: none; }
 button.link { background: none; color: var(--muted); font-weight: 500; box-shadow: none; padding: 6px 8px; }
@@ -88,62 +95,136 @@ button.ghost {
   border: 1px solid var(--line-strong); box-shadow: none;
 }
 button.ghost:hover:not(:disabled) { background: rgba(255, 255, 255, .08); }
+.cta {
+  background: linear-gradient(135deg, #3ddc84, #23b8a0); color: #04140c;
+  box-shadow: 0 12px 26px rgba(61, 220, 132, .22);
+}
+.cta:hover:not(:disabled) { box-shadow: 0 16px 32px rgba(61, 220, 132, .3); }
 
 .turnstile { display: flex; justify-content: center; margin: 0 0 14px; }
 
-/* Вкладки авторизации */
 .tabs, .choices, .stack { display: flex; gap: 8px; flex-wrap: wrap; }
 .tabs {
-  margin-bottom: 16px; padding: 4px; background: rgba(5, 10, 22, .55);
+  margin-bottom: 16px; padding: 4px; background: rgba(4, 9, 20, .55);
   border: 1px solid var(--line); border-radius: 14px;
 }
 .tab { flex: 1; background: transparent; color: var(--muted); box-shadow: none; padding: 9px 12px; }
 .tab.active { background: linear-gradient(135deg, rgba(53, 214, 232, .22), rgba(124, 140, 255, .22)); color: var(--text); box-shadow: inset 0 0 0 1px rgba(53, 214, 232, .35); }
 
-/* Строка статуса */
-.row { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 12px; }
-.row #world {
-  color: var(--muted); font-size: 12px; letter-spacing: .08em; text-transform: uppercase;
+/* ── Оболочка игры ───────────────────────────── */
+.game-shell {
+  max-width: 1180px; margin: 0 auto; padding: 6px 22px 46px;
+  display: grid; grid-template-columns: 232px minmax(0, 1fr); gap: 18px; align-items: start;
+  background: none; border: 0; box-shadow: none;
+}
+.content { min-width: 0; }
+
+.sidebar {
+  position: sticky; top: 16px;
+  background: linear-gradient(180deg, rgba(17, 27, 52, .95), rgba(8, 14, 30, .98));
+  border: 1px solid var(--line); border-radius: 18px; padding: 12px;
+  box-shadow: var(--shadow), inset 0 1px 0 rgba(255, 255, 255, .04);
+}
+.side-head { display: flex; align-items: center; gap: 10px; padding: 6px 8px 12px; border-bottom: 1px solid var(--line); margin-bottom: 8px; }
+.avatar { width: 38px; height: 38px; border-radius: 10px; border: 1px solid var(--line-strong); image-rendering: pixelated; background: #081128; }
+.cmd-label { display: block; font-size: 9px; letter-spacing: .12em; color: var(--muted); text-transform: uppercase; }
+.side-head strong, .commander-mobile strong { font-size: 13px; }
+
+.side-nav { display: flex; flex-direction: column; gap: 3px; }
+.side-item {
+  display: flex; align-items: center; gap: 10px; text-align: left;
+  padding: 9px 10px; border-radius: 10px; background: transparent;
+  color: var(--muted); font-weight: 600; font-size: 13px; box-shadow: none;
+}
+.side-item img { width: 20px; height: 20px; image-rendering: pixelated; opacity: .9; }
+.side-item:hover:not(:disabled) { background: rgba(255, 255, 255, .05); color: var(--text); transform: none; box-shadow: none; }
+.side-item.active {
+  color: var(--text);
+  background: linear-gradient(135deg, rgba(53, 214, 232, .18), rgba(124, 140, 255, .14));
+  box-shadow: inset 0 0 0 1px rgba(53, 214, 232, .32);
+}
+.side-item.locked { opacity: .45; font-weight: 500; }
+.side-sep { margin: 12px 10px 4px; font-size: 9px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.side-foot { margin: 14px 4px 2px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 10px; line-height: 1.4; color: var(--muted); }
+
+/* Верхняя панель */
+.topbar {
+  display: flex; align-items: center; gap: 12px; justify-content: space-between; flex-wrap: wrap;
+  padding: 10px 14px; margin-bottom: 14px;
+  background: linear-gradient(180deg, rgba(23, 36, 66, .92), rgba(9, 16, 32, .96));
+  border: 1px solid var(--line); border-radius: 16px; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .04);
+}
+.commander-mobile { display: none; align-items: center; gap: 10px; }
+.stats { display: flex; gap: 8px; flex-wrap: wrap; }
+.stat {
+  display: inline-flex; align-items: center; gap: 6px; padding: 6px 11px;
+  border: 1px solid var(--line); border-radius: 999px; background: rgba(255, 255, 255, .03);
+  font-size: 13px;
+}
+.stat img { width: 16px; height: 16px; image-rendering: pixelated; }
+.stat b { font-weight: 800; font-variant-numeric: tabular-nums; }
+.stat em { font-style: normal; color: var(--muted); font-size: 10px; letter-spacing: .04em; }
+.top-actions { display: flex; align-items: center; gap: 8px; }
+.world-pill {
+  color: var(--muted); font-size: 10px; letter-spacing: .08em; text-transform: uppercase;
   padding: 6px 10px; border-radius: 999px; border: 1px solid var(--line); background: rgba(255, 255, 255, .03);
+  white-space: nowrap;
 }
 
-/* Балансы */
-.cards { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 16px; }
-.card, .block {
-  background: linear-gradient(160deg, var(--panel-2), var(--panel));
-  border: 1px solid var(--line); border-radius: 14px; padding: 12px;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .04);
-}
-.card { display: flex; flex-direction: column; gap: 4px; }
-.label { color: var(--muted); font-size: 11px; letter-spacing: .09em; text-transform: uppercase; }
-.value { font-size: 23px; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
-.block { margin: 10px 0; }
-.block h3 { margin: 0 0 6px; font-size: 15px; }
-.locked { opacity: .55; }
+/* ── Панель контента ─────────────────────────── */
+#panel { display: block; }
+.screen { display: grid; gap: 14px; }
 
-/* Корабль */
-.ship-viewer {
-  position: relative; display: grid; place-items: center; height: 164px; margin: -4px 0 10px;
+.hero {
+  display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 14px; align-items: center;
+  padding: 16px;
   background:
-    radial-gradient(circle at 50% 55%, rgba(53, 214, 232, .18), transparent 62%),
-    radial-gradient(circle at 50% 50%, rgba(20, 32, 58, .9), transparent 72%);
+    radial-gradient(600px 220px at 18% 20%, rgba(53, 214, 232, .18), transparent 60%),
+    linear-gradient(150deg, rgba(27, 43, 78, .95), rgba(10, 18, 36, .98));
+  border: 1px solid var(--line); border-radius: 20px; box-shadow: var(--shadow), inset 0 1px 0 rgba(255, 255, 255, .05);
+}
+.hero-copy h2 { font-size: 21px; }
+.hero-copy p { margin: 0 0 12px; font-size: 13px; }
+.hero .cta { width: 100%; }
+
+.ship-viewer {
+  position: relative; display: grid; place-items: center; height: 168px;
+  background: radial-gradient(circle at 50% 55%, rgba(53, 214, 232, .16), transparent 68%);
   border-radius: 18px;
 }
 .ship-viewer img {
-  width: 260px; height: 150px; object-fit: contain; image-rendering: pixelated;
-  filter: drop-shadow(0 12px 20px rgba(0, 0, 0, .45));
+  width: 280px; height: 160px; object-fit: contain; image-rendering: pixelated;
+  filter: drop-shadow(0 14px 22px rgba(0, 0, 0, .5));
   animation: hover 3.4s ease-in-out infinite;
 }
-@keyframes hover {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-8px); }
-}
+@keyframes hover { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
 @media (prefers-reduced-motion: reduce) {
   .ship-viewer img { animation: none; }
   button, .planet-card { transition: none; }
 }
 
-/* Иконки */
+.panel-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+
+.block {
+  background: linear-gradient(160deg, var(--panel-2), var(--panel));
+  border: 1px solid var(--line); border-radius: 16px; padding: 14px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .04);
+}
+.block h3 { margin: 0 0 6px; font-size: 14px; }
+.block p { margin: 0 0 8px; font-size: 12px; }
+.block .btn-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+
+.cards { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 4px; }
+.card {
+  display: flex; flex-direction: column; gap: 4px; padding: 12px;
+  background: linear-gradient(160deg, var(--panel-2), var(--panel));
+  border: 1px solid var(--line); border-radius: 14px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .04);
+}
+.label { color: var(--muted); font-size: 10px; letter-spacing: .09em; text-transform: uppercase; }
+.value { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+.locked { opacity: .55; }
+
 .icon { width: 20px; height: 20px; object-fit: contain; image-rendering: pixelated; vertical-align: -4px; }
 .icon-sm { width: 18px; height: 18px; object-fit: contain; image-rendering: pixelated; vertical-align: -4px; margin-right: 6px; }
 .icon-xs { width: 14px; height: 14px; object-fit: contain; image-rendering: pixelated; }
@@ -152,12 +233,8 @@ button.ghost:hover:not(:disabled) { background: rgba(255, 255, 255, .08); }
 button .icon-sm { margin-right: 8px; }
 .sprite-thumb { height: auto; image-rendering: pixelated; }
 
-/* Сетка планет */
-.planet-grid {
-  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 6px 0 14px;
-}
-@media (min-width: 520px) { .planet-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-
+/* ── Сетка планет ────────────────────────────── */
+.planet-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .planet-card {
   display: flex; flex-direction: column; align-items: center; gap: 4px;
   padding: 10px 8px; text-align: center;
@@ -168,7 +245,7 @@ button .icon-sm { margin-right: 8px; }
 .planet-card:hover:not(:disabled) { border-color: rgba(53, 214, 232, .45); box-shadow: 0 12px 26px rgba(0, 0, 0, .35); }
 .planet-card.selected {
   border-color: rgba(53, 214, 232, .8);
-  box-shadow: 0 0 0 1px rgba(53, 214, 232, .5), 0 14px 30px rgba(53, 214, 232, .18);
+  box-shadow: 0 0 0 1px rgba(53, 214, 232, .5), 0 14px 30px rgba(53, 214, 232, .16);
   background: linear-gradient(170deg, rgba(36, 60, 96, .95), rgba(13, 24, 44, .98));
 }
 .planet-card.locked { opacity: .5; filter: grayscale(.65); }
@@ -180,14 +257,13 @@ button .icon-sm { margin-right: 8px; }
 .planet-art img { width: 84px; height: 84px; object-fit: contain; image-rendering: pixelated; filter: drop-shadow(0 6px 14px rgba(0, 0, 0, .5)); }
 .planet-art.big { width: 104px; height: 104px; max-height: 104px; flex: 0 0 auto; }
 .planet-art.big img { width: 96px; height: 96px; }
-.planet-name { font-size: 13px; letter-spacing: .01em; }
+.planet-name { font-size: 13px; }
 .planet-meta { display: inline-flex; align-items: center; gap: 3px; font-size: 10px; font-weight: 500; color: var(--muted); line-height: 1.25; }
 .lock-meta { display: inline-flex; align-items: center; gap: 3px; }
 .planet-res { display: inline-flex; gap: 4px; margin-top: 2px; }
 
-/* Карточка выбранной планеты */
 .planet-detail {
-  display: flex; gap: 12px; align-items: center; margin: 0 0 14px; padding: 12px;
+  display: flex; gap: 12px; align-items: center; padding: 12px;
   background: linear-gradient(160deg, rgba(29, 44, 77, .9), rgba(10, 18, 34, .95));
   border: 1px solid var(--line); border-radius: 16px;
 }
@@ -195,45 +271,64 @@ button .icon-sm { margin-right: 8px; }
 .planet-detail p { margin: 0; font-size: 12px; }
 .planet-detail .res-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
 .planet-detail .res-list span { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); }
+.planet-detail-info { min-width: 0; }
 
-.screen-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.screen-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 2px; }
+.screen-title h2 { margin: 0; }
 .badge {
   font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--accent);
   padding: 4px 8px; border-radius: 999px; border: 1px solid rgba(53, 214, 232, .35);
-  background: rgba(53, 214, 232, .08);
+  background: rgba(53, 214, 232, .08); white-space: nowrap;
 }
 
-/* Нижняя навигация */
-.dock {
-  position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
-  display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px;
-  padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
-  background: rgba(7, 12, 26, .88);
-  border-top: 1px solid var(--line);
-  backdrop-filter: blur(14px);
-}
-.dock button {
-  padding: 9px 2px; font-size: 11px; font-weight: 700; letter-spacing: .02em;
-  background: transparent; color: var(--muted); box-shadow: none; border-radius: 10px;
-}
-.dock button.active {
-  color: #041019;
-  background: linear-gradient(135deg, var(--accent), var(--accent-2));
-  box-shadow: 0 8px 18px rgba(53, 214, 232, .22);
-}
+.kinds { margin: 0; }
+.kinds button { flex: 1; min-width: 100px; }
+.cta { width: 100%; margin-top: 4px; padding: 13px 16px; font-size: 15px; }
+.cta-ghost { background: rgba(255, 255, 255, .06); color: var(--text); border: 1px solid var(--line-strong); box-shadow: none; }
 
-footer { max-width: 620px; margin: 0 auto; padding: 0 16px 26px; color: var(--muted); font-size: 11px; text-align: center; }
+/* ── Нижний док (мобильный) ──────────────────── */
+.dock { display: none; }
+
+/* ── Мелочи ──────────────────────────────────── */
 ul.plain { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 ul.plain li { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+.toast {
+  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+  background: rgba(16, 26, 48, .96); border: 1px solid var(--line-strong);
+  color: var(--text); padding: 10px 16px; border-radius: 12px; font-size: 13px;
+  box-shadow: var(--shadow); z-index: 50;
+}
+footer { max-width: 1180px; margin: 0 auto; padding: 0 22px 26px; color: var(--muted); font-size: 11px; text-align: center; }
 
-@media (max-width: 380px) {
-  h1 { font-size: 20px; }
-  .ship-viewer img { width: 220px; height: 128px; }
-  .value { font-size: 20px; }
+/* ── Адаптив ─────────────────────────────────── */
+@media (max-width: 900px) {
+  .brandbar { padding: 14px 14px 6px; }
+  .stage-pill { display: none; }
+  .game-shell { grid-template-columns: 1fr; padding: 4px 12px 96px; }
+  .sidebar { display: none; }
+  .topbar { gap: 8px; padding: 10px; }
+  .commander-mobile { display: flex; }
+  .top-actions { margin-left: auto; }
+  .stat em { display: none; }
+  .hero { grid-template-columns: 1fr; padding: 12px; }
+  .ship-viewer { order: -1; height: 140px; }
+  .ship-viewer img { width: 230px; height: 132px; }
+  .panel-grid { grid-template-columns: 1fr; }
+  .planet-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dock {
+    display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px;
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
+    padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
+    background: rgba(6, 11, 24, .9); border-top: 1px solid var(--line); backdrop-filter: blur(14px);
+  }
+  .dock button { padding: 9px 2px; font-size: 11px; font-weight: 700; background: transparent; color: var(--muted); box-shadow: none; border-radius: 10px; }
+  .dock button.active { color: #04140c; background: linear-gradient(135deg, var(--green), #23b8a0); box-shadow: 0 8px 18px rgba(61, 220, 132, .2); }
+  footer { padding-bottom: 16px; }
 }
 
-/* Кнопки выбора типа рейса и главное действие */
-.kinds { margin-bottom: 10px; }
-.kinds button { flex: 1; min-width: 92px; }
-.cta { width: 100%; margin-top: 10px; padding: 14px 16px; font-size: 16px; }
-.planet-detail-info { min-width: 0; }
+@media (max-width: 380px) {
+  h1 { font-size: 19px; }
+  .stats { gap: 6px; }
+  .stat { padding: 5px 8px; font-size: 12px; }
+  .value { font-size: 20px; }
+}
