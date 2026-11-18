@@ -2,6 +2,7 @@ import { CLAIM_INTERVAL_MS, START_ASTRA, START_FUEL, WORLD_CAPACITY } from '../.
 import { applyDelta, getBalance } from '../balances';
 import { ApiError } from '../errors';
 import { ensureMaintenance } from './maintenance';
+import { applyDurability } from './progress';
 
 export function playerExists(sql: SqlStorage, playerId: string): boolean {
   return sql.exec('SELECT 1 FROM players WHERE id = ?', playerId).toArray().length > 0;
@@ -16,7 +17,11 @@ export function createPlayer(sql: SqlStorage, playerId: string, now: number): { 
 
   sql.exec('INSERT INTO players (id, level, xp, created_at) VALUES (?, 1, 0, ?)', playerId, now);
   sql.exec(`INSERT INTO balances (player_id, asset, amount, version) VALUES (?, 'points', 0, 0)`, playerId);
-  sql.exec(`INSERT INTO ships (id, player_id, type, durability, status) VALUES (?, ?, 'scout', 100, 'idle')`, crypto.randomUUID(), playerId);
+  const shipId = crypto.randomUUID();
+  // Корабль создаётся с нулевой прочностью, а 100 начисляются через журнал:
+  // иначе запись была бы нулевой и сверка увидела бы 0 против 100.
+  sql.exec(`INSERT INTO ships (id, player_id, type, durability, status) VALUES (?, ?, 'scout', 0, 'idle')`, shipId, playerId);
+  applyDurability(sql, { playerId, shipId, delta: 100, reason: 'ship_delivery', sourceRef: 'start' }, now);
   applyDelta(sql, { playerId, asset: 'astra', delta: START_ASTRA, reason: 'start_bonus', sourceRef: 'start' }, now);
   applyDelta(sql, { playerId, asset: 'fuel', delta: START_FUEL, reason: 'start_bonus', sourceRef: 'start' }, now);
   ensureMaintenance(sql, now);

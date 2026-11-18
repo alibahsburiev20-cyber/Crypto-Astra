@@ -21,7 +21,8 @@ describe('limit в запросах', () => {
     const { sql, tx } = makeWorld();
     tx(() => createPlayer(sql, 'p1', T0));
     const rows = listLedger(sql, 'p1', Number.NaN);
-    expect(rows.length).toBe(2);
-    expect(rows[0].asset).toBe('fuel');
+    // ASTRA, топливо и стартовая прочность корабля
+    expect(rows.length).toBe(3);
+    expect(rows.map((r) => r.asset)).toContain('fuel');
   });
 });

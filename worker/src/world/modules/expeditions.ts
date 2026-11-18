@@ -12,6 +12,7 @@ import {
   type Reward,
 } from './expeditionMath';
 import { addResource, assertPlayable, bumpDaily, dailyOf, fuelCap } from './maintenance';
+import { applyDurability, applyXp } from './progress';
 
 interface ShipRow { id: string; type: ShipType; durability: number; status: string }
 
@@ -290,11 +291,10 @@ export function finishExpedition(sql: SqlStorage, expeditionId: string, now: num
   if (reward.astra > 0) applyDelta(sql, { playerId, asset: 'astra', delta: reward.astra, reason: 'expedition_reward', sourceRef: expeditionId }, now);
   if (reward.points > 0) applyDelta(sql, { playerId, asset: 'points', delta: reward.points, reason: 'expedition_reward', sourceRef: expeditionId }, now);
   for (const stack of reward.resources) addResource(sql, playerId, stack.resource, stack.amount, now, expeditionId);
-  const nextDur = Math.max(0, ship.durability - reward.wear);
-  sql.exec(`UPDATE ships SET durability = ?, status = 'idle' WHERE id = ?`, nextDur, ship.id);
-  const xpRow = sql.exec('SELECT xp FROM players WHERE id = ?', playerId).toArray()[0];
-  const xp = Number(xpRow.xp) + reward.xp;
-  sql.exec('UPDATE players SET xp = ?, level = ? WHERE id = ?', xp, levelFromXp(xp), playerId);
+  // Износ и опыт пишутся в журнал теми же операциями, что меняют значения.
+  applyDurability(sql, { playerId, shipId: ship.id, delta: -reward.wear, reason: 'expedition_wear', sourceRef: expeditionId }, now);
+  sql.exec(`UPDATE ships SET status = 'idle' WHERE id = ?`, ship.id);
+  if (reward.xp > 0) applyXp(sql, { playerId, delta: reward.xp, reason: 'expedition_reward', sourceRef: expeditionId }, now, levelFromXp);
   bumpDaily(sql, playerId, day, 'expeditions', 1);
   if (reward.points > 0) bumpDaily(sql, playerId, day, 'points_gained', reward.points);
   sql.exec(`UPDATE expeditions SET status = 'completed', reward_json = ? WHERE id = ?`, JSON.stringify(reward), expeditionId);

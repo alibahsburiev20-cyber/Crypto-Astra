@@ -2,7 +2,9 @@
  * Проверка хеш-цепочки и сверка Ledger с балансами по снимку мира.
  *
  * Запуск: npm run check-ledger -- --file snapshot.json
- * Формат: { "world_id": "w1", "ledger": [...], "balances": [...] }
+ * Формат: { "world_id": "w1", "ledger": [...], "balances": [...], "assets": [...] }
+ * В assets — всё, что не лежит в balances: ресурсы (res:<имя>), опыт (xp),
+ * прочность (dur:<shipId>). Без этого сверка ресурсов и прочности невозможна.
  * Путь "-" читает JSON из stdin. Код выхода 1, если цепочка или суммы не сходятся.
  */
 import { readFileSync } from 'node:fs';

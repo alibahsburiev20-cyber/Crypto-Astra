@@ -17,7 +17,15 @@ function snapshotOf(sql: SqlStorage): Snapshot {
   const balances = sql.exec('SELECT player_id, asset, amount FROM balances').toArray().map((r) => ({
     player_id: String(r.player_id), asset: String(r.asset), amount: Number(r.amount),
   }));
-  return { world_id: 'w-test', ledger, balances };
+  const assets = [
+    ...sql.exec('SELECT player_id, resource, amount FROM resources').toArray()
+      .map((r) => ({ player_id: String(r.player_id), asset: `res:${String(r.resource)}`, amount: Number(r.amount) })),
+    ...sql.exec('SELECT id, xp FROM players').toArray()
+      .map((r) => ({ player_id: String(r.id), asset: 'xp', amount: Number(r.xp) })),
+    ...sql.exec('SELECT id, player_id, durability FROM ships').toArray()
+      .map((r) => ({ player_id: String(r.player_id), asset: `dur:${String(r.id)}`, amount: Number(r.durability) })),
+  ];
+  return { world_id: 'w-test', ledger, balances, assets };
 }
 
 describe('проверка снимка мира', () => {
@@ -27,8 +35,9 @@ describe('проверка снимка мира', () => {
     tx(() => claim(sql, 'p1', 'k1', T0));
     const report = verifySnapshot(snapshotOf(sql));
     expect(report.ok).toBe(true);
-    expect(report.rows).toBe(3);
-    expect(report.head?.seq).toBe(3);
+    // start_bonus ASTRA, start_bonus топливо, ship_delivery прочность, Claim
+    expect(report.rows).toBe(4);
+    expect(report.head?.seq).toBe(4);
   });
 
   it('находит подмену записи', () => {

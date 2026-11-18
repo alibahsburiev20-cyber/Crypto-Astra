@@ -12,6 +12,7 @@ import { regenPlan, bumpDaily, isFrozen, runLedgerVerify } from '../../src/world
 import { cancelExpedition, chooseExpeditionEvent, finishExpedition, openExpeditionEvent, startExpedition, timeoutExpeditionEvent } from '../../src/world/modules/expeditions';
 import { claim } from '../../src/world/modules/claim';
 import { createPlayer } from '../../src/world/modules/players';
+import { applyDurability } from '../../src/world/modules/progress';
 import { buyFuel, repairShip } from '../../src/world/modules/upkeep';
 import { makeWorld } from '../helpers/sqlShim';
 
@@ -196,10 +197,11 @@ describe('ремонт, топливо, заморозка', () => {
     const { sql, tx } = makeWorld();
     tx(() => createPlayer(sql, 'p1', T0));
     const id = shipId(sql);
-    tx(() => sql.exec('UPDATE ships SET durability = 40 WHERE id = ?', id));
+    // Износ идёт через журнал (срез 2): прямой UPDATE прочность больше не меняет.
+    tx(() => applyDurability(sql, { playerId: 'p1', shipId: id, delta: -60, reason: 'test_wear' }, T0));
     expect(() => tx(() => repairShip(sql, 'p1', 'r0', id, T0))).toThrow(/repair_needs_alloy_plate/);
     expect(getBalance(sql, 'p1', 'astra')).toBe(START_ASTRA);
-    tx(() => sql.exec('UPDATE ships SET durability = 80 WHERE id = ?', id));
+    tx(() => applyDurability(sql, { playerId: 'p1', shipId: id, delta: 40, reason: 'test_wear' }, T0));
     const repaired = tx(() => repairShip(sql, 'p1', 'r1', id, T0));
     expect(repaired.cost).toBe(300);
     expect(repaired.durability).toBe(100);

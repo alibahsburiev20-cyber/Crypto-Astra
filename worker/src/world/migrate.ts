@@ -50,3 +50,40 @@ export function backfillResourceLedger(sql: SqlStorage, now: number): void {
      ON CONFLICT (key) DO UPDATE SET value = '1'`,
   );
 }
+
+// Срез 2 этапа 2. Опыт и прочность начали попадать в журнал позже, чем появились.
+// Старым мирам дописываем по одной записи на текущее значение, иначе сверка
+// увидит расхождение и заморозит мир.
+export function backfillProgressLedger(sql: SqlStorage, now: number): void {
+  const done = sql.exec(`SELECT value FROM meta WHERE key = 'mig_progress_ledger'`).toArray();
+  if (done.length && String(done[0].value) === '1') return;
+
+  for (const row of sql.exec('SELECT id, xp FROM players').toArray()) {
+    const playerId = String(row.id);
+    const xp = Number(row.xp);
+    if (xp <= 0) continue;
+    const seen = sql.exec(`SELECT 1 FROM ledger WHERE player_id = ? AND asset = 'xp' LIMIT 1`, playerId).toArray();
+    if (seen.length) continue;
+    appendLedger(sql, { playerId, asset: 'xp', delta: xp, reason: 'migration', sourceRef: 'backfill' }, now);
+  }
+
+  for (const row of sql.exec('SELECT id, player_id, durability FROM ships').toArray()) {
+    const shipId = String(row.id);
+    const durability = Number(row.durability);
+    if (durability === 0) continue;
+    const seen = sql.exec(`SELECT 1 FROM ledger WHERE asset = ? LIMIT 1`, `dur:${shipId}`).toArray();
+    if (seen.length) continue;
+    appendLedger(sql, {
+      playerId: String(row.player_id),
+      asset: `dur:${shipId}`,
+      delta: durability,
+      reason: 'migration',
+      sourceRef: 'backfill',
+    }, now);
+  }
+
+  sql.exec(
+    `INSERT INTO meta (key, value) VALUES ('mig_progress_ledger', '1')
+     ON CONFLICT (key) DO UPDATE SET value = '1'`,
+  );
+}

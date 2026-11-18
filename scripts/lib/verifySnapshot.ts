@@ -20,6 +20,12 @@ export interface Snapshot {
   world_id?: string;
   ledger: LedgerRow[];
   balances?: BalanceRow[];
+  /**
+   * Все остальные активы в том же виде, что в balances: ресурсы (res:<имя>),
+   * опыт (xp) и прочность (dur:<shipId>). Появились на этапе 2: без них сверка
+   * считала бы журнал по ресурсам и прочности расходящимся.
+   */
+  assets?: BalanceRow[];
 }
 
 export interface SnapshotReport {
@@ -54,7 +60,7 @@ export function verifySnapshot(snapshot: Snapshot): SnapshotReport {
   }
 
   const balances = new Map<string, number>();
-  for (const b of snapshot.balances ?? []) {
+  for (const b of [...(snapshot.balances ?? []), ...(snapshot.assets ?? [])]) {
     balances.set(`${String(b.player_id)}${KEY_SEP}${String(b.asset)}`, Number(b.amount));
   }
   for (const key of new Set([...sums.keys(), ...balances.keys()])) {
