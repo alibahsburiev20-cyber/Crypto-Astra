@@ -11,6 +11,17 @@ export function isFrozen(sql: SqlStorage): boolean {
   return r.length > 0 && String(r[0].value) === '1';
 }
 
+// Статус последней сверки Ledger. Нужен и клиенту (экран журнала), и оператору:
+// без этого поля результат ежедневного `ledger_verify` виден только внутри мира.
+export function verifyStatus(sql: SqlStorage): { at: number | null; ok: boolean | null } {
+  const rows = sql.exec(`SELECT key, value FROM meta WHERE key IN ('last_verify_at', 'last_verify_ok')`).toArray();
+  const meta = new Map(rows.map((r) => [String(r.key), String(r.value)]));
+  const atRaw = meta.get('last_verify_at');
+  const at = atRaw === undefined ? NaN : Number(atRaw);
+  const okRaw = meta.get('last_verify_ok');
+  return { at: Number.isFinite(at) ? at : null, ok: okRaw === undefined ? null : okRaw === '1' };
+}
+
 export function fuelCap(sql: SqlStorage, playerId: string): number {
   const rows = sql.exec('SELECT type FROM ships WHERE player_id = ?', playerId).toArray();
   let cap = 0;
