@@ -137,8 +137,6 @@ button.ghost:hover:not(:disabled) { background: rgba(255, 255, 255, .08); }
   color: var(--muted); font-weight: 600; font-size: 13px; box-shadow: none;
 }
 .side-item img { width: 20px; height: 20px; image-rendering: pixelated; opacity: .9; }
-/* Иконка раздела в SVG: пиксельное масштабирование её только портит. */
-.side-item img.nav-svg { image-rendering: auto; }
 .side-item:hover:not(:disabled) { background: rgba(255, 255, 255, .05); color: var(--text); transform: none; box-shadow: none; }
 .side-item.active {
   color: var(--text);
@@ -218,9 +216,16 @@ button.ghost:hover:not(:disabled) { background: rgba(255, 255, 255, .08); }
 
 /* ── Модули ──────────────────────────────────── */
 .module-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.module-card { display: grid; grid-template-columns: 44px 1fr; gap: 10px; align-items: start; }
+.module-card { display: grid; grid-template-columns: 52px 1fr; gap: 10px; align-items: start; }
 .module-card.installed { border-color: rgba(53, 214, 232, .38); box-shadow: inset 0 0 0 1px rgba(53, 214, 232, .12); }
-.module-art { width: 44px; height: 44px; object-fit: contain; image-rendering: auto; }
+.module-art { width: 52px; height: 52px; object-fit: contain; image-rendering: pixelated; filter: drop-shadow(0 6px 10px rgba(0, 0, 0, .45)); }
+
+/* ── Крафт ───────────────────────────────────── */
+.craft-card { display: grid; grid-template-columns: 56px 1fr; gap: 12px; align-items: start; }
+.craft-art { width: 56px; height: 56px; object-fit: contain; image-rendering: pixelated; filter: drop-shadow(0 6px 10px rgba(0, 0, 0, .45)); }
+.craft-info { min-width: 0; }
+.craft-info p { margin: 0 0 6px; font-size: 11px; line-height: 1.35; }
+.craft-info button { width: 100%; padding: 9px 10px; font-size: 12px; }
 .module-info { min-width: 0; }
 .module-info h3 { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .module-info p { margin: 0 0 6px; font-size: 11px; line-height: 1.35; }
@@ -331,12 +336,12 @@ footer { max-width: 1180px; margin: 0 auto; padding: 0 22px 26px; color: var(--m
   .panel-grid { grid-template-columns: 1fr; }
   .planet-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .dock {
-    display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px;
+    display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px;
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
     padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
     background: rgba(6, 11, 24, .9); border-top: 1px solid var(--line); backdrop-filter: blur(14px);
   }
-  .dock button { padding: 9px 2px; font-size: 10px; font-weight: 700; background: transparent; color: var(--muted); box-shadow: none; border-radius: 10px; }
+  .dock button { padding: 9px 1px; font-size: 9px; letter-spacing: -.01em; font-weight: 700; background: transparent; color: var(--muted); box-shadow: none; border-radius: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .dock button.active { color: #04140c; background: linear-gradient(135deg, var(--green), #23b8a0); box-shadow: 0 8px 18px rgba(61, 220, 132, .2); }
   footer { padding-bottom: 16px; }
 }

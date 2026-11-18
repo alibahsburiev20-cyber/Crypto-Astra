@@ -91,3 +91,10 @@ export async function moduleInstall(request: Request, env: Env, a: AuthContext):
   if (!shipId || !module) throw new ApiError(400, 'bad_module');
   return json(await world(env, a).installModule(a.userId, idemKey(request), { shipId, module }));
 }
+
+export async function shipBuy(request: Request, env: Env, a: AuthContext): Promise<Response> {
+  const body = await readJson(request);
+  const type = typeof body.type === 'string' ? body.type : '';
+  if (!type) throw new ApiError(400, 'bad_ship_type');
+  return json(await world(env, a).buyShip(a.userId, idemKey(request), type));
+}

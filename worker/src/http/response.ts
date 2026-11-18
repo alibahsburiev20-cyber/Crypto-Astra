@@ -37,6 +37,11 @@ const STATUS_BY_CODE: Record<string, number> = {
   bad_module: 400,
   module_slots_full: 409,
   module_max_level: 409,
+  // Срез 5: покупка кораблей.
+  bad_ship_type: 400,
+  ship_not_for_sale: 400,
+  ship_locked: 403,
+  ship_owned: 409,
 };
 
 export function json(data: unknown, status = 200, headers: Record<string, string> = {}): Response {

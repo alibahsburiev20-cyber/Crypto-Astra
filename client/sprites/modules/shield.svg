@@ -1,6 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Щит">
-  <rect x="1" y="1" width="62" height="62" rx="14" fill="#0B1220" stroke="#2A3A5E" stroke-width="2"/>
-  <path d="M32 10 L50 18 V33 C50 43 42 51 32 55 C22 51 14 43 14 33 V18 Z" fill="#1B2748" stroke="#C9CED6" stroke-width="2" stroke-linejoin="round"/>
-  <path d="M32 18 L43 23 V33 C43 39 38 45 32 48 C26 45 21 39 21 33 V23 Z" fill="#35D6E8" opacity=".35"/>
-  <path d="M32 22 V44" stroke="#F08A24" stroke-width="2.5" stroke-linecap="round"/>
-</svg>
