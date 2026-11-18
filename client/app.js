@@ -77,6 +77,15 @@ let turnstileWidget = null;
 let turnstileScript = null;
 let loginNeedsTurnstile = false;
 
+function setText(selector, value) {
+  const n = document.querySelector(selector);
+  if (n) n.textContent = String(value);
+}
+
+function callsign() {
+  try { return localStorage.getItem('astra:callsign') || 'Пилот'; } catch { return 'Пилот'; }
+}
+
 function syncServerTime(serverNow) {
   if (typeof serverNow === 'number' && Number.isFinite(serverNow)) serverOffset = serverNow - Date.now();
 }
@@ -252,17 +261,46 @@ function renderBridge() {
   const ship = state.ships[0];
   const active = state.expeditions.active;
   const claimLeft = left(state.nextClaimAt);
-  return el('div', {},
-    shipArt(ship?.type || 'scout'),
-    cards(),
-    el('h2', {}, 'Claim'),
-    el('button', { type: 'button', 'data-claim': '', disabled: claimLeft > 0 || state.frozen ? '' : null, onClick: doClaim }, el('img', { src: '/icons/ui/claim.png', alt: '', width: '22', height: '22', class: 'icon-sm' }), 'Забрать'),
-    el('p', { class: 'muted', 'data-claim-note': '' }, claimLeft > 0 ? `Следующий Claim через ${fmtLeft(claimLeft)}` : 'Claim доступен. +5 ASTRA, не чаще раза в 15 минут.'),
-    active ? el('div', { class: 'block' },
-      el('h3', {}, 'Рейс идёт'),
-      el('p', { class: 'muted', 'data-prefix': `${active.planet} · осталось `, 'data-until': active.endsAt }),
-      el('button', { type: 'button', class: 'ghost', onClick: () => setView('flight') }, 'Открыть рейс'),
-    ) : null,
+  const b = state.balances;
+  return el('div', { class: 'screen' },
+    el('div', { class: 'hero' },
+      shipArt(ship?.type || 'scout'),
+      el('div', { class: 'hero-copy' },
+        el('span', { class: 'badge' }, 'Мостик'),
+        el('h2', {}, active ? 'Рейс в пути' : 'Готовы к прыжку?'),
+        el('p', { class: 'muted' }, active
+          ? `${active.planet} · до финиша ${fmtLeft(left(active.endsAt))}`
+          : 'Выберите планету, отправьте корабль и привезите ресурсы.'),
+        el('button', {
+          type: 'button',
+          class: active ? 'cta cta-ghost' : 'cta',
+          onClick: () => setView('flight'),
+        }, active ? 'Открыть рейс' : 'Начать экспедицию'),
+      ),
+    ),
+    el('div', { class: 'panel-grid' },
+      el('div', { class: 'block' },
+        el('h3', {}, 'Ежедневный Claim'),
+        el('p', { class: 'muted', 'data-claim-note': '' }, claimLeft > 0
+          ? `Следующий Claim через ${fmtLeft(claimLeft)}`
+          : 'Claim доступен. +5 ASTRA, не чаще раза в 15 минут.'),
+        el('button', {
+          type: 'button', 'data-claim': '',
+          disabled: claimLeft > 0 || state.frozen ? '' : null,
+          onClick: doClaim,
+        }, el('img', { src: '/icons/ui/claim.png', alt: '', width: '22', height: '22', class: 'icon-sm' }), 'Забрать'),
+      ),
+      el('div', { class: 'block' },
+        el('h3', {}, 'Корабль'),
+        el('p', { class: 'muted' }, `${ship?.name || 'Scout'} · прочность ${ship?.durability ?? 0}% · ${b.fuel}/${state.fuel.cap} топлива`),
+        el('button', { type: 'button', class: 'ghost', onClick: () => setView('fleet') }, 'Открыть флот'),
+      ),
+      el('div', { class: 'block' },
+        el('h3', {}, 'Кошелёк'),
+        el('p', { class: 'muted' }, `${b.astra} ASTRA · ${b.points} очков`),
+        el('button', { type: 'button', class: 'ghost', onClick: () => setView('wallet') }, 'Открыть кошелёк'),
+      ),
+    ),
     note ? el('p', { class: 'ok' }, note) : null,
   );
 }
@@ -412,13 +450,19 @@ function renderFleet() {
       ` ${c.name}`),
     el('p', { class: 'muted' }, `Уровень ${c.unlockLevel}. ${c.price == null ? 'Чертёж, не продаётся' : `${c.price} ASTRA — покупка на этапе 2`}`),
   ));
-  return el('div', {}, el('h2', {}, 'Флот'), ...owned, el('h2', {}, 'Закрыто'), ...locked, note ? el('p', { class: 'ok' }, note) : null);
+  return el('div', { class: 'screen' },
+    el('div', { class: 'screen-title' }, el('h2', {}, 'Флот'), el('span', { class: 'badge' }, `${state.ships.length} в строю`)),
+    ...owned,
+    el('div', { class: 'screen-title' }, el('h2', {}, 'Закрыто'), el('span', { class: 'badge' }, 'этап 2')),
+    ...locked,
+    note ? el('p', { class: 'ok' }, note) : null,
+  );
 }
 
 function renderWallet() {
   const f = state.fuel;
-  return el('div', {},
-    el('h2', {}, 'Кошелёк'),
+  return el('div', { class: 'screen' },
+    el('div', { class: 'screen-title' }, el('h2', {}, 'Кошелёк'), el('span', { class: 'badge' }, 'ASTRA')),
     cards(),
     el('p', { class: 'muted' }, 'ASTRA нельзя вывести и нельзя купить за деньги.'),
     el('div', { class: 'block' },
@@ -444,8 +488,8 @@ function renderWallet() {
 }
 
 function renderLedger() {
-  return el('div', {},
-    el('h2', {}, 'Журнал'),
+  return el('div', { class: 'screen' },
+    el('div', { class: 'screen-title' }, el('h2', {}, 'Журнал'), el('span', { class: 'badge' }, 'append-only')),
     el('p', { class: 'muted' }, 'Записи только добавляются. Подменить баланс из клиента нельзя.'),
     ledger.length ? el('ul', { class: 'plain' }, ...ledger.map((e) => el('li', {},
       el('span', {}, `${REASONS[e.reason] || e.reason}`),
@@ -456,13 +500,20 @@ function renderLedger() {
 
 function render() {
   if (!state) return;
-  $('#world').textContent = `Мир ${state.world_id} · ур. ${state.level}`;
+  const b = state.balances;
+  setText('#world', `Мир ${state.world_id}`);
+  setText('#commander', callsign());
+  setText('#commander-mobile', callsign());
+  setText('#top-astra', b.astra);
+  setText('#top-fuel', `${b.fuel}/${state.fuel.cap}`);
+  setText('#top-points', b.points);
+  setText('#top-level', state.level);
   $('#frozen').hidden = !state.frozen;
   const panel = $('#panel');
   panel.replaceChildren();
   const body = view === 'flight' ? renderFlight() : view === 'fleet' ? renderFleet() : view === 'wallet' ? renderWallet() : view === 'ledger' ? renderLedger() : renderBridge();
   panel.append(body);
-  for (const b of document.querySelectorAll('.dock button')) b.classList.toggle('active', b.dataset.view === view);
+  for (const btn of document.querySelectorAll('[data-view]')) btn.classList.toggle('active', btn.dataset.view === view);
 }
 
 async function loadGame() {
@@ -524,6 +575,10 @@ $('#auth-form').addEventListener('submit', async (e) => {
   resetTurnstile();
   if (status === 200) {
     token = data.access_token;
+    try {
+      const em = ($('#email')?.value || '').trim();
+      if (em) localStorage.setItem('astra:callsign', em.split('@')[0]);
+    } catch { /* приватный режим */ }
     loginNeedsTurnstile = false;
     $('#password').value = '';
     await loadGame();
@@ -543,7 +598,14 @@ $('#logout').addEventListener('click', async () => {
   state = null;
   show('auth');
 });
-for (const b of document.querySelectorAll('.dock button')) b.addEventListener('click', () => setView(b.dataset.view));
+for (const b of document.querySelectorAll('[data-view]')) b.addEventListener('click', () => setView(b.dataset.view));
+for (const b of document.querySelectorAll('[data-soon]')) b.addEventListener('click', () => {
+  const toast = document.createElement('div');
+  toast.className = 'toast';
+  toast.textContent = `${b.dataset.soon} — появится на следующем этапе`;
+  document.querySelector('.content')?.append(toast);
+  setTimeout(() => toast.remove(), 2400);
+});
 
 // Раз в секунду обновляем только таймеры, а не весь DOM: иначе у пользователя
 // закрывался бы список планет, открытый в <select>.

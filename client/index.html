@@ -8,45 +8,100 @@
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-  <main>
-    <header class="brand">
-      <img src="/icons/currency/astra.png" alt="" width="44" height="44">
+  <header class="brandbar">
+    <div class="brand">
+      <img src="/icons/currency/astra.png" alt="" width="40" height="40">
       <div>
         <h1>Crypto Astra</h1>
         <p class="tagline">Космическая экономическая игра</p>
       </div>
-    </header>
+    </div>
+    <span class="stage-pill">Этап 1 · Ядро</span>
+  </header>
 
-    <section id="auth" hidden>
-      <div class="tabs">
-        <button type="button" id="tab-register" class="tab active">Регистрация</button>
-        <button type="button" id="tab-login" class="tab">Вход</button>
-      </div>
-      <form id="auth-form" autocomplete="on">
-        <label>Email <input id="email" type="email" required autocomplete="email"></label>
-        <label>Пароль (8–128 символов) <input id="password" type="password" required minlength="8" maxlength="128" autocomplete="current-password"></label>
-        <div id="turnstile" class="turnstile" hidden></div>
-        <button type="submit" id="auth-submit">Зарегистрироваться</button>
-        <p id="auth-error" class="error" role="alert"></p>
-      </form>
-    </section>
+  <section id="auth" class="auth-card" hidden>
+    <div class="tabs">
+      <button type="button" id="tab-register" class="tab active">Регистрация</button>
+      <button type="button" id="tab-login" class="tab">Вход</button>
+    </div>
+    <form id="auth-form" autocomplete="on">
+      <label>Email <input id="email" type="email" required autocomplete="email"></label>
+      <label>Пароль (8–128 символов) <input id="password" type="password" required minlength="8" maxlength="128" autocomplete="current-password"></label>
+      <div id="turnstile" class="turnstile" hidden></div>
+      <button type="submit" id="auth-submit" class="cta">Зарегистрироваться</button>
+      <p id="auth-error" class="error" role="alert"></p>
+    </form>
+    <p class="auth-note">ASTRA — внутриигровая валюта. Выплат нет, купить её нельзя.</p>
+  </section>
 
-    <section id="game" hidden>
-      <div class="row">
-        <span id="world" class="muted"></span>
-        <button type="button" id="logout" class="link">Выйти</button>
+  <section id="game" class="game-shell" hidden>
+    <aside class="sidebar" aria-label="Разделы">
+      <div class="side-head">
+        <img src="/avatars/commander.png" alt="" width="40" height="40" class="avatar">
+        <div>
+          <span class="cmd-label">Командир</span>
+          <strong id="commander">Пилот</strong>
+        </div>
       </div>
+      <nav class="side-nav">
+        <button type="button" data-view="bridge" class="side-item active">
+          <img src="/icons/nav/overview.png" alt="" width="20" height="20">Обзор
+        </button>
+        <button type="button" data-view="flight" class="side-item">
+          <img src="/icons/nav/expeditions.png" alt="" width="20" height="20">Экспедиции
+        </button>
+        <button type="button" data-view="fleet" class="side-item">
+          <img src="/icons/nav/fleet.png" alt="" width="20" height="20">Флот
+        </button>
+        <button type="button" data-view="wallet" class="side-item">
+          <img src="/icons/nav/wallet.png" alt="" width="20" height="20">Кошелёк
+        </button>
+        <button type="button" data-view="ledger" class="side-item">
+          <img src="/icons/nav/ledger.png" alt="" width="20" height="20">Журнал
+        </button>
+        <p class="side-sep">Скоро</p>
+        <button type="button" class="side-item locked" data-soon="Модули">Модули</button>
+        <button type="button" class="side-item locked" data-soon="Крафт">Крафт</button>
+        <button type="button" class="side-item locked" data-soon="Рынок">Рынок</button>
+        <button type="button" class="side-item locked" data-soon="Сезон">Сезон</button>
+        <button type="button" class="side-item locked" data-soon="Гильдии">Гильдии</button>
+        <button type="button" class="side-item locked" data-soon="Astra Pool">Astra Pool</button>
+      </nav>
+      <p class="side-foot">ASTRA — внутриигровая валюта. Это не деньги и не токен.</p>
+    </aside>
+
+    <div class="content">
+      <header class="topbar">
+        <div class="commander-mobile">
+          <img src="/avatars/commander.png" alt="" width="36" height="36" class="avatar">
+          <div>
+            <span class="cmd-label">Командир</span>
+            <strong id="commander-mobile">Пилот</strong>
+          </div>
+        </div>
+        <div class="stats">
+          <span class="stat"><img src="/icons/currency/astra.png" alt="" width="16" height="16"><b id="top-astra">0</b><em>ASTRA</em></span>
+          <span class="stat"><img src="/icons/currency/fuel.png" alt="" width="16" height="16"><b id="top-fuel">0/0</b><em>топливо</em></span>
+          <span class="stat"><img src="/icons/currency/points.png" alt="" width="16" height="16"><b id="top-points">0</b><em>очки</em></span>
+          <span class="stat"><b id="top-level">1</b><em>уровень</em></span>
+        </div>
+        <div class="top-actions">
+          <span id="world" class="world-pill"></span>
+          <button type="button" id="logout" class="link">Выйти</button>
+        </div>
+      </header>
       <p id="frozen" class="error" hidden>Мир заморожен: сверка журнала не сошлась. Игровые действия остановлены.</p>
       <div id="panel"></div>
       <nav class="dock" aria-label="Разделы">
-        <button type="button" data-view="bridge" class="active">Мостик</button>
+        <button type="button" data-view="bridge" class="active">Обзор</button>
         <button type="button" data-view="flight">Рейс</button>
         <button type="button" data-view="fleet">Флот</button>
         <button type="button" data-view="wallet">Кошелёк</button>
         <button type="button" data-view="ledger">Журнал</button>
       </nav>
-    </section>
-  </main>
+    </div>
+  </section>
+
   <footer>
     ASTRA Coins — внутриигровая валюта. Это не деньги, не токен и не актив; выплат нет, прибыли не обещаем.
   </footer>
