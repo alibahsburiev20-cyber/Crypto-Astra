@@ -201,3 +201,14 @@ npm run check-ledger -- --file snapshot.json
 (`client/icons/nav/*.png`), всё в том же пиксельном стиле и с прозрачным фоном. Попутно исправлено:
 `.game-shell { display: grid }` перебивал UA-правило `[hidden]`, из-за чего оболочка игры могла
 просвечивать на экране входа — добавлено `[hidden] { display: none !important }`.
+
+## 7. Turnstile в продакшене (18.11.2026)
+
+Виджет Turnstile создан для `crypto-astra.cryptoastra.workers.dev` в режиме Managed.
+`TURNSTILE_SECRET` лежит секретом Worker'а, `JWT_SECRET` уже был. Публичный site key
+прописан в `[vars]` корневого `wrangler.toml`, а `worker/wrangler.toml` пересобран через
+`npm run config:sync` — важно помнить, что Workers Builds деплоит именно второй файл,
+и правка только корневого конфига до прода не доезжает.
+
+Проверка на клиенте: `GET /config` отдаёт `turnstile_site_key`, и модалка входа грузит
+виджет. Локально и в e2e проверка выключена, потому что там нет `TURNSTILE_SECRET`.

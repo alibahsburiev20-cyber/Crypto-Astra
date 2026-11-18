@@ -19,8 +19,12 @@
 
 Осталось до гейта 1:
 
-- [ ] Выложить версию и включить секреты `JWT_SECRET`, `TURNSTILE_SECRET`,
-      `TURNSTILE_SITE_KEY`; включить правила Cloudflare Rate Limiting на `/auth/*`.
+- [x] Выложить версию и включить секреты. `JWT_SECRET` и `TURNSTILE_SECRET` стоят
+      в Worker'е как секреты, публичный site key записан в `wrangler.toml`
+      (и в сгенерированный `worker/wrangler.toml`) — регистрация снова проходит
+      проверку на бота. Правила Cloudflare Rate Limiting на `/auth/*` не
+      включаем: они работают только на зоне, а игра живёт на `*.workers.dev`.
+      Эквивалент — встроенные лимиты в D1 (`auth_limits`, 429 + `Retry-After`).
 - [ ] Прогнать сверку Ledger семь дней подряд без расхождений (ежедневный
       `ledger_verify` + `check-ledger` по снимку).
 - [ ] Проверить, что клиент не может изменить баланс: e2e уже покрывает подмену

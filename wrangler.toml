@@ -8,7 +8,7 @@ compatibility_date = "2026-11-01"
 # `wrangler secret put TURNSTILE_SECRET`. Пустые значения означают «проверка выключена»:
 # так работают локальная разработка и тесты.
 [vars]
-TURNSTILE_SITE_KEY = ""
+TURNSTILE_SITE_KEY = "0x4AAAAAAGGq5Lt25F34cDiq"
 
 # Клиент отдаётся тем же Worker (бесплатно). Один адрес для сайта и API: не нужны CORS, кука refresh работает.
 # Запросы, для которых нет файла в client/ (/auth/*, /me, /claim), идут в Worker.
