@@ -289,7 +289,7 @@ export function finishExpedition(sql: SqlStorage, expeditionId: string, now: num
   });
   if (reward.astra > 0) applyDelta(sql, { playerId, asset: 'astra', delta: reward.astra, reason: 'expedition_reward', sourceRef: expeditionId }, now);
   if (reward.points > 0) applyDelta(sql, { playerId, asset: 'points', delta: reward.points, reason: 'expedition_reward', sourceRef: expeditionId }, now);
-  for (const stack of reward.resources) addResource(sql, playerId, stack.resource, stack.amount);
+  for (const stack of reward.resources) addResource(sql, playerId, stack.resource, stack.amount, now, expeditionId);
   const nextDur = Math.max(0, ship.durability - reward.wear);
   sql.exec(`UPDATE ships SET durability = ?, status = 'idle' WHERE id = ?`, nextDur, ship.id);
   const xpRow = sql.exec('SELECT xp FROM players WHERE id = ?', playerId).toArray()[0];

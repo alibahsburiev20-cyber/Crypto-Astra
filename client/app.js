@@ -31,6 +31,7 @@ const ERRORS = {
   fuel_tank_full: 'Бак полон',
   fuel_daily_limit: 'Суточный лимит топлива исчерпан',
   insufficient_funds: 'Не хватает ASTRA',
+  insufficient_resources: 'Не хватает ресурсов',
   too_early: 'Claim ещё не готов',
   daily_limit: 'Суточный лимит Claim исчерпан',
   expedition_not_found: 'Рейс не найден',
@@ -53,8 +54,24 @@ const REASONS = {
   fuel_regen: 'Восстановление топлива',
   fuel_purchase: 'Покупка топлива',
   repair: 'Ремонт',
+  resource_gain: 'Ресурсы из рейса',
+  migration: 'Перенос истории',
 };
 const ASSETS = { astra: 'ASTRA', fuel: 'Топливо', points: 'Очки' };
+const RESOURCES = {
+  iron_ore: 'Железная руда', copper_ore: 'Медная руда', silicon: 'Кремний', ice: 'Лёд',
+  helium3: 'Гелий-3', titanium: 'Титан', crystal: 'Кристалл',
+  astralite: 'Астралит', void_crystal: 'Пустотный кристалл', quantum_dust: 'Квантовая пыль',
+};
+
+// Запись журнала по ресурсу приходит как res:<имя>, а не как базовый актив.
+function assetLabel(asset) {
+  if (typeof asset === 'string' && asset.startsWith('res:')) {
+    const id = asset.slice(4);
+    return RESOURCES[id] || id;
+  }
+  return ASSETS[asset] || asset;
+}
 
 const errText = (code) => ERRORS[code] || 'Что-то пошло не так';
 
@@ -517,7 +534,7 @@ function renderLedger() {
     verifyLine(),
     ledger.length ? el('ul', { class: 'plain' }, ...ledger.map((e) => el('li', {},
       el('span', {}, `${REASONS[e.reason] || e.reason}`),
-      el('span', {}, `${e.delta > 0 ? '+' : ''}${e.delta} ${ASSETS[e.asset] || e.asset}`),
+      el('span', {}, `${e.delta > 0 ? '+' : ''}${e.delta} ${assetLabel(e.asset)}`),
     ))) : el('p', { class: 'muted' }, 'Пока пусто'),
   );
 }
