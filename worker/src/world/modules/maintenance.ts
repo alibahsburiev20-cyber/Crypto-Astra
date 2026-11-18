@@ -1,4 +1,4 @@
-import { FUEL_REGEN_MS } from '../../shared/constants';
+import { FUEL_REGEN_MS, utcDay } from '../../shared/constants';
 import { SHIPS, type ShipType } from '../../shared/gameData';
 import { applyDelta, getBalance } from '../balances';
 import { ApiError } from '../errors';
@@ -13,13 +13,35 @@ export function isFrozen(sql: SqlStorage): boolean {
 
 // Статус последней сверки Ledger. Нужен и клиенту (экран журнала), и оператору:
 // без этого поля результат ежедневного `ledger_verify` виден только внутри мира.
-export function verifyStatus(sql: SqlStorage): { at: number | null; ok: boolean | null } {
+export function verifyStatus(sql: SqlStorage, now: number): { at: number | null; ok: boolean | null; streak: number } {
   const rows = sql.exec(`SELECT key, value FROM meta WHERE key IN ('last_verify_at', 'last_verify_ok')`).toArray();
   const meta = new Map(rows.map((r) => [String(r.key), String(r.value)]));
   const atRaw = meta.get('last_verify_at');
   const at = atRaw === undefined ? NaN : Number(atRaw);
   const okRaw = meta.get('last_verify_ok');
-  return { at: Number.isFinite(at) ? at : null, ok: okRaw === undefined ? null : okRaw === '1' };
+  const checks = sql.exec('SELECT day, ok FROM ledger_checks ORDER BY day DESC').toArray()
+    .map((r) => ({ day: Number(r.day), ok: Number(r.ok) === 1 }));
+  return {
+    at: Number.isFinite(at) ? at : null,
+    ok: okRaw === undefined ? null : okRaw === '1',
+    streak: verifyStreak(checks, utcDay(now)),
+  };
+}
+
+/**
+ * Сколько дней подряд сверка проходила без расхождений. Гейт 1 требует семь.
+ * Сегодняшняя сверка может быть ещё не сделана — тогда считаем со вчерашнего дня,
+ * иначе счётчик обнулялся бы каждую полночь.
+ */
+export function verifyStreak(checks: { day: number; ok: boolean }[], today: number): number {
+  const byDay = new Map(checks.map((c) => [c.day, c.ok]));
+  let day = byDay.has(today) ? today : today - 1;
+  let streak = 0;
+  while (byDay.get(day) === true) {
+    streak += 1;
+    day -= 1;
+  }
+  return streak;
 }
 
 export function fuelCap(sql: SqlStorage, playerId: string): number {
@@ -115,6 +137,11 @@ export function runLedgerVerify(sql: SqlStorage, now: number): void {
   );
   set('last_verify_at', String(now));
   set('last_verify_ok', report.ok ? '1' : '0');
+  sql.exec(
+    `INSERT INTO ledger_checks (day, at, ok) VALUES (?, ?, ?)
+     ON CONFLICT (day) DO UPDATE SET at = excluded.at, ok = excluded.ok`,
+    utcDay(now), now, report.ok ? 1 : 0,
+  );
   set('frozen', report.ok ? '0' : '1');
   if (!report.ok) set('frozen_seq', String(report.brokenAtSeq ?? ''));
   enqueue(sql, 'ledger_verify', now + 24 * 60 * 60 * 1000, {});
