@@ -5,7 +5,7 @@ import { ApiError } from '../errors';
 import { withIdempotency } from '../idempotency';
 import { repairCost } from './expeditionMath';
 import { applyDurability } from './progress';
-import { assertPlayable, bumpDaily, dailyOf, fuelCap } from './maintenance';
+import { applyResourceDelta, assertPlayable, bumpDaily, dailyOf, fuelCap, getResource } from './maintenance';
 
 export function buyFuel(sql: SqlStorage, playerId: string, idemKey: string, now: number) {
   return withIdempotency(sql, playerId, 'fuel_buy', idemKey, { qty: 1 }, now, () => {
@@ -31,10 +31,16 @@ export function repairShip(sql: SqlStorage, playerId: string, idemKey: string, s
     if (String(rows[0].status) !== 'idle') throw new ApiError(409, 'ship_busy');
     const durability = Number(rows[0].durability);
     if (durability >= 100) throw new ApiError(409, 'nothing_to_repair');
-    if (durability < 50) throw new ApiError(409, 'repair_needs_alloy_plate');
     const def = SHIPS[String(rows[0].type) as ShipType];
     const cost = repairCost(100 - durability, def.repairCoef);
+    // Крупный ремонт (ниже 50 %) требует компонент: с этапа 2 его можно скрафтить,
+    // поэтому это уже не тупик, а цена решения.
+    const needsPlate = durability < 50;
+    if (needsPlate && getResource(sql, playerId, 'alloy_plate') < 1) throw new ApiError(409, 'repair_needs_alloy_plate');
     const astra = applyDelta(sql, { playerId, asset: 'astra', delta: -cost, reason: 'repair', sourceRef: shipId, idemKey }, now);
+    if (needsPlate) {
+      applyResourceDelta(sql, { playerId, resource: 'alloy_plate', delta: -1, reason: 'repair_plate', sourceRef: shipId, idemKey }, now);
+    }
     applyDurability(sql, { playerId, shipId, delta: 100 - durability, reason: 'repair', sourceRef: shipId, idemKey }, now);
     return { value: { shipId, durability: 100, cost, astra }, store: true };
   });

@@ -1,4 +1,5 @@
 import { runFuelRegen, runIdemCleanup, runLedgerVerify, ensureMaintenance } from './modules/maintenance';
+import { finishCraft } from './modules/crafting';
 import { finishExpedition, openExpeditionEvent, timeoutExpeditionEvent } from './modules/expeditions';
 import { nextAttempt, parsePayload, type JobRow } from './scheduler';
 
@@ -7,6 +8,7 @@ export function runJob(sql: SqlStorage, job: JobRow, now: number): void {
   if (job.kind === 'expedition_finish') return finishExpedition(sql, String(payload.expeditionId), now);
   if (job.kind === 'expedition_event') return openExpeditionEvent(sql, String(payload.expeditionId), Number(payload.eventIdx), now);
   if (job.kind === 'expedition_event_timeout') return timeoutExpeditionEvent(sql, String(payload.expeditionId), Number(payload.eventIdx), now);
+  if (job.kind === 'craft_finish') return finishCraft(sql, String(payload.jobId), now);
   if (job.kind === 'fuel_regen') return runFuelRegen(sql, String(payload.playerId), Number(job.run_at ?? now), now);
   if (job.kind === 'ledger_verify') return runLedgerVerify(sql, now);
   if (job.kind === 'idem_cleanup') return runIdemCleanup(sql, now);

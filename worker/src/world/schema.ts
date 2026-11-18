@@ -53,6 +53,12 @@ export const WORLD_SCHEMA: string[] = [
      delta INTEGER NOT NULL, reason TEXT NOT NULL, source_ref TEXT, idem_key TEXT,
      created_at INTEGER NOT NULL, prev_hash TEXT NOT NULL, hash TEXT NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS idx_ledger_player ON ledger (player_id, asset)`,
+  // Очередь крафта (этап 2, срез 3): один слот, второй будет за Astra Pass.
+  `CREATE TABLE IF NOT EXISTS craft_jobs (
+     id TEXT PRIMARY KEY, player_id TEXT NOT NULL REFERENCES players (id), recipe TEXT NOT NULL,
+     status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'done')),
+     started_at INTEGER NOT NULL, ends_at INTEGER NOT NULL, fee INTEGER NOT NULL)`,
+  `CREATE INDEX IF NOT EXISTS idx_craft_player ON craft_jobs (player_id, status)`,
   // История сверок по дням (UTC). Нужна гейту 1: семь дней подряд без расхождений.
   `CREATE TABLE IF NOT EXISTS ledger_checks (
      day INTEGER PRIMARY KEY, at INTEGER NOT NULL, ok INTEGER NOT NULL CHECK (ok IN (0, 1)))`,

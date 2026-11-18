@@ -32,6 +32,8 @@ const ERRORS = {
   fuel_daily_limit: 'Суточный лимит топлива исчерпан',
   insufficient_funds: 'Не хватает ASTRA',
   insufficient_resources: 'Не хватает ресурсов',
+  bad_recipe: 'Такого рецепта нет',
+  craft_queue_full: 'Очередь крафта занята',
   too_early: 'Claim ещё не готов',
   daily_limit: 'Суточный лимит Claim исчерпан',
   expedition_not_found: 'Рейс не найден',
@@ -57,6 +59,10 @@ const REASONS = {
   resource_gain: 'Ресурсы из рейса',
   expedition_wear: 'Износ корабля',
   ship_delivery: 'Выдача корабля',
+  craft_fee: 'Плата за крафт',
+  craft_input: 'Ресурсы в крафт',
+  craft_output: 'Крафт готов',
+  repair_plate: 'Пластина в ремонт',
   migration: 'Перенос истории',
 };
 const ASSETS = { astra: 'ASTRA', fuel: 'Топливо', points: 'Очки' };
@@ -64,6 +70,7 @@ const RESOURCES = {
   iron_ore: 'Железная руда', copper_ore: 'Медная руда', silicon: 'Кремний', ice: 'Лёд',
   helium3: 'Гелий-3', titanium: 'Титан', crystal: 'Кристалл',
   astralite: 'Астралит', void_crystal: 'Пустотный кристалл', quantum_dust: 'Квантовая пыль',
+  energy_cell: 'Энергоячейка', circuit: 'Схема', alloy_plate: 'Сплавная пластина',
 };
 
 // Запись журнала по ресурсу приходит как res:<имя>, а не как базовый актив.
@@ -484,8 +491,8 @@ function renderFleet() {
     el('p', { class: 'muted' }, s.status === 'flying' ? 'В рейсе' : 'На базе'),
     s.repair.blocked === 'ok' ? el('button', { type: 'button', disabled: state.frozen ? '' : null, onClick: () => doRepair(s.id) },
       el('img', { src: '/icons/ui/repair.png', alt: '', width: '20', height: '20', class: 'icon-sm', loading: 'lazy' }),
-      `Ремонт за ${s.repair.cost} ASTRA`) : null,
-    s.repair.blocked === 'needs_plate' ? el('p', { class: 'error' }, 'Ниже 50%. Нужен alloy_plate, крафт ещё не открыт.') : null,
+      `Ремонт за ${s.repair.cost} ASTRA${s.repair.plate ? ' + пластина' : ''}`) : null,
+    s.repair.blocked === 'needs_plate' ? el('p', { class: 'error' }, 'Ниже 50% нужен alloy_plate — скрафтите его в «Кошельке» (3 руды + 1 титан, 60 ASTRA).') : null,
     s.durability <= 70 && s.durability >= 50 ? el('p', { class: 'muted' }, 'Почините до следующего рейса, иначе можно просесть ниже 50%.') : null,
   ));
   const locked = state.catalog.filter((c) => !c.owned).map((c) => el('div', { class: 'block locked' },
@@ -501,6 +508,35 @@ function renderFleet() {
     el('div', { class: 'screen-title' }, el('h2', {}, 'Закрыто'), el('span', { class: 'badge' }, 'этап 2')),
     ...locked,
     note ? el('p', { class: 'ok' }, note) : null,
+  );
+}
+
+// Крафт: три рецепта, один слот. Пока идёт задача, кнопки заблокированы —
+// очередь на сервере тоже одна, интерфейс это отражает.
+function renderCraft() {
+  const c = state.craft;
+  if (!c) return null;
+  const busy = c.slots - c.running.length <= 0;
+  const have = (id) => (state.resources.find((r) => r.id === id)?.amount ?? 0);
+  const rows = c.recipes.map((r) => {
+    const enough = r.inputs.every((i) => have(i.resource) >= i.amount) && state.balances.astra >= r.fee;
+    return el('div', { class: 'block' },
+      el('h3', {}, r.name),
+      el('p', { class: 'muted' }, `${r.inputs.map((i) => `${RESOURCES[i.resource] || i.resource} ${have(i.resource)}/${i.amount}`).join(' · ')}`),
+      el('p', { class: 'muted' }, `Плата ${r.fee} ASTRA · ${fmtDur(r.ms)}`),
+      el('button', {
+        type: 'button',
+        disabled: state.frozen || busy || !enough ? '' : null,
+        onClick: () => doCraft(r.id),
+      }, busy ? 'Очередь занята' : enough ? 'Скрафтить' : 'Не хватает'),
+    );
+  });
+  return el('div', { class: 'block' },
+    el('h3', {}, 'Крафт'),
+    c.running.length
+      ? el('p', { class: 'ok', 'data-prefix': 'Готовится: ', 'data-until': c.running[0].endsAt }, c.running[0].name)
+      : el('p', { class: 'muted' }, `Слотов ${c.slots}. Готовый компонент начислится сам.`),
+    ...rows,
   );
 }
 
@@ -522,6 +558,7 @@ function renderWallet() {
         onClick: doBuyFuel,
       }, 'Купить 1'),
     ),
+    renderCraft(),
     state.resources.length ? el('div', { class: 'block' }, el('h3', {}, 'Трюм'), el('ul', { class: 'plain' },
       ...state.resources.map((r) => el('li', {},
       el('span', { class: 'res-name' },
@@ -622,6 +659,7 @@ function doCancel(id) { return act(`cancel:${id}`, '/expeditions/cancel', { expe
 function doChoose(id, choiceId) { return act(`choose:${id}:${choiceId}`, '/expeditions/choose', { expeditionId: id, choiceId }); }
 function doRepair(id) { return act(`repair:${id}`, '/ships/repair', { shipId: id }); }
 function doBuyFuel() { return act(`fuel:${state?.fuel.boughtToday}`, '/fuel/buy', {}); }
+function doCraft(recipe) { return act(`craft:${recipe}`, '/craft/start', { recipe }); }
 
 function setView(v) {
   view = v;

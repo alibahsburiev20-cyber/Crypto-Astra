@@ -27,6 +27,12 @@ const STATUS_BY_CODE: Record<string, number> = {
   repair_needs_alloy_plate: 409,
   fuel_tank_full: 409,
   fuel_daily_limit: 409,
+  // Этап 2: крафт и ресурсы. Коды приходят из мира строкой, поэтому таблица
+  // должна знать их все, иначе клиент увидит internal.
+  insufficient_resources: 409,
+  bad_recipe: 400,
+  craft_queue_full: 409,
+  bad_delta: 409,
 };
 
 export function json(data: unknown, status = 200, headers: Record<string, string> = {}): Response {

@@ -151,4 +151,44 @@ export const RESOURCE_NAMES: Record<string, string> = {
   astralite: 'Астралит',
   void_crystal: 'Пустотный кристалл',
   quantum_dust: 'Квантовая пыль',
+  energy_cell: 'Энергоячейка',
+  circuit: 'Схема',
+  alloy_plate: 'Сплавная пластина',
 };
+
+// Крафт (этап 2, срез 3). Компоненты — такие же ресурсы: лежат в resources и
+// пишутся в журнал как res:<имя>.
+export type RecipeId = 'energy_cell' | 'circuit' | 'alloy_plate';
+
+export interface Recipe {
+  id: RecipeId;
+  name: string;
+  inputs: { resource: string; amount: number }[];
+  ms: number;
+  /** Плата в ASTRA. Главный поглотитель этапа: без неё крафт только печатает ресурсы. */
+  fee: number;
+}
+
+export const RECIPES: Record<RecipeId, Recipe> = {
+  energy_cell: {
+    id: 'energy_cell', name: 'Энергоячейка',
+    inputs: [{ resource: 'helium3', amount: 3 }, { resource: 'silicon', amount: 2 }],
+    ms: 30 * 60 * 1000, fee: 50,
+  },
+  circuit: {
+    id: 'circuit', name: 'Схема',
+    inputs: [{ resource: 'copper_ore', amount: 2 }, { resource: 'silicon', amount: 1 }, { resource: 'crystal', amount: 1 }],
+    ms: 20 * 60 * 1000, fee: 40,
+  },
+  alloy_plate: {
+    id: 'alloy_plate', name: 'Сплавная пластина',
+    inputs: [{ resource: 'iron_ore', amount: 3 }, { resource: 'titanium', amount: 1 }],
+    ms: 20 * 60 * 1000, fee: 60,
+  },
+};
+
+export const RECIPE_ORDER: RecipeId[] = ['energy_cell', 'circuit', 'alloy_plate'];
+
+export function isRecipeId(value: string): value is RecipeId {
+  return (RECIPE_ORDER as string[]).includes(value);
+}
