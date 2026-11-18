@@ -8,9 +8,10 @@ import { ApiError } from '../errors';
 import { withIdempotency } from '../idempotency';
 import { dropExpeditionJobs, enqueue } from '../scheduler';
 import {
-  applyEventChoice, canCancel, computeReward, eventKindFor, eventSchedule, fuelCost, isKind, levelFromXp, safeChoiceId,
-  type Reward,
+  applyEventChoice, canCancel, computeReward, durationOf, eventKindFor, eventSchedule, fuelCost, isKind, levelFromXp,
+  safeChoiceId, type Reward,
 } from './expeditionMath';
+import { fxOfShip } from './shipModules';
 import { addResource, assertPlayable, bumpDaily, dailyOf, fuelCap } from './maintenance';
 import { applyDurability, applyXp } from './progress';
 
@@ -126,7 +127,9 @@ export function startExpedition(
     const type = EXPEDITION_TYPES[body.kind];
     const id = crypto.randomUUID();
     const seed = newSeed();
-    const endsAt = now + type.durationMs;
+    // Двигатель сокращает рейс, поэтому время фиксируется здесь: модули на этом
+    // корабле до конца полёта не меняются (установка требует статус «на базе»).
+    const endsAt = now + durationOf(body.kind, fxOfShip(sql, ship.id));
     applyDelta(sql, { playerId, asset: 'fuel', delta: -cost, reason: 'expedition_start', sourceRef: id, idemKey }, now);
     sql.exec(
       `INSERT INTO expeditions (
@@ -287,6 +290,7 @@ export function finishExpedition(sql: SqlStorage, expeditionId: string, now: num
     planet, shipType: ship.type, kind, seed: String(fresh.seed),
     eventBonusBp: Number(fresh.event_bonus_bp), extraWear: Number(fresh.extra_wear), durability: ship.durability,
     expeditionsToday: daily.expeditions, pointsToday: daily.pointsGained,
+    fx: fxOfShip(sql, ship.id),
   });
   if (reward.astra > 0) applyDelta(sql, { playerId, asset: 'astra', delta: reward.astra, reason: 'expedition_reward', sourceRef: expeditionId }, now);
   if (reward.points > 0) applyDelta(sql, { playerId, asset: 'points', delta: reward.points, reason: 'expedition_reward', sourceRef: expeditionId }, now);

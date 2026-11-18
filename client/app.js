@@ -27,13 +27,16 @@ const ERRORS = {
   not_waiting: 'Событие уже закрыто',
   bad_choice: 'Такого варианта нет',
   nothing_to_repair: 'Чинить нечего',
-  repair_needs_alloy_plate: 'Ниже 50% нужен alloy_plate. Крафта ещё нет',
+  repair_needs_alloy_plate: 'Ниже 50% нужна сплавная пластина — скрафтите её в «Кошельке»',
   fuel_tank_full: 'Бак полон',
   fuel_daily_limit: 'Суточный лимит топлива исчерпан',
   insufficient_funds: 'Не хватает ASTRA',
   insufficient_resources: 'Не хватает ресурсов',
   bad_recipe: 'Такого рецепта нет',
   craft_queue_full: 'Очередь крафта занята',
+  bad_module: 'Такого модуля нет',
+  module_slots_full: 'Свободных слотов на корабле нет',
+  module_max_level: 'У модуля уже максимальный уровень',
   too_early: 'Claim ещё не готов',
   daily_limit: 'Суточный лимит Claim исчерпан',
   expedition_not_found: 'Рейс не найден',
@@ -63,6 +66,8 @@ const REASONS = {
   craft_input: 'Ресурсы в крафт',
   craft_output: 'Крафт готов',
   repair_plate: 'Пластина в ремонт',
+  module_buy: 'Покупка модуля',
+  module_parts: 'Компоненты модуля',
   migration: 'Перенос истории',
 };
 const ASSETS = { astra: 'ASTRA', fuel: 'Топливо', points: 'Очки' };
@@ -492,7 +497,9 @@ function renderFleet() {
     s.repair.blocked === 'ok' ? el('button', { type: 'button', disabled: state.frozen ? '' : null, onClick: () => doRepair(s.id) },
       el('img', { src: '/icons/ui/repair.png', alt: '', width: '20', height: '20', class: 'icon-sm', loading: 'lazy' }),
       `Ремонт за ${s.repair.cost} ASTRA${s.repair.plate ? ' + пластина' : ''}`) : null,
-    s.repair.blocked === 'needs_plate' ? el('p', { class: 'error' }, 'Ниже 50% нужен alloy_plate — скрафтите его в «Кошельке» (3 руды + 1 титан, 60 ASTRA).') : null,
+    s.repair.blocked === 'needs_plate' ? el('p', { class: 'error' }, 'Ниже 50% нужна сплавная пластина — скрафтите её в «Кошельке» (3 руды + 1 титан, 60 ASTRA).') : null,
+    el('button', { type: 'button', class: 'ghost', onClick: () => setView('modules') },
+      el('img', { src: '/icons/nav/modules.svg', alt: '', width: '18', height: '18', class: 'icon-sm' }), 'Модули'),
     s.durability <= 70 && s.durability >= 50 ? el('p', { class: 'muted' }, 'Почините до следующего рейса, иначе можно просесть ниже 50%.') : null,
   ));
   const locked = state.catalog.filter((c) => !c.owned).map((c) => el('div', { class: 'block locked' },
@@ -537,6 +544,64 @@ function renderCraft() {
       ? el('p', { class: 'ok', 'data-prefix': 'Готовится: ', 'data-until': c.running[0].endsAt }, c.running[0].name)
       : el('p', { class: 'muted' }, `Слотов ${c.slots}. Готовый компонент начислится сам.`),
     ...rows,
+  );
+}
+
+// Модули: один экран на весь флот. Снять модуль нельзя, поэтому у каждого
+// пункта только «Установить» или «Улучшить до уровня N».
+function astraNum(n) {
+  return Number(n || 0).toLocaleString('ru-RU');
+}
+
+function moduleCard(ship, entry) {
+  const owned = (ship.modules || []).find((m) => m.id === entry.id);
+  const level = owned ? owned.level : 0;
+  const next = entry.levels[level] || null;
+  const slotsFree = level > 0 || ship.used < ship.slots;
+  const have = (id) => (state.resources.find((r) => r.id === id)?.amount ?? 0);
+  const partsOk = !next || next.parts.every((p) => have(p.resource) >= p.amount);
+  const astraOk = !next || state.balances.astra >= next.price;
+  const blocked = state.frozen || !next || !slotsFree || !partsOk || !astraOk;
+  const label = !next ? 'Максимум' : !slotsFree ? 'Нет слота' : level === 0 ? 'Установить' : `Улучшить до ${next.level}`;
+  const parts = next
+    ? next.parts.map((p) => `${RESOURCES[p.resource] || p.resource} ${have(p.resource)}/${p.amount}`).join(' · ')
+    : '';
+  return el('div', { class: `block module-card${level ? ' installed' : ''}${blocked && !next ? ' locked' : ''}` },
+    el('img', { src: `/sprites/modules/${entry.id}.svg`, alt: '', width: '44', height: '44', class: 'module-art', loading: 'lazy' }),
+    el('div', { class: 'module-info' },
+      el('h3', {}, entry.name, level ? el('span', { class: 'badge' }, `L${level}`) : null),
+      el('p', { class: 'muted' }, owned ? owned.effectText : 'Не установлен'),
+      next
+        ? el('p', { class: 'muted' }, `Дальше: ${next.effectText} · ${astraNum(next.price)} ASTRA${parts ? ` + ${parts}` : ''}`)
+        : el('p', { class: 'muted' }, 'Дальше уровней нет'),
+      el('button', {
+        type: 'button',
+        disabled: blocked ? '' : null,
+        onClick: () => doInstall(ship.id, entry.id),
+      }, label),
+    ),
+  );
+}
+
+function renderModules() {
+  const m = state.modules;
+  if (!m) return el('div', { class: 'screen' }, el('p', { class: 'muted' }, 'Сервер ещё не отдаёт модули.'));
+  const blocks = [];
+  for (const ship of m.ships) {
+    blocks.push(el('div', { class: 'screen-title' },
+      el('h2', {}, ship.name),
+      el('span', { class: 'badge' }, `слоты ${ship.used}/${ship.slots}`),
+    ));
+    blocks.push(ship.modules.length
+      ? el('p', { class: 'muted' }, ship.modules.map((x) => `${x.name} L${x.level}: ${x.effectText}`).join(' · '))
+      : el('p', { class: 'muted' }, 'Модулей нет. Слоты пустые.'));
+    blocks.push(el('div', { class: 'module-grid' }, ...m.catalog.map((entry) => moduleCard(ship, entry))));
+  }
+  return el('div', { class: 'screen' },
+    el('div', { class: 'screen-title' }, el('h2', {}, 'Модули'), el('span', { class: 'badge' }, `до L${m.maxLevel}`)),
+    el('p', { class: 'muted' }, 'Модуль ставится на корабль и занимает слот. Снять его нельзя — только улучшить: поэтому вложенные ASTRA не возвращаются.'),
+    ...blocks,
+    note ? el('p', { class: note.startsWith('Ошибка') ? 'error' : 'ok' }, note) : null,
   );
 }
 
@@ -594,7 +659,11 @@ function render() {
   $('#frozen').hidden = !state.frozen;
   const panel = $('#panel');
   panel.replaceChildren();
-  const body = view === 'flight' ? renderFlight() : view === 'fleet' ? renderFleet() : view === 'wallet' ? renderWallet() : view === 'ledger' ? renderLedger() : renderBridge();
+  const body = view === 'flight' ? renderFlight()
+    : view === 'fleet' ? renderFleet()
+      : view === 'modules' ? renderModules()
+        : view === 'wallet' ? renderWallet()
+          : view === 'ledger' ? renderLedger() : renderBridge();
   panel.append(body);
   for (const btn of document.querySelectorAll('[data-view]')) btn.classList.toggle('active', btn.dataset.view === view);
 }
@@ -660,6 +729,7 @@ function doChoose(id, choiceId) { return act(`choose:${id}:${choiceId}`, '/exped
 function doRepair(id) { return act(`repair:${id}`, '/ships/repair', { shipId: id }); }
 function doBuyFuel() { return act(`fuel:${state?.fuel.boughtToday}`, '/fuel/buy', {}); }
 function doCraft(recipe) { return act(`craft:${recipe}`, '/craft/start', { recipe }); }
+function doInstall(shipId, module) { return act(`module:${shipId}:${module}`, '/modules/install', { shipId, module }); }
 
 function setView(v) {
   view = v;

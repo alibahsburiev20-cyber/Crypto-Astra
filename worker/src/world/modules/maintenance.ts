@@ -1,5 +1,5 @@
 import { FUEL_REGEN_MS, utcDay } from '../../shared/constants';
-import { SHIPS, type ShipType } from '../../shared/gameData';
+import { MODULES, SHIPS, type ShipType } from '../../shared/gameData';
 import { applyDelta, getBalance } from '../balances';
 import { ApiError } from '../errors';
 import { cleanupIdempotency } from '../idempotency';
@@ -46,11 +46,20 @@ export function verifyStreak(checks: { day: number; ok: boolean }[], today: numb
 }
 
 export function fuelCap(sql: SqlStorage, playerId: string): number {
-  const rows = sql.exec('SELECT type FROM ships WHERE player_id = ?', playerId).toArray();
+  // Бак считается по лучшему кораблю флота. Топливная система расширяет бак
+  // своего корабля, поэтому уровень читается вместе с типом.
+  const rows = sql.exec(
+    `SELECT s.type AS type,
+            COALESCE((SELECT level FROM ship_modules m WHERE m.ship_id = s.id AND m.module = 'fuel_system'), 0) AS tank_level
+       FROM ships s WHERE s.player_id = ?`,
+    playerId,
+  ).toArray();
   let cap = 0;
   for (const row of rows) {
     const def = SHIPS[String(row.type) as ShipType];
-    if (def && def.tank > cap) cap = def.tank;
+    if (!def) continue;
+    const bonus = Number(row.tank_level) * MODULES.fuel_system.perLevel;
+    cap = Math.max(cap, def.tank + bonus);
   }
   return cap;
 }

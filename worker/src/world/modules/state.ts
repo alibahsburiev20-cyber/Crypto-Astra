@@ -1,9 +1,10 @@
 import { FUEL_DAILY_MAX, FUEL_UNIT_PRICE, utcDay } from '../../shared/constants';
 import {
-  EXPEDITION_TYPES, PLANETS, RESOURCE_NAMES, SECTORS, SHIP_ORDER, SHIPS, sectorById,
-  type ExpeditionKind, type ShipType,
+  EXPEDITION_TYPES, NEUTRAL_FX, PLANETS, RESOURCE_NAMES, SECTORS, SHIP_ORDER, SHIPS, sectorById,
+  type ExpeditionKind, type ModuleFx, type ShipType,
 } from '../../shared/gameData';
-import { fuelCost, repairCost, rewardRange, xpThreshold } from './expeditionMath';
+import { durationOf, fuelCost, repairCost, rewardRange, xpThreshold } from './expeditionMath';
+import { fxOfShip, moduleStateFor } from './shipModules';
 import { listExpeditions } from './expeditions';
 import { craftCatalog, listCraftJobs, CRAFT_SLOTS } from './crafting';
 import { dailyOf, fuelCap, getResource, isFrozen, verifyStatus } from './maintenance';
@@ -16,6 +17,10 @@ export function buildState(sql: SqlStorage, playerId: string, now: number) {
   const daily = dailyOf(sql, playerId, day);
   const cap = fuelCap(sql, playerId);
   const owned = new Set(base.ships.map((s) => String(s.type)));
+  // Эффекты модулей считаются один раз на корабль: тот же объект идёт в цену
+  // ремонта, в варианты рейса и в блок «Модули».
+  const fxByShip = new Map<string, ModuleFx>();
+  for (const raw of base.ships) fxByShip.set(String(raw.id), fxOfShip(sql, String(raw.id)));
   const ships = base.ships.map((raw) => {
     const type = String(raw.type) as ShipType;
     const def = SHIPS[type];
@@ -25,16 +30,20 @@ export function buildState(sql: SqlStorage, playerId: string, now: number) {
     // поэтому это уже не запрет, а цена: показываем её, если пластина есть.
     const needsPlate = durability < 50;
     const hasPlate = getResource(sql, playerId, 'alloy_plate') >= 1;
+    const repairMult = fxByShip.get(String(raw.id))?.repair ?? 1;
     let repair: { blocked: 'ok' | 'busy' | 'full' | 'needs_plate'; cost: number | null; plate: boolean } = { blocked: 'full', cost: null, plate: false };
     if (status !== 'idle') repair = { blocked: 'busy', cost: null, plate: needsPlate };
     else if (needsPlate) {
       repair = hasPlate
-        ? { blocked: 'ok', cost: repairCost(100 - durability, def.repairCoef), plate: true }
+        ? { blocked: 'ok', cost: repairCost(100 - durability, def.repairCoef, repairMult), plate: true }
         : { blocked: 'needs_plate', cost: null, plate: true };
-    } else if (durability < 100) repair = { blocked: 'ok', cost: repairCost(100 - durability, def.repairCoef), plate: false };
+    } else if (durability < 100) {
+      repair = { blocked: 'ok', cost: repairCost(100 - durability, def.repairCoef, repairMult), plate: false };
+    }
     return { id: String(raw.id), type, name: def.name, durability, status, repair };
   });
   const activeShip = ships[0];
+  const shipFx = activeShip ? (fxByShip.get(activeShip.id) ?? NEUTRAL_FX) : NEUTRAL_FX;
   const planets = PLANETS.map((planet) => {
     const sector = sectorById(planet.sector);
     const levelLocked = base.level < sector.level;
@@ -42,9 +51,9 @@ export function buildState(sql: SqlStorage, playerId: string, now: number) {
     const locked = levelLocked || rangeLocked;
     const options = locked || !activeShip ? [] : (['short', 'medium', 'long'] as ExpeditionKind[]).map((kind) => {
       const type = EXPEDITION_TYPES[kind];
-      const range = rewardRange(planet.id, activeShip.type, kind);
+      const range = rewardRange(planet.id, activeShip.type, kind, shipFx);
       return {
-        kind, label: type.label, durationMs: type.durationMs, xp: type.xp, fuel: fuelCost(SHIPS[activeShip.type].consumption, kind),
+        kind, label: type.label, durationMs: durationOf(kind, shipFx), xp: type.xp, fuel: fuelCost(SHIPS[activeShip.type].consumption, kind),
         astra: range.astra, units: range.units,
       };
     });
@@ -76,6 +85,8 @@ export function buildState(sql: SqlStorage, playerId: string, now: number) {
     verify: verifyStatus(sql, now),
     // Крафт: каталог рецептов и запущенные задачи. Очередь — один слот.
     craft: { slots: CRAFT_SLOTS, running: listCraftJobs(sql, playerId), recipes: craftCatalog() },
+    // Модули: каталог с ценами по уровням и состояние каждого корабля.
+    modules: moduleStateFor(sql, playerId),
     catalog: SHIP_ORDER.map((type) => {
       const def = SHIPS[type];
       return {

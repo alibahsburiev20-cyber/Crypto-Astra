@@ -1,7 +1,7 @@
 import { EXPEDITION_FULL_REWARD, POINTS_HARD_CAP, POINTS_SOFT_CAP, REPAIR_ASTRA_PER_PERCENT } from '../../shared/constants';
 import {
-  EVENTS, EXPEDITION_TYPES, EVENT_KINDS, PLANET_BY_ID, SHIPS, sectorById,
-  type EventKind, type ExpeditionKind, type PlanetDef, type ShipType,
+  EVENTS, EXPEDITION_TYPES, EVENT_KINDS, NEUTRAL_FX, PLANET_BY_ID, SHIPS, sectorById,
+  type EventKind, type ExpeditionKind, type ModuleFx, type PlanetDef, type ShipType,
 } from '../../shared/gameData';
 
 export function isKind(v: string): v is ExpeditionKind {
@@ -66,8 +66,13 @@ export function canCancel(startedAt: number, endsAt: number, now: number): boole
   return now <= startedAt + Math.floor((endsAt - startedAt) * 0.1);
 }
 
-export function repairCost(lostPercent: number, coef: number): number {
-  return Math.round(REPAIR_ASTRA_PER_PERCENT * lostPercent * coef);
+export function repairCost(lostPercent: number, coef: number, repairMult = 1): number {
+  return Math.round(REPAIR_ASTRA_PER_PERCENT * lostPercent * coef * repairMult);
+}
+
+/** Длительность рейса с учётом двигателя. Считается один раз при старте. */
+export function durationOf(kind: ExpeditionKind, fx: ModuleFx = NEUTRAL_FX): number {
+  return Math.round(EXPEDITION_TYPES[kind].durationMs * fx.duration);
 }
 
 export interface RewardInput {
@@ -81,6 +86,8 @@ export interface RewardInput {
   expeditionsToday: number;
   pointsToday: number;
   scannerBonus?: number;
+  /** Множители от модулей корабля. Без них рейс считается как раньше. */
+  fx?: ModuleFx;
 }
 
 export interface ResourceStack { resource: string; amount: number }
@@ -120,15 +127,18 @@ export function computeReward(i: RewardInput): Reward {
   const ship = SHIPS[i.shipType];
   const sector = sectorById(i.planet.sector);
   const dangerous = sector.id >= 4;
+  const fx = i.fx ?? NEUTRAL_FX;
   const diminished = i.expeditionsToday >= EXPEDITION_FULL_REWARD;
   const low = i.durability < 30;
   const seedMult = seedMultiplier(i.seed);
   const eventBonus = i.eventBonusBp / 1000;
-  let units = i.planet.difficulty * type.qty * ship.mining * seedMult * eventBonus;
+  let units = i.planet.difficulty * type.qty * ship.mining * fx.mining * seedMult * eventBonus;
   if (low) units *= 0.5;
   if (diminished) units *= 0.5;
-  const capped = Math.max(0, Math.min(ship.cargo, Math.floor(units)));
-  const rare = rareHit(i.seed, i.planet.rareChance, i.scannerBonus ?? 0) && capped > 0;
+  // Грузовой отсек расширяет трюм, поэтому потолок тоже растёт.
+  const cargoCap = Math.max(0, Math.floor(ship.cargo * fx.cargo));
+  const capped = Math.max(0, Math.min(cargoCap, Math.floor(units)));
+  const rare = rareHit(i.seed, i.planet.rareChance, (i.scannerBonus ?? 0) + fx.scanner) && capped > 0;
   let astra = i.planet.difficulty * type.astra * seedMult * eventBonus;
   if (diminished) astra *= 0.5;
   const rawPoints = Math.floor(i.planet.difficulty * 10 * type.pointsMult * (dangerous ? 1.5 : 1));
@@ -139,7 +149,8 @@ export function computeReward(i: RewardInput): Reward {
     astra: Math.floor(astra),
     points,
     xp: type.xp,
-    wear: durabilityLoss(i.seed, dangerous, i.extraWear),
+    // Щит срезает износ, но рейс в любом случае что-то стоит: минимум 1 %.
+    wear: Math.max(1, Math.round(durabilityLoss(i.seed, dangerous, i.extraWear) * fx.wear)),
     rare,
     diminished,
     units: capped,
@@ -147,11 +158,13 @@ export function computeReward(i: RewardInput): Reward {
 }
 
 /** Оценка для клиента: границы seed 0.8 и 1.2, без события и без редкой находки. Не награда. */
-export function rewardRange(planetId: string, shipType: ShipType, kind: ExpeditionKind): { astra: [number, number]; units: [number, number] } {
+export function rewardRange(
+  planetId: string, shipType: ShipType, kind: ExpeditionKind, fx: ModuleFx = NEUTRAL_FX,
+): { astra: [number, number]; units: [number, number] } {
   const planet = PLANET_BY_ID[planetId];
   const base = {
     planet, shipType, kind, eventBonusBp: 1000, extraWear: 0, durability: 100,
-    expeditionsToday: 0, pointsToday: 0,
+    expeditionsToday: 0, pointsToday: 0, fx,
   };
   const lo = computeReward({ ...base, seed: '00'.repeat(8) });
   const hi = computeReward({ ...base, seed: 'ff'.repeat(8) });

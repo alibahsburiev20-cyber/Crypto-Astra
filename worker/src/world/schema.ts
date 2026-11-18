@@ -59,6 +59,13 @@ export const WORLD_SCHEMA: string[] = [
      status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'done')),
      started_at INTEGER NOT NULL, ends_at INTEGER NOT NULL, fee INTEGER NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS idx_craft_player ON craft_jobs (player_id, status)`,
+  // Модули на кораблях (этап 2, срез 4). Снять модуль нельзя — только поставить
+  // или улучшить, поэтому строка живёт до конца сезона.
+  `CREATE TABLE IF NOT EXISTS ship_modules (
+     ship_id TEXT NOT NULL REFERENCES ships (id), module TEXT NOT NULL,
+     level INTEGER NOT NULL CHECK (level BETWEEN 1 AND 5),
+     installed_at INTEGER NOT NULL,
+     PRIMARY KEY (ship_id, module))`,
   // История сверок по дням (UTC). Нужна гейту 1: семь дней подряд без расхождений.
   `CREATE TABLE IF NOT EXISTS ledger_checks (
      day INTEGER PRIMARY KEY, at INTEGER NOT NULL, ok INTEGER NOT NULL CHECK (ok IN (0, 1)))`,
