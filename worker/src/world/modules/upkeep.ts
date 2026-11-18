@@ -4,6 +4,7 @@ import { applyDelta, getBalance } from '../balances';
 import { ApiError } from '../errors';
 import { withIdempotency } from '../idempotency';
 import { repairCost } from './expeditionMath';
+import { applyDurability } from './progress';
 import { assertPlayable, bumpDaily, dailyOf, fuelCap } from './maintenance';
 
 export function buyFuel(sql: SqlStorage, playerId: string, idemKey: string, now: number) {
@@ -34,7 +35,7 @@ export function repairShip(sql: SqlStorage, playerId: string, idemKey: string, s
     const def = SHIPS[String(rows[0].type) as ShipType];
     const cost = repairCost(100 - durability, def.repairCoef);
     const astra = applyDelta(sql, { playerId, asset: 'astra', delta: -cost, reason: 'repair', sourceRef: shipId, idemKey }, now);
-    sql.exec(`UPDATE ships SET durability = 100 WHERE id = ?`, shipId);
+    applyDurability(sql, { playerId, shipId, delta: 100 - durability, reason: 'repair', sourceRef: shipId, idemKey }, now);
     return { value: { shipId, durability: 100, cost, astra }, store: true };
   });
 }

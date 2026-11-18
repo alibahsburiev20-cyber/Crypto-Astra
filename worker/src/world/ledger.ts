@@ -4,7 +4,7 @@ import { ApiError } from './errors';
 export const GENESIS_HASH = '0'.repeat(64);
 // Базовые активы живут в balances, ресурсы — в таблице resources.
 // В журнале у ресурса свой вид: res:<имя>.
-export type Asset = 'astra' | 'fuel' | 'points' | `res:${string}`;
+export type Asset = 'astra' | 'fuel' | 'points' | 'xp' | `res:${string}` | `dur:${string}`;
 
 export function isResourceAsset(asset: string): asset is `res:${string}` {
   return asset.startsWith('res:') && asset.length > 4;
@@ -79,6 +79,14 @@ export function verifyLedger(sql: SqlStorage): LedgerReport {
   // Ресурсы лежат в отдельной таблице, но в журнале у них вид res:<имя>.
   for (const r of sql.exec('SELECT player_id, resource, amount FROM resources')) {
     balances.set(`${r.player_id}\u0000res:${r.resource}`, Number(r.amount));
+  }
+  // Опыт — колонка players.xp, прочность — ships.durability; в журнале это
+  // активы xp и dur:<shipId>.
+  for (const p of sql.exec('SELECT id, xp FROM players')) {
+    balances.set(`${p.id}\u0000xp`, Number(p.xp));
+  }
+  for (const sh of sql.exec('SELECT id, player_id, durability FROM ships')) {
+    balances.set(`${sh.player_id}\u0000dur:${sh.id}`, Number(sh.durability));
   }
   const mismatches: LedgerReport['mismatches'] = [];
   for (const k of new Set([...sums.keys(), ...balances.keys()])) {

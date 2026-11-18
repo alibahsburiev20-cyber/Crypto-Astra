@@ -17,14 +17,15 @@ describe('createPlayer', () => {
     const s = getPlayerState(sql, 'p1');
     expect(s.balances).toEqual({ astra: START_ASTRA, fuel: START_FUEL, points: 0 });
     expect(s.ships.length).toBe(1);
-    expect(count(sql, 'ledger')).toBe(2);
+    // ASTRA, топливо и стартовая прочность корабля
+    expect(count(sql, 'ledger')).toBe(3);
     expect(verifyLedger(sql).ok).toBe(true);
   });
   it('повторный вызов ничего не меняет', () => {
     const { sql, tx } = makeWorld();
     tx(() => createPlayer(sql, 'p1', T0));
     expect(tx(() => createPlayer(sql, 'p1', T0 + 1)).created).toBe(false);
-    expect(count(sql, 'ledger')).toBe(2);
+    expect(count(sql, 'ledger')).toBe(3);
   });
   it('мир не принимает больше 100 игроков', () => {
     const { sql, tx } = makeWorld();

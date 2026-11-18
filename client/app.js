@@ -55,6 +55,8 @@ const REASONS = {
   fuel_purchase: 'Покупка топлива',
   repair: 'Ремонт',
   resource_gain: 'Ресурсы из рейса',
+  expedition_wear: 'Износ корабля',
+  ship_delivery: 'Выдача корабля',
   migration: 'Перенос истории',
 };
 const ASSETS = { astra: 'ASTRA', fuel: 'Топливо', points: 'Очки' };
@@ -66,11 +68,14 @@ const RESOURCES = {
 
 // Запись журнала по ресурсу приходит как res:<имя>, а не как базовый актив.
 function assetLabel(asset) {
-  if (typeof asset === 'string' && asset.startsWith('res:')) {
-    const id = asset.slice(4);
+  const a = String(asset || '');
+  if (a.startsWith('res:')) {
+    const id = a.slice(4);
     return RESOURCES[id] || id;
   }
-  return ASSETS[asset] || asset;
+  if (a === 'xp') return 'Опыт';
+  if (a.startsWith('dur:')) return 'Прочность корабля';
+  return ASSETS[a] || a;
 }
 
 const errText = (code) => ERRORS[code] || 'Что-то пошло не так';
