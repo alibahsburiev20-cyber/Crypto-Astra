@@ -5,7 +5,7 @@ import {
 } from '../../shared/gameData';
 import { fuelCost, repairCost, rewardRange, xpThreshold } from './expeditionMath';
 import { listExpeditions } from './expeditions';
-import { dailyOf, fuelCap, isFrozen } from './maintenance';
+import { dailyOf, fuelCap, isFrozen, verifyStatus } from './maintenance';
 import { playerPayload } from '../scheduler';
 import { getPlayerState } from './players';
 
@@ -65,6 +65,7 @@ export function buildState(sql: SqlStorage, playerId: string, now: number) {
     planets,
     expeditions: listExpeditions(sql, playerId),
     frozen: isFrozen(sql),
+    verify: verifyStatus(sql),
     catalog: SHIP_ORDER.map((type) => {
       const def = SHIPS[type];
       return {

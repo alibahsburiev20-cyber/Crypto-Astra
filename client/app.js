@@ -236,6 +236,22 @@ function fmtLeft(ms) {
   const sec = s % 60;
   return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}` : `${m}:${String(sec).padStart(2, '0')}`;
 }
+function fmtAgo(ms) {
+  const m = Math.floor(ms / 60000);
+  if (m < 1) return 'только что';
+  if (m < 60) return `${m} мин назад`;
+  const h = Math.floor(m / 60);
+  return h < 24 ? `${h} ч назад` : `${Math.floor(h / 24)} дн назад`;
+}
+
+function verifyLine() {
+  const v = state?.verify;
+  if (!v || v.at == null) return el('p', { class: 'muted' }, 'Сверка журнала ещё не проходила.');
+  const ago = fmtAgo(Math.max(0, Date.now() + serverOffset - v.at));
+  return el('p', { class: v.ok ? 'muted' : 'error' },
+    v.ok ? `Сверка журнала: OK · ${ago}.` : `Сверка журнала: расхождение · ${ago}. Мир заморожен.`);
+}
+
 function fmtDur(ms) {
   const m = Math.round(ms / 60000);
   return m < 120 ? `${m} мин` : `${Math.round(m / 60)} ч`;
@@ -491,6 +507,7 @@ function renderLedger() {
   return el('div', { class: 'screen' },
     el('div', { class: 'screen-title' }, el('h2', {}, 'Журнал'), el('span', { class: 'badge' }, 'append-only')),
     el('p', { class: 'muted' }, 'Записи только добавляются. Подменить баланс из клиента нельзя.'),
+    verifyLine(),
     ledger.length ? el('ul', { class: 'plain' }, ...ledger.map((e) => el('li', {},
       el('span', {}, `${REASONS[e.reason] || e.reason}`),
       el('span', {}, `${e.delta > 0 ? '+' : ''}${e.delta} ${ASSETS[e.asset] || e.asset}`),
