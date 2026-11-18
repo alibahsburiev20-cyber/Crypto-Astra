@@ -2,7 +2,17 @@ import { sha256Hex } from '../shared/sha256';
 import { ApiError } from './errors';
 
 export const GENESIS_HASH = '0'.repeat(64);
-export type Asset = 'astra' | 'fuel' | 'points';
+// Базовые активы живут в balances, ресурсы — в таблице resources.
+// В журнале у ресурса свой вид: res:<имя>.
+export type Asset = 'astra' | 'fuel' | 'points' | `res:${string}`;
+
+export function isResourceAsset(asset: string): asset is `res:${string}` {
+  return asset.startsWith('res:') && asset.length > 4;
+}
+
+export function resourceName(asset: string): string {
+  return asset.slice(4);
+}
 
 export interface LedgerInput {
   playerId: string;
@@ -65,6 +75,10 @@ export function verifyLedger(sql: SqlStorage): LedgerReport {
   const balances = new Map<string, number>();
   for (const b of sql.exec('SELECT player_id, asset, amount FROM balances')) {
     balances.set(`${b.player_id}\u0000${b.asset}`, Number(b.amount));
+  }
+  // Ресурсы лежат в отдельной таблице, но в журнале у них вид res:<имя>.
+  for (const r of sql.exec('SELECT player_id, resource, amount FROM resources')) {
+    balances.set(`${r.player_id}\u0000res:${r.resource}`, Number(r.amount));
   }
   const mismatches: LedgerReport['mismatches'] = [];
   for (const k of new Set([...sums.keys(), ...balances.keys()])) {

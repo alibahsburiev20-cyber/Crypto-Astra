@@ -3,6 +3,7 @@ import { SHIPS, type ShipType } from '../../shared/gameData';
 import { applyDelta, getBalance } from '../balances';
 import { ApiError } from '../errors';
 import { cleanupIdempotency } from '../idempotency';
+import { appendLedger } from '../ledger';
 import { verifyLedger } from '../ledger';
 import { enqueue, playerPayload } from '../scheduler';
 
@@ -79,13 +80,46 @@ export function bumpDaily(sql: SqlStorage, playerId: string, day: number, field:
   );
 }
 
-export function addResource(sql: SqlStorage, playerId: string, resource: string, amount: number): void {
+/**
+ * Изменение ресурса и запись в журнал одной операцией. Срез 1 этапа 2: до этого
+ * ресурсы жили в таблице resources и в Ledger не попадали вовсе.
+ */
+export function applyResourceDelta(
+  sql: SqlStorage,
+  input: { playerId: string; resource: string; delta: number; reason: string; sourceRef?: string | null; idemKey?: string | null },
+  now: number,
+): number {
+  if (!Number.isInteger(input.delta) || input.delta === 0) return getResource(sql, input.playerId, input.resource);
+  const next = getResource(sql, input.playerId, input.resource) + input.delta;
+  if (next < 0) throw new ApiError(409, 'insufficient_resources');
+  if (next === 0) {
+    sql.exec('DELETE FROM resources WHERE player_id = ? AND resource = ?', input.playerId, input.resource);
+  } else {
+    sql.exec(
+      `INSERT INTO resources (player_id, resource, amount) VALUES (?, ?, ?)
+       ON CONFLICT (player_id, resource) DO UPDATE SET amount = excluded.amount`,
+      input.playerId, input.resource, next,
+    );
+  }
+  appendLedger(sql, {
+    playerId: input.playerId,
+    asset: `res:${input.resource}`,
+    delta: input.delta,
+    reason: input.reason,
+    sourceRef: input.sourceRef ?? null,
+    idemKey: input.idemKey ?? null,
+  }, now);
+  return next;
+}
+
+export function getResource(sql: SqlStorage, playerId: string, resource: string): number {
+  const r = sql.exec('SELECT amount FROM resources WHERE player_id = ? AND resource = ?', playerId, resource).toArray();
+  return r.length ? Number(r[0].amount) : 0;
+}
+
+export function addResource(sql: SqlStorage, playerId: string, resource: string, amount: number, now: number, sourceRef?: string): void {
   if (amount <= 0) return;
-  sql.exec(
-    `INSERT INTO resources (player_id, resource, amount) VALUES (?, ?, ?)
-     ON CONFLICT (player_id, resource) DO UPDATE SET amount = amount + excluded.amount`,
-    playerId, resource, amount,
-  );
+  applyResourceDelta(sql, { playerId, resource, delta: amount, reason: 'resource_gain', sourceRef: sourceRef ?? null }, now);
 }
 
 /** Сколько топлива выдать, если задача просрочена, и когда ставить следующую. */

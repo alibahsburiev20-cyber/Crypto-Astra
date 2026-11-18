@@ -7,7 +7,7 @@ import { createPlayer } from './modules/players';
 import { buildState, listLedger } from './modules/state';
 import { buyFuel, repairShip } from './modules/upkeep';
 import { verifyLedger, type LedgerReport } from './ledger';
-import { migrateLegacyExpeditions } from './migrate';
+import { backfillResourceLedger, migrateLegacyExpeditions } from './migrate';
 import { nextAlarmAt } from './scheduler';
 import { WORLD_SCHEMA } from './schema';
 
@@ -24,6 +24,7 @@ export class World extends DurableObject<Env> {
       this.ctx.storage.transactionSync(() => {
         migrateLegacyExpeditions(this.sql, Date.now());
         for (const stmt of WORLD_SCHEMA) this.sql.exec(stmt);
+        backfillResourceLedger(this.sql, Date.now());
       });
     });
   }
