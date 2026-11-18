@@ -9,8 +9,9 @@ import { World } from './world/World';
 export { World, WorldLobby };
 export type { Env };
 
+// HTML отдают статические ассеты, поэтому заголовки для него живут в client/_headers.
+// Здесь — только запасной путь, если файл когда-нибудь начнёт отдавать Worker.
 const SECURITY: Record<string, string> = {
-  // Turnstile грузит скрипт и iframe с challenges.cloudflare.com. Больше внешних источников нет.
   'Content-Security-Policy': "default-src 'self'; script-src 'self' https://challenges.cloudflare.com; style-src 'self'; img-src 'self' data:; connect-src 'self' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
   'Referrer-Policy': 'same-origin',
   'X-Content-Type-Options': 'nosniff',

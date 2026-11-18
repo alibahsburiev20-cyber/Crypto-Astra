@@ -533,6 +533,27 @@ function render() {
   for (const btn of document.querySelectorAll('[data-view]')) btn.classList.toggle('active', btn.dataset.view === view);
 }
 
+// Рекламный слот один на всё приложение: он висит под топбаром и остаётся на
+// экране при переключении разделов. Так сеть видит показ (у CryptoCoinsAd
+// учитываются только видимые блоки), а мы не плодим невидимые вставки.
+function mountAds() {
+  const ads = config?.ads;
+  const slot = document.getElementById('ad-slot');
+  if (!slot || !ads?.enabled || !ads.script_url) return;
+  if (slot.dataset.mounted === '1') return;
+  slot.dataset.mounted = '1';
+  if (ads.provider) slot.dataset.provider = String(ads.provider);
+  if (ads.unit_id) slot.dataset.unitId = String(ads.unit_id);
+  slot.hidden = false;
+  const s = document.createElement('script');
+  s.src = ads.script_url;
+  s.async = true;
+  s.defer = true;
+  s.dataset.adsProvider = String(ads.provider || 'ads');
+  if (ads.unit_id) s.dataset.unitId = String(ads.unit_id);
+  slot.append(s);
+}
+
 async function loadGame() {
   const { status, data } = await authed('/me');
   if (status === 401) { show('auth'); return; }
@@ -550,6 +571,7 @@ async function loadGame() {
   }
   show('game');
   render();
+  mountAds();
 }
 
 async function act(scope, path, body) {

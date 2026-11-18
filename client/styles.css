@@ -332,3 +332,18 @@ footer { max-width: 1180px; margin: 0 auto; padding: 0 22px 26px; color: var(--m
   .stat { padding: 5px 8px; font-size: 12px; }
   .value { font-size: 20px; }
 }
+
+/* ── Рекламный слот ──────────────────────────── */
+/* Один слот под топбаром: он виден на всех экранах, а сеть считает только
+   видимые показы. Пустой слот не занимает место — [hidden] выше. */
+.ad-slot {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 96px; margin: 0 0 14px; padding: 6px;
+  background: rgba(255, 255, 255, .02);
+  border: 1px dashed var(--line-strong); border-radius: 14px;
+  overflow: hidden;
+}
+.ad-slot:empty { display: none; }
+@media (max-width: 900px) {
+  .ad-slot { min-height: 56px; margin-bottom: 10px; padding: 4px; }
+}
