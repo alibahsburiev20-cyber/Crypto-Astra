@@ -65,7 +65,7 @@ export function buildState(sql: SqlStorage, playerId: string, now: number) {
     planets,
     expeditions: listExpeditions(sql, playerId),
     frozen: isFrozen(sql),
-    verify: verifyStatus(sql),
+    verify: verifyStatus(sql, now),
     catalog: SHIP_ORDER.map((type) => {
       const def = SHIPS[type];
       return {

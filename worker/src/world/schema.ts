@@ -53,6 +53,9 @@ export const WORLD_SCHEMA: string[] = [
      delta INTEGER NOT NULL, reason TEXT NOT NULL, source_ref TEXT, idem_key TEXT,
      created_at INTEGER NOT NULL, prev_hash TEXT NOT NULL, hash TEXT NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS idx_ledger_player ON ledger (player_id, asset)`,
+  // История сверок по дням (UTC). Нужна гейту 1: семь дней подряд без расхождений.
+  `CREATE TABLE IF NOT EXISTS ledger_checks (
+     day INTEGER PRIMARY KEY, at INTEGER NOT NULL, ok INTEGER NOT NULL CHECK (ok IN (0, 1)))`,
   `CREATE TRIGGER IF NOT EXISTS ledger_no_update BEFORE UPDATE ON ledger
      BEGIN SELECT RAISE(ABORT, 'ledger is append-only'); END`,
   `CREATE TRIGGER IF NOT EXISTS ledger_no_delete BEFORE DELETE ON ledger

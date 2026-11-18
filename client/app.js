@@ -244,12 +244,19 @@ function fmtAgo(ms) {
   return h < 24 ? `${h} ч назад` : `${Math.floor(h / 24)} дн назад`;
 }
 
+// Гейт 1 закрывается семью днями подряд; сервер считает стрик сам (verify.streak).
+const VERIFY_GATE_DAYS = 7;
+
 function verifyLine() {
   const v = state?.verify;
   if (!v || v.at == null) return el('p', { class: 'muted' }, 'Сверка журнала ещё не проходила.');
   const ago = fmtAgo(Math.max(0, Date.now() + serverOffset - v.at));
-  return el('p', { class: v.ok ? 'muted' : 'error' },
-    v.ok ? `Сверка журнала: OK · ${ago}.` : `Сверка журнала: расхождение · ${ago}. Мир заморожен.`);
+  if (!v.ok) return el('p', { class: 'error' }, `Сверка журнала: расхождение · ${ago}. Мир заморожен.`);
+  const streak = Number(v.streak ?? 0);
+  const tail = streak >= VERIFY_GATE_DAYS
+    ? ` ${VERIFY_GATE_DAYS}/${VERIFY_GATE_DAYS} дней — гейт 1 закрыт.`
+    : ` ${Math.min(streak, VERIFY_GATE_DAYS)}/${VERIFY_GATE_DAYS} дней до гейта 1.`;
+  return el('p', { class: 'muted' }, `Сверка журнала: OK · ${ago}.${tail}`);
 }
 
 function fmtDur(ms) {
