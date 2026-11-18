@@ -333,7 +333,11 @@ function renderFlight() {
     },
       planetArt(p, false),
       el('span', { class: 'planet-name' }, p.name),
-      el('span', { class: 'planet-meta' }, p.locked ? p.lock : `Сектор ${p.sector} · сложность ${p.difficulty}`),
+      el('span', { class: 'planet-meta' }, p.locked
+        ? el('span', { class: 'lock-meta' },
+            el('img', { src: '/icons/ui/lock.png', alt: '', width: '12', height: '12', class: 'icon-xs', loading: 'lazy' }),
+            p.lock)
+        : `Сектор ${p.sector} · сложность ${p.difficulty}`),
       !p.locked && p.resources?.length ? el('span', { class: 'planet-res' },
         ...p.resources.slice(0, 3).map((r) => el('img', {
           src: `/icons/resources/${r.id}.png`, alt: '', width: '14', height: '14', class: 'icon-xs', loading: 'lazy',
@@ -359,7 +363,9 @@ function renderFlight() {
     detail,
     el('div', { class: 'choices kinds' }, ...['short', 'medium', 'long'].map((k) => {
       const o = selected?.options.find((x) => x.kind === k);
-      return el('button', { type: 'button', class: k === kind ? '' : 'ghost', onClick: () => { window.__kind = k; render(); } }, o ? o.label : k);
+      return el('button', { type: 'button', class: k === kind ? '' : 'ghost', onClick: () => { window.__kind = k; render(); } },
+        el('img', { src: `/icons/ui/route_${k}.png`, alt: '', width: '20', height: '20', class: 'icon-sm', loading: 'lazy' }),
+        o ? o.label : k);
     })),
     opt ? el('div', { class: 'block' },
       el('p', { class: 'muted' },
@@ -393,13 +399,17 @@ function renderFleet() {
     shipArt(s.type),
     el('h3', {}, `${s.name} · ${s.durability}%`),
     el('p', { class: 'muted' }, s.status === 'flying' ? 'В рейсе' : 'На базе'),
-    s.repair.blocked === 'ok' ? el('button', { type: 'button', disabled: state.frozen ? '' : null, onClick: () => doRepair(s.id) }, `Ремонт за ${s.repair.cost} ASTRA`) : null,
+    s.repair.blocked === 'ok' ? el('button', { type: 'button', disabled: state.frozen ? '' : null, onClick: () => doRepair(s.id) },
+      el('img', { src: '/icons/ui/repair.png', alt: '', width: '20', height: '20', class: 'icon-sm', loading: 'lazy' }),
+      `Ремонт за ${s.repair.cost} ASTRA`) : null,
     s.repair.blocked === 'needs_plate' ? el('p', { class: 'error' }, 'Ниже 50%. Нужен alloy_plate, крафт ещё не открыт.') : null,
     s.durability <= 70 && s.durability >= 50 ? el('p', { class: 'muted' }, 'Почините до следующего рейса, иначе можно просесть ниже 50%.') : null,
   ));
   const locked = state.catalog.filter((c) => !c.owned).map((c) => el('div', { class: 'block locked' },
     el('img', { src: `/sprites/ships/${c.type}.png`, alt: '', width: '96', class: 'sprite-thumb' }),
-    el('h3', {}, c.name),
+    el('h3', {},
+      el('img', { src: '/icons/ui/lock.png', alt: '', width: '14', height: '14', class: 'icon-xs', loading: 'lazy' }),
+      ` ${c.name}`),
     el('p', { class: 'muted' }, `Уровень ${c.unlockLevel}. ${c.price == null ? 'Чертёж, не продаётся' : `${c.price} ASTRA — покупка на этапе 2`}`),
   ));
   return el('div', {}, el('h2', {}, 'Флот'), ...owned, el('h2', {}, 'Закрыто'), ...locked, note ? el('p', { class: 'ok' }, note) : null);

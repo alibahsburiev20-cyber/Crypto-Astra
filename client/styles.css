@@ -181,7 +181,8 @@ button .icon-sm { margin-right: 8px; }
 .planet-art.big { width: 104px; height: 104px; max-height: 104px; flex: 0 0 auto; }
 .planet-art.big img { width: 96px; height: 96px; }
 .planet-name { font-size: 13px; letter-spacing: .01em; }
-.planet-meta { font-size: 10px; font-weight: 500; color: var(--muted); line-height: 1.25; }
+.planet-meta { display: inline-flex; align-items: center; gap: 3px; font-size: 10px; font-weight: 500; color: var(--muted); line-height: 1.25; }
+.lock-meta { display: inline-flex; align-items: center; gap: 3px; }
 .planet-res { display: inline-flex; gap: 4px; margin-top: 2px; }
 
 /* Карточка выбранной планеты */

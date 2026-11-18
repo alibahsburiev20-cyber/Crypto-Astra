@@ -12,7 +12,7 @@
 | Типы | `npm run typecheck` | чисто | чисто |
 | Юнит-тесты | `npm test` | 6 файлов, 45 тестов | 11 файлов, 63 теста |
 | Сборка воркера | `wrangler deploy --dry-run` | 114,9 KiB (30,2 KiB gzip) | 134,2 KiB (34,6 KiB gzip) |
-| Зависимости | `npm audit` | 2 critical + 1 moderate (vitest 3 → tinypool) | 0 |
+| Зависимости | `npm audit` | 2 critical + 1 moderate (vitest 3 → tinypool) | 0; 17.11 появилась advisory в dev-зависимости picomatch (ReDoS в glob), патча ещё нет — на рантайм не влияет |
 | E2E | `npm run test:e2e` | не было | 11 сценариев против `wrangler dev` |
 | Живой прогон | `wrangler dev` + миграции D1 + `curl` | регистрация, вход, `/me`, Claim, журнал, рейс, отмена, ротация refresh, cron | всё проходит |
 
