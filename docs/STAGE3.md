@@ -78,7 +78,7 @@ e2e проверяет `/season` и отказ гостю.
 ## Проверки
 
 ```bash
-npm run check                    # типы + 174 unit-теста
+npm run check                    # типы + 179 unit-тестов
 npm run simulate -- --mix --days 56 --season
 npx wrangler dev --port 8787     # затем npm run test:e2e — 14 проверок
 npm run verify-snapshot -- --file snapshot.json
