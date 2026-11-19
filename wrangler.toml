@@ -36,6 +36,26 @@ new_sqlite_classes = ["World", "WorldLobby"]
 [triggers]
 crons = ["0 * * * *", "0 3 * * *"]
 
+# Workers Builds Previews: отдельная D1-база и изолированные Durable Objects.
+[previews]
+
+[[previews.d1_databases]]
+binding = "DB"
+database_name = "astra-preview"
+database_id = "a9656807-8f65-4f3d-bf77-1ac7fd49e6a3"
+
+[[previews.durable_objects.bindings]]
+name = "WORLD"
+class_name = "World"
+
+[[previews.durable_objects.bindings]]
+name = "LOBBY"
+class_name = "WorldLobby"
+
+[previews.vars]
+TURNSTILE_SITE_KEY = ""
+ADS_ENABLED = "false"
+
 # R2 (архив и бэкапы) включается позже, когда появится доход. Без блока снимки
 # сезонов и недельные снимки мира складываются в D1 `world_snapshots.payload`:
 # код читает биндинг как необязательный, при подключении бакета менять код не нужно.
