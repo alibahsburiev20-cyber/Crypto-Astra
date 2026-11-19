@@ -70,6 +70,24 @@ h2 { margin: 0 0 10px; font-size: 17px; letter-spacing: -.01em; }
 }
 .auth-note { margin: 12px 0 0; color: var(--muted); font-size: 11px; }
 
+/* ── Публичное описание игры ─────────────────── */
+/* Видно до входа: рекламная сеть и поисковик должны получить оригинальный текст
+   без регистрации. Скрывается, когда открыт игровой экран. */
+.landing { max-width: 900px; margin: 8px auto 48px; padding: 0 22px; }
+.landing h2 { font-size: 19px; margin-bottom: 8px; }
+.landing > p { margin: 0 0 10px; color: var(--muted); font-size: 13px; line-height: 1.55; max-width: 70ch; }
+.landing-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
+.landing .block p { margin: 0 0 8px; font-size: 12px; line-height: 1.5; color: var(--muted); }
+.landing .block p b { color: var(--text); }
+.landing-steps { gap: 6px; }
+.landing-steps li { display: block; font-size: 12px; line-height: 1.45; color: var(--muted); }
+.landing-steps li b { color: var(--text); }
+
+.ad-label {
+  display: block; margin: 0 0 4px; font-size: 9px; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--muted);
+}
+
 label { display: block; margin-bottom: 12px; color: var(--muted); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
 input, select {
   display: block; width: 100%; margin-top: 6px; padding: 12px 14px;
