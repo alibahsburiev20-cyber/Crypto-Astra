@@ -6,6 +6,7 @@ import { cleanupIdempotency } from '../idempotency';
 import { appendLedger } from '../ledger';
 import { verifyLedger } from '../ledger';
 import { enqueue, playerPayload } from '../scheduler';
+import { ensureSeasonJobs } from './season';
 
 export function isFrozen(sql: SqlStorage): boolean {
   const r = sql.exec(`SELECT value FROM meta WHERE key = 'frozen'`).toArray();
@@ -145,6 +146,7 @@ export function ensureMaintenance(sql: SqlStorage, now: number): void {
   const has = (kind: string) => sql.exec(`SELECT 1 FROM jobs WHERE kind = ? AND status = 'pending' LIMIT 1`, kind).toArray().length > 0;
   if (!has('ledger_verify')) enqueue(sql, 'ledger_verify', now + 5 * 60 * 1000, {});
   if (!has('idem_cleanup')) enqueue(sql, 'idem_cleanup', now + 24 * 60 * 60 * 1000, {});
+  ensureSeasonJobs(sql, now);
   const players = sql.exec('SELECT id FROM players').toArray();
   for (const p of players) {
     const id = String(p.id);

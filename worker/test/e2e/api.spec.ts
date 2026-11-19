@@ -180,5 +180,39 @@ if (!BASE) {
       expect(res.status).toBe(401);
       expect(res.data.error).toBe('unauthorized');
     });
+
+    it('/me отдаёт сезон: номер, рамки и место игрока', async () => {
+      const me = await api('/me');
+      expect(me.status).toBe(200);
+      const season = me.data.season as Record<string, any>;
+      expect(season.number).toBe(1);
+      expect(season.lengthDays).toBe(56);
+      expect(season.endsAt).toBeGreaterThan(season.startsAt);
+      expect(season.daysLeft).toBeGreaterThan(0);
+      expect(season.rank).toBe(1);
+      expect(season.players).toBeGreaterThanOrEqual(1);
+    });
+
+    it('GET /season отдаёт рейтинг, призы и прошлые сезоны', async () => {
+      const res = await api('/season');
+      expect(res.status).toBe(200);
+      const body = res.data as Record<string, any>;
+      expect(body.season.id).toBe('s1');
+      expect(body.season.lengthDays).toBe(56);
+      expect(Array.isArray(body.top)).toBe(true);
+      expect(body.top[0]).toMatchObject({ rank: 1, isMe: true });
+      expect(typeof body.top[0].label).toBe('string');
+      expect(body.top[0].label.startsWith('Пилот ')).toBe(true);
+      expect(body.me.rank).toBeGreaterThanOrEqual(1);
+      expect(body.me.label.startsWith('Пилот ')).toBe(true);
+      expect(body.rewards.map((r: { place: number | string }) => r.place)).toEqual([1, 2, 3, '4–10', 'участие']);
+      expect(body.past).toEqual([]);
+    });
+
+    it('/season закрыт для гостя', async () => {
+      const res = await api('/season', { auth: false });
+      expect(res.status).toBe(401);
+      expect(res.data.error).toBe('unauthorized');
+    });
   });
 }

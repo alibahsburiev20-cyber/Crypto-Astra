@@ -6,6 +6,8 @@ import { startCraft } from './modules/crafting';
 import { cancelExpedition, chooseExpeditionEvent, startExpedition } from './modules/expeditions';
 import { createPlayer } from './modules/players';
 import { buildState, listLedger } from './modules/state';
+import { seasonReport } from './modules/season';
+import { ackSnapshots, pendingSnapshots } from './modules/snapshots';
 import { installModule } from './modules/shipModules';
 import { buyShip } from './modules/ships';
 import { buyLot, cancelLot, createLot, marketView, type CreateLotInput } from './modules/market';
@@ -135,6 +137,24 @@ export class World extends DurableObject<Env> {
     const result = this.ctx.storage.transactionSync(() => buyFuel(this.sql, playerId, idemKey, now));
     await this.arm();
     return result;
+  }
+
+  async getSeason(playerId: string) {
+    // seasonReport может создать сезон, если мир его ещё не видел, — тогда
+    // будильник надо поставить, иначе закрытие не придёт вовремя.
+    const result = this.ctx.storage.transactionSync(() => seasonReport(this.sql, playerId, Date.now()));
+    await this.arm();
+    return result;
+  }
+
+  // Cron воркера забирает готовые снимки и подтверждает запись. Отметка `exported`
+  // ставится только после ответа D1: снимок не должен исчезнуть при сбое архива.
+  async takeSnapshots() {
+    return this.ctx.storage.transactionSync(() => pendingSnapshots(this.sql));
+  }
+
+  async ackSnapshots(ids: string[]) {
+    return this.ctx.storage.transactionSync(() => ackSnapshots(this.sql, ids));
   }
 
   verifyLedger(): LedgerReport {

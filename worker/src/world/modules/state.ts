@@ -11,6 +11,7 @@ import { dailyOf, fuelCap, getResource, isFrozen, verifyStatus } from './mainten
 import { playerPayload } from '../scheduler';
 import { marketView } from './market';
 import { getPlayerState } from './players';
+import { seasonBrief } from './season';
 
 export function buildState(sql: SqlStorage, playerId: string, now: number) {
   const base = getPlayerState(sql, playerId);
@@ -100,6 +101,9 @@ export function buildState(sql: SqlStorage, playerId: string, now: number) {
     // Рынок: открытые лоты, коридор по каждому ресурсу и лимиты. Считается в том
     // же ответе /me: клиенту не нужен отдельный поход в /market на старте.
     market: marketView(sql, playerId, now),
+    // Сезон: номер, рамки, дни до конца и место в рейтинге. Полный рейтинг —
+    // в отдельном /season, чтобы /me не раздувался на сто игроков.
+    season: seasonBrief(sql, playerId, now),
   };
 }
 
