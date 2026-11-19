@@ -64,6 +64,9 @@ npx wrangler r2 object get "crypto-astra-backups/worlds/<world>/snapshots/<file>
 npm run verify-snapshot -- --file snap.json --sha256 <sha256 из D1>
 ```
 
+Как устроены окружения (боевая D1, превью-база, локальная разработка), какие
+секреты и миграции где применяются — `docs/ENVIRONMENTS.md`.
+
 Полное восстановление мира по-прежнему идёт через Time Travel Durable Objects:
 снимок — это контрольная точка «что было», а не замена журналу. После
 восстановления сверяем `head_seq`/`head_hash` из снимка с `/me` (`verify`) и
