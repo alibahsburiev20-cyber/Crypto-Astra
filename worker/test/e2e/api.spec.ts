@@ -23,15 +23,19 @@ if (!BASE) {
   } = { token: '', cookie: '', worldId: '', shipId: '', expeditionId: '', claimKey: `claim-${Date.now()}` };
 
   const url = (p: string): string => `${BASE}${p}`;
+  // Токен админки пула: в CI он приходит из .dev.vars, локально — из окружения.
+  const ADMIN = process.env.ADMIN_TOKEN ?? 'ci-admin-token';
 
   async function api(
-    path: string, init: { method?: string; body?: unknown; key?: string; auth?: boolean; cookie?: string } = {},
+    path: string,
+    init: { method?: string; body?: unknown; key?: string; auth?: boolean; cookie?: string; admin?: boolean } = {},
   ) {
     const headers: Record<string, string> = { 'CF-Connecting-IP': IP };
     if (init.body !== undefined) headers['Content-Type'] = 'application/json';
     if (init.auth !== false && state.token) headers.Authorization = `Bearer ${state.token}`;
     if (init.key) headers['Idempotency-Key'] = init.key;
     if (init.cookie) headers.Cookie = init.cookie;
+    if (init.admin) headers['X-Admin-Token'] = ADMIN;
     const res = await fetch(url(path), {
       method: init.method ?? 'GET',
       headers,
@@ -284,6 +288,60 @@ if (!BASE) {
       });
       expect(res.status).toBe(400);
       expect(res.data.error).toBe('self_referral');
+    });
+
+
+    it('GET /pool — публичный отчёт без входа, выплаты выключены', async () => {
+      const res = await api('/pool.json', { auth: false });
+      expect(res.status).toBe(200);
+      const body = res.data as Record<string, any>;
+      expect(body.ok).toBe(true);
+      expect(body.payoutsEnabled).toBe(false);
+      expect(body.feePercent).toBe(20);
+      expect(Array.isArray(body.totals)).toBe(true);
+      expect(Array.isArray(body.latest)).toBe(true);
+      // Публичный отчёт не отдаёт номера платежей.
+      for (const row of body.latest) expect(row.ref).toBeUndefined();
+    });
+
+    it('запись пула без админ-токена отклоняется', async () => {
+      const res = await api('/admin/pool/entry', {
+        method: 'POST', auth: false,
+        body: { kind: 'in', amount: 100, currency: 'EUR', ref: `no-token-${Date.now()}` },
+      });
+      expect(res.status).toBe(401);
+      expect(res.data.error).toBe('admin_token_required');
+    });
+
+    it('админ добавляет взнос, отчёт сходится, повтор не удваивает сумму', async () => {
+      const before = await api('/pool.json', { auth: false });
+      const inBefore = Number((before.data.totals as { currency: string; in: number }[])
+        .find((t) => t.currency === 'EUR')?.in ?? 0);
+
+      const ref = `e2e-in-${Date.now()}`;
+      const added = await api('/admin/pool/entry', {
+        method: 'POST', auth: false, admin: true,
+        body: { kind: 'in', amount: 1234, currency: 'EUR', ref, note: 'e2e взнос' },
+      });
+      expect(added.status).toBe(201);
+      expect(added.data.ref).toBe(ref);
+
+      const after = await api('/pool.json', { auth: false });
+      const inAfter = Number((after.data.totals as { currency: string; in: number }[])
+        .find((t) => t.currency === 'EUR')?.in ?? 0);
+      expect(inAfter - inBefore).toBe(1234);
+
+      const repeat = await api('/admin/pool/entry', {
+        method: 'POST', auth: false, admin: true,
+        body: { kind: 'in', amount: 1234, currency: 'EUR', ref, note: 'e2e взнос' },
+      });
+      expect(repeat.status).toBe(409);
+      expect(repeat.data.error).toBe('pool_ref_exists');
+    });
+
+    it('админский список пула закрыт без токена', async () => {
+      expect((await api('/admin/pool', { auth: false })).status).toBe(401);
+      expect((await api('/admin/pool', { auth: false, admin: true })).status).toBe(200);
     });
 
     it('/social и /guild закрыты для гостя', async () => {

@@ -76,6 +76,16 @@ export const STATUS_BY_CODE: Record<string, number> = {
   referral_already_applied: 409,
   referral_limit: 409,
   referral_not_found: 404,
+  // Этап 5: пул. Деньги учитываем, выплат пока нет.
+  bad_pool_kind: 400,
+  bad_pool_amount: 400,
+  bad_pool_currency: 400,
+  bad_pool_ref: 400,
+  pool_ref_exists: 409,
+  admin_token_required: 401,
+  admin_forbidden: 403,
+  admin_disabled: 503,
+  pool_unavailable: 503,
   season_not_found: 404,
 };
 

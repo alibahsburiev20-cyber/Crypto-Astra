@@ -6,6 +6,7 @@ import {
   guildRename, guildRole, ledger, market, marketBuy, marketCancel, marketLot, me, missionClaim, moduleInstall, passClaim,
   referralApply, repair, season, shipBuy, social, startExpedition,
 } from '../routes/game';
+import { adminPool, adminPoolEntry, poolPublic } from '../routes/pool';
 import { errorResponse, json } from './response';
 
 export async function route(request: Request, env: Env): Promise<Response> {
@@ -15,6 +16,13 @@ export async function route(request: Request, env: Env): Promise<Response> {
   try {
     if (p === '/health') return json({ ok: true, service: 'crypto-astra-api', now: Date.now() });
     if (m === 'GET' && p === '/config') return config(env);
+    // Пул: публичный отчёт открыт без авторизации, запись — только с админ-токеном.
+    if (m === 'GET' && (p === '/pool.json' || p === '/pool/report')) return await poolPublic(env);
+    if (p === '/admin/pool' || p === '/admin/pool/entry') {
+      if (m === 'GET' && p === '/admin/pool') return await adminPool(request, env);
+      if (m === 'POST' && p === '/admin/pool/entry') return await adminPoolEntry(request, env);
+      return json({ error: 'not_found' }, 404);
+    }
 
     if (m === 'POST' && p === '/auth/register') return await register(request, env);
     if (m === 'POST' && p === '/auth/login') return await login(request, env);

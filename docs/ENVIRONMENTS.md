@@ -14,6 +14,7 @@
 | Durable Objects | боевые | изолированные (`[previews.durable_objects]`) | локальные |
 | `TURNSTILE_SITE_KEY` | реальный | пустой — проверка выключена | из `.dev.vars`/`[vars]` |
 | `JWT_SECRET` | секрет | секрет превью **другой** | `.dev.vars` |
+| `ADMIN_TOKEN` | секрет (запись пула) | не нужен, запись не проверяется | `.dev.vars` = `ci-admin-token` |
 | Cron / архив | включён | не срабатывает (превью не планировщик) | вручную |
 | Снимки мира | D1 `world_snapshots` (R2 позже) | не пишутся | не пишутся |
 
@@ -57,7 +58,12 @@ npx wrangler d1 migrations list DB --remote --preview
 # production — единственное место, где ключ подписи действительно секрет
 npx wrangler secret put JWT_SECRET
 npx wrangler secret put TURNSTILE_SECRET      # если site key включён
+npx wrangler secret put ADMIN_TOKEN           # запись пула (этап 5)
 ```
+
+Секрет `ADMIN_TOKEN` можно поставить и из браузера: Cloudflare Dashboard →
+Workers & Pages → crypto-astra → Settings → Variables and Secrets → Add → Secret.
+Пока он пуст, публичный отчёт работает, а запись отвечает 503 `admin_disabled`.
 
 - Боевой `JWT_SECRET` **обязан отличаться** от превью-ключа: иначе токен,
   выпущенный на превью, криптографически годится и для прода (спасает только то,
