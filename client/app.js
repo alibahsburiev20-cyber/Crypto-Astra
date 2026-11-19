@@ -685,20 +685,22 @@ function renderMarket() {
   const total = amount * price;
   const tax = Math.floor(total * m.tax / 100);
   const outOfBand = price < band.min || price > band.max;
-  const canSell = !state.frozen && resource.have >= amount && amount >= 1 && price > 0 && !outOfBand && m.mine < m.limit;
+  // Кнопка активна, пока есть что продавать: количество и цену читаем в момент
+  // клика (onClick ниже), иначе после правки поля уходили бы старые значения.
+  const canSell = !state.frozen && resource.have >= 1 && m.mine < m.limit;
 
   const resSelect = el('select', {
-    onChange: (e) => { window.__mkt = { ...(window.__mkt || {}), resource: e.currentTarget.value }; render(); },
+    onChange: (e) => { window.__mkt = { resource: e.currentTarget.value }; render(); },
   }, ...m.resources.map((r) => el('option', { value: r.id, selected: r.id === resource.id ? '' : null },
     `${r.name} · в трюме ${r.have}`)));
 
   const amountInput = el('input', {
     type: 'number', min: '1', max: String(m.maxAmount), step: '1', value: String(amount), inputmode: 'numeric',
-    onInput: (e) => { window.__mkt = { ...(window.__mkt || {}), amount: Number(e.currentTarget.value) }; },
+    onChange: (e) => { window.__mkt = { ...(window.__mkt || {}), amount: Number(e.currentTarget.value) }; render(); },
   });
   const priceInput = el('input', {
     type: 'number', min: String(band.min), max: String(band.max), step: '1', value: String(price), inputmode: 'numeric',
-    onInput: (e) => { window.__mkt = { ...(window.__mkt || {}), price: Number(e.currentTarget.value) }; },
+    onChange: (e) => { window.__mkt = { ...(window.__mkt || {}), price: Number(e.currentTarget.value) }; render(); },
   });
 
   const form = el('div', { class: 'block market-form' },
@@ -718,8 +720,8 @@ function renderMarket() {
     el('button', {
       type: 'button',
       disabled: canSell ? null : '',
-      onClick: () => doSellLot(resource.id, amount, price),
-    }, outOfBand ? 'Цена вне коридора' : resource.have < amount ? 'Не хватает ресурса' : m.mine >= m.limit ? 'Лимит лотов' : 'Выставить лот'),
+      onClick: () => doSellLot(resource.id, Number(amountInput.value) || amount, Number(priceInput.value) || price),
+    }, resource.have < 1 ? 'В трюме нет ресурса' : m.mine >= m.limit ? 'Лимит лотов' : outOfBand ? 'Выставить (цена вне коридора)' : 'Выставить лот'),
   );
 
   return el('div', { class: 'screen' },
