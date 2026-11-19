@@ -9,7 +9,12 @@ const client = readFileSync(new URL('client/app.js', root), 'utf8');
 const worker = readFileSync(new URL('worker/src/http/router.ts', root), 'utf8')
   + readFileSync(new URL('worker/src/routes/auth.ts', root), 'utf8')
   + readFileSync(new URL('worker/src/routes/game.ts', root), 'utf8')
-  + readFileSync(new URL('worker/src/auth/guards.ts', root), 'utf8');
+  + readFileSync(new URL('worker/src/auth/guards.ts', root), 'utf8')
+  // Срез 6: рынок бросает свои коды из модуля, а не из маршрута.
+  + readFileSync(new URL('worker/src/world/modules/market.ts', root), 'utf8')
+  + readFileSync(new URL('worker/src/world/modules/ships.ts', root), 'utf8')
+  + readFileSync(new URL('worker/src/world/modules/crafting.ts', root), 'utf8')
+  + readFileSync(new URL('worker/src/world/modules/shipModules.ts', root), 'utf8');
 
 describe('коды ошибок клиента и сервера', () => {
   it('у каждого кода ApiError есть перевод', () => {

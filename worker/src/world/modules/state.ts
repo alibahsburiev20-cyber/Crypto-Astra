@@ -9,6 +9,7 @@ import { listExpeditions } from './expeditions';
 import { craftCatalog, listCraftJobs, CRAFT_SLOTS } from './crafting';
 import { dailyOf, fuelCap, getResource, isFrozen, verifyStatus } from './maintenance';
 import { playerPayload } from '../scheduler';
+import { marketView } from './market';
 import { getPlayerState } from './players';
 
 export function buildState(sql: SqlStorage, playerId: string, now: number) {
@@ -96,6 +97,9 @@ export function buildState(sql: SqlStorage, playerId: string, now: number) {
       };
     }),
     sectors: SECTORS.map((s) => ({ id: s.id, name: s.name, level: s.level, open: base.level >= s.level })),
+    // Рынок: открытые лоты, коридор по каждому ресурсу и лимиты. Считается в том
+    // же ответе /me: клиенту не нужен отдельный поход в /market на старте.
+    market: marketView(sql, playerId, now),
   };
 }
 

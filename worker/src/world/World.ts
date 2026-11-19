@@ -8,6 +8,7 @@ import { createPlayer } from './modules/players';
 import { buildState, listLedger } from './modules/state';
 import { installModule } from './modules/shipModules';
 import { buyShip } from './modules/ships';
+import { buyLot, cancelLot, createLot, marketView, type CreateLotInput } from './modules/market';
 import { buyFuel, repairShip } from './modules/upkeep';
 import { verifyLedger, type LedgerReport } from './ledger';
 import { backfillProgressLedger, backfillResourceLedger, migrateLegacyExpeditions } from './migrate';
@@ -68,6 +69,31 @@ export class World extends DurableObject<Env> {
   async buyShip(playerId: string, idemKey: string, type: string) {
     const now = Date.now();
     const result = this.ctx.storage.transactionSync(() => buyShip(this.sql, playerId, idemKey, type, now));
+    await this.arm();
+    return result;
+  }
+
+  getMarket(playerId: string) {
+    return this.ctx.storage.transactionSync(() => marketView(this.sql, playerId, Date.now()));
+  }
+
+  async createLot(playerId: string, idemKey: string, body: CreateLotInput) {
+    const now = Date.now();
+    const result = this.ctx.storage.transactionSync(() => createLot(this.sql, playerId, idemKey, body, now));
+    await this.arm();
+    return result;
+  }
+
+  async buyLot(playerId: string, idemKey: string, lotId: string) {
+    const now = Date.now();
+    const result = this.ctx.storage.transactionSync(() => buyLot(this.sql, playerId, idemKey, lotId, now));
+    await this.arm();
+    return result;
+  }
+
+  async cancelLot(playerId: string, idemKey: string, lotId: string) {
+    const now = Date.now();
+    const result = this.ctx.storage.transactionSync(() => cancelLot(this.sql, playerId, idemKey, lotId, now));
     await this.arm();
     return result;
   }

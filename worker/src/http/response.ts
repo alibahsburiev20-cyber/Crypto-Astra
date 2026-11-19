@@ -42,6 +42,16 @@ const STATUS_BY_CODE: Record<string, number> = {
   ship_not_for_sale: 400,
   ship_locked: 403,
   ship_owned: 409,
+  // Срез 6: рынок.
+  bad_resource: 400,
+  bad_amount: 400,
+  bad_price: 400,
+  lot_not_found: 404,
+  lot_closed: 409,
+  own_lot: 409,
+  not_your_lot: 403,
+  market_lot_limit: 409,
+  price_out_of_band: 409,
 };
 
 export function json(data: unknown, status = 200, headers: Record<string, string> = {}): Response {

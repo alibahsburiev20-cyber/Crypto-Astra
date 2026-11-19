@@ -98,3 +98,30 @@ export async function shipBuy(request: Request, env: Env, a: AuthContext): Promi
   if (!type) throw new ApiError(400, 'bad_ship_type');
   return json(await world(env, a).buyShip(a.userId, idemKey(request), type));
 }
+
+export async function market(url: URL, env: Env, a: AuthContext): Promise<Response> {
+  return json(await world(env, a).getMarket(a.userId));
+}
+
+export async function marketLot(request: Request, env: Env, a: AuthContext): Promise<Response> {
+  const body = await readJson(request);
+  const resource = typeof body.resource === 'string' ? body.resource : '';
+  const amount = Number(body.amount);
+  const unitPrice = Number(body.unitPrice);
+  if (!resource) throw new ApiError(400, 'bad_resource');
+  return json(await world(env, a).createLot(a.userId, idemKey(request), { resource, amount, unitPrice }));
+}
+
+export async function marketBuy(request: Request, env: Env, a: AuthContext): Promise<Response> {
+  const body = await readJson(request);
+  const lotId = typeof body.lotId === 'string' ? body.lotId : '';
+  if (!lotId) throw new ApiError(400, 'lot_not_found');
+  return json(await world(env, a).buyLot(a.userId, idemKey(request), lotId));
+}
+
+export async function marketCancel(request: Request, env: Env, a: AuthContext): Promise<Response> {
+  const body = await readJson(request);
+  const lotId = typeof body.lotId === 'string' ? body.lotId : '';
+  if (!lotId) throw new ApiError(400, 'lot_not_found');
+  return json(await world(env, a).cancelLot(a.userId, idemKey(request), lotId));
+}

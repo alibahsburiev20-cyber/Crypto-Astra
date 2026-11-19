@@ -1,18 +1,30 @@
 /**
- * Симуляция экономики этапа 1 на реальных формулах игры.
+ * Симуляция экономики этапа 2 на реальных формулах и ценах игры.
  *
  * Запуск: npm run simulate -- --players 200 --days 30 --claims 32 --max-expeditions 5
  *
- * Считает источники и стоки ASTRA по §I.10 концепции: Claim, награды экспедиций,
- * стартовый бонус, покупка топлива и ремонт. Цель — стоки возвращают 70–90% выпущенной
- * валюты. Число стартовое: до гейта 3 его подгоняют коэффициентами, а не «на глаз».
+ * Что считается (срез 7): Claim, награды экспедиций, топливо, ремонт, плата за крафт,
+ * модули, верфь и налог рынка. Цель — стоки возвращают 70–90 % выпущенной валюты.
+ *
+ * Модель поведения (это допущения, а не правила игры):
+ *  · игрок заходит раз в день, делает Claim и до N рейсов;
+ *  · ремонтируется, когда прочность ниже 70 %, и только если хватает ASTRA;
+ *  · ставит модули по порядку, если есть цена и компоненты, и держит резерв;
+ *  · покупает следующий корабль, когда накопил цену плюс резерв;
+ *  · лишние ресурсы продаёт на рынке (это перевод между игроками: в поглощение
+ *    идёт только 5 % налога, а не вся выручка).
  */
 import {
-  CLAIM_DAILY_MAX, DAY_MS, EXPEDITION_FULL_REWARD, FUEL_DAILY_MAX, FUEL_REGEN_MS,
-  FUEL_UNIT_PRICE, START_ASTRA, START_FUEL,
+  CLAIM_DAILY_MAX, FUEL_DAILY_MAX, FUEL_REGEN_MS, FUEL_UNIT_PRICE, REPAIR_ASTRA_PER_PERCENT, START_ASTRA, START_FUEL,
 } from '../worker/src/shared/constants';
-import { EXPEDITION_TYPES, PLANETS, SHIPS, type ExpeditionKind } from '../worker/src/shared/gameData';
+import {
+  EXPEDITION_TYPES, MODULES, MODULE_MAX_LEVEL, MODULE_ORDER, PLANETS, RECIPE_ORDER, RECIPES, RESOURCE_BASE_PRICES,
+  SHIPS, marketTax, moduleFx, moduleParts, modulePrice, sectorById,
+  type ExpeditionKind, type ModuleId, type PlanetDef, type ShipType,
+} from '../worker/src/shared/gameData';
 import { computeReward, fuelCost, levelFromXp, repairCost } from '../worker/src/world/modules/expeditionMath';
+
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 interface Args {
   players: number;
@@ -20,6 +32,14 @@ interface Args {
   claims: number;
   maxExpeditions: number;
   seed: number;
+  reserve: number;
+  /** Пробные коэффициенты: с ними ищем значения, потом переносим в константы. */
+  repairPerPct: number | null;
+  astraMult: number | null;
+  /** Доля дневного дохода, которую игрок готов вложить в модули и корабли. */
+  invest: number;
+  /** Смешанная популяция: новички, обычные, активные. */
+  mix: boolean;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -35,8 +55,21 @@ function parseArgs(argv: string[]): Args {
     claims: Math.min(CLAIM_DAILY_MAX, Math.max(0, Math.floor(arg('claims', 32)))),
     maxExpeditions: Math.max(0, Math.floor(arg('max-expeditions', 5))),
     seed: Math.floor(arg('seed', 1)),
+    // Резерв: игрок не тратит последнее, иначе нечем покупать топливо.
+    reserve: Math.max(0, Math.floor(arg('reserve', 250))),
+    repairPerPct: argv.includes('--repair-percent') ? arg('repair-percent', 0) : null,
+    astraMult: argv.includes('--astra-mult') ? arg('astra-mult', 1) : null,
+    invest: Math.min(1, Math.max(0, arg('invest', 0.4))),
+    mix: argv.includes('--mix'),
   };
 }
+
+/** Архетипы игроков: онлайна в игре ещё нет, поэтому это гипотеза, а не факт. */
+const ARCHETYPES = [
+  { id: 'новичок', share: 0.5, claims: 10, flights: 2, invest: 0.4 },
+  { id: 'обычный', share: 0.35, claims: 32, flights: 5, invest: 0.4 },
+  { id: 'активный', share: 0.15, claims: 64, flights: 8, invest: 0.35 },
+];
 
 // Детерминированный PRNG: один и тот же seed даёт один и тот же отчёт.
 function mulberry32(seed: number): () => number {
@@ -56,123 +89,411 @@ function hexSeed(rnd: () => number): string {
   return out;
 }
 
+interface SimShip {
+  type: ShipType;
+  durability: number;
+  modules: Partial<Record<ModuleId, number>>;
+}
+
+interface Player {
+  astra: number;
+  fuel: number;
+  xp: number;
+  level: number;
+  ships: SimShip[];
+  res: Record<string, number>;
+  craftMinutes: number;
+  /** Копилка на прогресс: сюда откладывается доля дохода, отсюда платятся модули и корабли. */
+  fund: number;
+}
+
 interface Totals {
   claims: number;
   expeditionAstra: number;
-  startBonus: number;
   fuelSpend: number;
   repairSpend: number;
+  craftSpend: number;
+  moduleSpend: number;
+  shipSpend: number;
+  marketTax: number;
+  marketTurnover: number;
   flights: number;
+  crafts: number;
+  modulesInstalled: number;
+  shipsBought: number;
   stuck: number;
   finalAstra: number;
   finalDurability: number;
+  finalLevel: number;
+  soldUnits: number;
+}
+
+const SHIP_ORDER: ShipType[] = ['hauler', 'miner', 'explorer', 'cruiser'];
+
+function installed(ship: SimShip): { module: ModuleId; level: number }[] {
+  return MODULE_ORDER.filter((id) => (ship.modules[id] ?? 0) > 0)
+    .map((id) => ({ module: id, level: ship.modules[id] as number }));
+}
+
+function usedSlots(ship: SimShip): number {
+  return MODULE_ORDER.filter((id) => (ship.modules[id] ?? 0) > 0).length;
+}
+
+function fleetCap(p: Player): number {
+  let cap = 0;
+  for (const ship of p.ships) {
+    const bonus = (ship.modules.fuel_system ?? 0) * MODULES.fuel_system.perLevel;
+    cap = Math.max(cap, SHIPS[ship.type].tank + bonus);
+  }
+  return cap;
+}
+
+function have(p: Player, resource: string): number {
+  return p.res[resource] ?? 0;
+}
+
+/** Плановая установка: первый по порядку модуль, который ещё не на максимуме. */
+function nextModule(ship: SimShip): { id: ModuleId; level: number } | null {
+  for (const id of MODULE_ORDER) {
+    const level = ship.modules[id] ?? 0;
+    if (level < MODULE_MAX_LEVEL) break;
+  }
+  for (const id of MODULE_ORDER) {
+    const level = ship.modules[id] ?? 0;
+    if (level === 0 && usedSlots(ship) < SHIPS[ship.type].slots) return { id, level: 1 };
+    if (level > 0 && level < MODULE_MAX_LEVEL) return { id, level: level + 1 };
+  }
+  return null;
+}
+
+/**
+ * Сколько чего игроку нужно в ближайшее время: компоненты под следующий модуль и
+ * сырьё под их крафт, плюс пластина для крупного ремонта. По этому списку он и
+ * выбирает планету — иначе возит один ресурс и не может крафтить.
+ */
+function needs(p: Player): Map<string, number> {
+  const need = new Map<string, number>();
+  const add = (resource: string, amount: number): void => {
+    need.set(resource, Math.max(need.get(resource) ?? 0, amount));
+  };
+  for (const ship of p.ships) {
+    const next = nextModule(ship);
+    if (!next) continue;
+    for (const part of moduleParts(next.id, next.level)) {
+      if ((RECIPE_ORDER as string[]).includes(part.resource)) {
+        const recipe = RECIPES[part.resource as (typeof RECIPE_ORDER)[number]];
+        for (const input of recipe.inputs) add(input.resource, input.amount);
+      } else {
+        add(part.resource, part.amount);
+      }
+    }
+  }
+  if (p.ships.some((s) => s.durability < 55) && have(p, 'alloy_plate') === 0) {
+    for (const input of RECIPES.alloy_plate.inputs) add(input.resource, input.amount);
+  }
+  return need;
 }
 
 function simulate(args: Args): Totals {
   const rnd = mulberry32(args.seed);
   const t: Totals = {
-    claims: 0, expeditionAstra: 0, startBonus: 0, fuelSpend: 0, repairSpend: 0,
-    flights: 0, stuck: 0, finalAstra: 0, finalDurability: 0,
+    claims: 0, expeditionAstra: 0, fuelSpend: 0, repairSpend: 0, craftSpend: 0,
+    moduleSpend: 0, shipSpend: 0, marketTax: 0, marketTurnover: 0,
+    flights: 0, crafts: 0, modulesInstalled: 0, shipsBought: 0, stuck: 0,
+    finalAstra: 0, finalDurability: 0, finalLevel: 0, soldUnits: 0,
   };
-  const scout = SHIPS.scout;
-  const cap = scout.tank;
   const regenPerDay = Math.floor(DAY_MS / FUEL_REGEN_MS);
 
-  for (let p = 0; p < args.players; p++) {
-    let astra = START_ASTRA;
-    let fuel = START_FUEL;
-    let durability = 100;
-    let xp = 0;
-    let level = 1;
-    t.startBonus += START_ASTRA;
+  for (let n = 0; n < args.players; n++) {
+    const claimsPerDay = args.claims;
+    const flightsPerDay = args.maxExpeditions;
+    const invest = args.invest;
+    const p: Player = {
+      astra: START_ASTRA,
+      fuel: START_FUEL,
+      xp: 0,
+      level: 1,
+      ships: [{ type: 'scout', durability: 100, modules: {} }],
+      res: {},
+      craftMinutes: 0,
+      fund: 0,
+    };
+
+    const repair = (ship: SimShip): boolean => {
+      if (ship.durability >= 100) return false;
+      const fx = moduleFx(installed(ship));
+      const lost = 100 - ship.durability;
+      const cost = args.repairPerPct == null
+        ? repairCost(lost, SHIPS[ship.type].repairCoef, fx.repair)
+        : Math.round(args.repairPerPct * lost * SHIPS[ship.type].repairCoef * fx.repair);
+      const needsPlate = ship.durability < 50;
+      if (p.astra < cost || (needsPlate && have(p, 'alloy_plate') < 1)) return false;
+      if (needsPlate) p.res.alloy_plate -= 1;
+      p.astra -= cost;
+      t.repairSpend += cost;
+      ship.durability = 100;
+      return true;
+    };
+
+    const craft = (id: (typeof RECIPE_ORDER)[number]): boolean => {
+      const recipe = RECIPES[id];
+      // craftMinutes — минуты, ms в рецепте — миллисекунды.
+      const minutes = Math.ceil(recipe.ms / 60000);
+      if (p.craftMinutes < minutes) return false;
+      if (p.astra < recipe.fee) return false;
+      if (recipe.inputs.some((i) => have(p, i.resource) < i.amount)) return false;
+      for (const i of recipe.inputs) p.res[i.resource] -= i.amount;
+      p.astra -= recipe.fee;
+      p.craftMinutes -= minutes;
+      p.res[id] = have(p, id) + 1;
+      t.craftSpend += recipe.fee;
+      t.crafts += 1;
+      return true;
+    };
 
     for (let day = 0; day < args.days; day++) {
-      // Топливо восстанавливается +1 каждые 2 часа, но бак не переполняется.
-      fuel = Math.min(cap, fuel + regenPerDay);
-
-      const claims = Math.min(args.claims, CLAIM_DAILY_MAX);
-      astra += claims * 5;
+      p.fuel = Math.min(fleetCap(p), p.fuel + regenPerDay);
+      p.craftMinutes = 24 * 60; // один слот крафта на игрока, но за день его много
+      const claims = claimsPerDay;
+      p.astra += claims * 5;
       t.claims += claims * 5;
+      // В копилку на прогресс уходит доля дохода. Копить на корабль за 6000 ASTRA —
+      // нормальное поведение, поэтому покупка ждёт, пока в копилке хватит.
+      p.fund += claims * 5 * invest;
 
-      let bought = 0;
-      let expeditions = 0;
-      while (expeditions < args.maxExpeditions) {
-        if (durability <= 0) break;
-        // Ниже 50% ремонт закрыт (нет alloy_plate): игрок встаёт до этапа 2.
-        if (durability < 60 && durability >= 50) {
-          const cost = repairCost(100 - durability, scout.repairCoef);
-          if (astra >= cost) {
-            astra -= cost;
-            t.repairSpend += cost;
-            durability = 100;
+      // ── Рейсы ──────────────────────────────────────────────────────────────
+      let flightsToday = 0;
+      let boughtToday = 0;
+      while (flightsToday < flightsPerDay) {
+        const ship = p.ships
+          .filter((s) => s.durability > 0)
+          .sort((a, b) => b.durability - a.durability)[0];
+        if (!ship) break;
+
+        if (ship.durability < 70) {
+          if (!repair(ship)) {
+            // Нужна пластина: крафтим её, если есть руда и ASTRA на плату.
+            if (ship.durability < 50 && have(p, 'alloy_plate') === 0) {
+              while (have(p, 'alloy_plate') === 0 && craft('alloy_plate')) { /* плавим, пока выходит */ }
+            }
+            if (!repair(ship)) break;
           }
         }
-        // Ниже 50% ремонт закрыт до появления alloy_plate (этап 2).
-        if (durability < 50) break;
 
-        const kind: ExpeditionKind = fuel >= 2 && expeditions < Math.floor(args.maxExpeditions / 2) && rnd() < 0.25 ? 'medium' : 'short';
-        const cost = fuelCost(scout.consumption, kind);
-        while (fuel < cost && bought < FUEL_DAILY_MAX && astra >= FUEL_UNIT_PRICE) {
-          astra -= FUEL_UNIT_PRICE;
+        const fx = moduleFx(installed(ship));
+        const r = rnd();
+        const kinds: ExpeditionKind[] = [];
+        if (p.fuel >= fuelCost(SHIPS[ship.type].consumption, 'long') && r < 0.05) kinds.push('long');
+        else if (p.fuel >= fuelCost(SHIPS[ship.type].consumption, 'medium') && r < 0.35) kinds.push('medium');
+        else kinds.push('short');
+        const kind = kinds[0];
+        const cost = fuelCost(SHIPS[ship.type].consumption, kind);
+        while (p.fuel < cost && boughtToday < FUEL_DAILY_MAX && p.astra >= FUEL_UNIT_PRICE + args.reserve) {
+          p.fuel += 1;
+          p.astra -= FUEL_UNIT_PRICE;
           t.fuelSpend += FUEL_UNIT_PRICE;
-          fuel += 1;
-          bought += 1;
+          boughtToday += 1;
         }
-        if (fuel < cost) break;
+        if (p.fuel < cost) break;
 
-        const open = PLANETS.filter((pl) => pl.sector <= Math.min(scout.maxSector, 2) && pl.sector <= level);
+        const open = PLANETS.filter((pl) => pl.sector <= SHIPS[ship.type].maxSector
+          && p.level >= sectorById(pl.sector).level);
         if (!open.length) break;
-        // Игрок выбирает планету потруднее: там больше награда и износ.
-        const planet = open.reduce((a, b) => (b.difficulty > a.difficulty ? b : a));
+        // Игрок ищет то, чего не хватает для следующего модуля или пластины, а потом
+        // уже самое сложное: иначе он вечно возит один ресурс и не может крафтить.
+        const want = needs(p);
+        const score = (pl: PlanetDef): number => {
+          let sc = pl.difficulty * 0.5;
+          for (const r of pl.resources) {
+            const target = want.get(r) ?? 0;
+            const haveNow = have(p, r);
+            if (target > 0 && haveNow < target) sc += 3;
+            else if (target > 0 && haveNow < target * 3) sc += 1;
+          }
+          return sc;
+        };
+        const planet: PlanetDef = open.reduce((a, b) => (score(b) > score(a) ? b : a));
         const reward = computeReward({
-          planet, shipType: 'scout', kind, seed: hexSeed(rnd), eventBonusBp: 1000,
-          extraWear: 0, durability, expeditionsToday: expeditions, pointsToday: 0,
+          planet, shipType: ship.type, kind, seed: hexSeed(rnd), eventBonusBp: 1000,
+          extraWear: 0, durability: ship.durability, expeditionsToday: flightsToday, pointsToday: 0, fx,
         });
 
-        fuel -= cost;
-        astra += reward.astra;
-        durability = Math.max(0, durability - reward.wear);
-        xp += reward.xp;
-        level = levelFromXp(xp);
-        t.expeditionAstra += reward.astra;
+        p.fuel -= cost;
+        const astraGain = args.astraMult == null ? reward.astra : Math.round(reward.astra * args.astraMult);
+        p.astra += astraGain;
+        ship.durability = Math.max(0, ship.durability - reward.wear);
+        p.xp += reward.xp;
+        p.level = levelFromXp(p.xp);
+        t.expeditionAstra += astraGain;
+        p.fund += astraGain * invest;
         t.flights += 1;
-        expeditions += 1;
+        flightsToday += 1;
+        for (const stack of reward.resources) p.res[stack.resource] = have(p, stack.resource) + stack.amount;
+      }
+
+      // ── Крафт под модули ──────────────────────────────────────────────────
+      for (const ship of p.ships) {
+        const next = nextModule(ship);
+        if (!next) continue;
+        for (const part of moduleParts(next.id, next.level)) {
+          const isComponent = (RECIPE_ORDER as string[]).includes(part.resource);
+          if (!isComponent) continue;
+          while (have(p, part.resource) < part.amount && craft(part.resource as (typeof RECIPE_ORDER)[number])) {
+            // крафтим ровно столько, сколько не хватает
+          }
+        }
+      }
+
+      // ── Модули ─────────────────────────────────────────────────────────────
+      for (const ship of p.ships) {
+        const next = nextModule(ship);
+        if (!next) continue;
+        const price = modulePrice(next.id, next.level);
+        const parts = moduleParts(next.id, next.level);
+        const partsOk = parts.every((x) => have(p, x.resource) >= x.amount);
+        if (!partsOk || p.astra < price + args.reserve) continue;
+        if (p.fund < price) continue;
+        for (const x of parts) p.res[x.resource] -= x.amount;
+        p.astra -= price;
+        t.moduleSpend += price;
+        ship.modules[next.id] = next.level;
+        p.fund -= price;
+        t.modulesInstalled += 1;
+      }
+
+      // ── Верфь ──────────────────────────────────────────────────────────────
+      for (const type of SHIP_ORDER) {
+        const def = SHIPS[type];
+        if (def.price == null) continue;
+        if (p.ships.some((s) => s.type === type)) continue;
+        if (p.level < def.unlockLevel) continue;
+        if (p.astra < def.price + args.reserve) continue;
+        if (p.fund < def.price) continue;
+        p.astra -= def.price;
+        p.fund -= def.price;
+        t.shipSpend += def.price;
+        t.shipsBought += 1;
+        p.ships.push({ type, durability: 100, modules: {} });
+        break;
+      }
+
+      // ── Рынок: лишние ресурсы уходят другим игрокам ────────────────────────
+      // Выручка — перевод между игроками, поэтому баланс от неё не растёт:
+      // в поглощение идёт только налог. Иначе один игрок «печатал» бы ASTRA.
+      const keep: Record<string, number> = { iron_ore: 6, copper_ore: 6, silicon: 6, ice: 6 };
+      let revenue = 0;
+      let units = 0;
+      for (const [resource, amount] of Object.entries(p.res)) {
+        const surplus = amount - (keep[resource] ?? 2);
+        if (surplus <= 0) continue;
+        const price = RESOURCE_BASE_PRICES[resource];
+        if (!price) continue;
+        p.res[resource] = amount - surplus;
+        revenue += surplus * price;
+        units += surplus;
+      }
+      if (revenue > 0) {
+        t.marketTurnover += revenue;
+        t.marketTax += marketTax(revenue);
+        t.soldUnits += units;
       }
     }
 
-    t.finalAstra += astra;
-    t.finalDurability += durability;
-    if (durability < 50) t.stuck += 1;
+    t.finalAstra += p.astra;
+    t.finalDurability += p.ships.reduce((a, s) => a + s.durability, 0) / p.ships.length;
+    t.finalLevel += p.level;
+    // Застрял: все корабли ниже 50 %, пластины нет и на крафт пластины не хватает.
+    const broken = p.ships.every((s) => s.durability < 50);
+    const canPlate = have(p, 'alloy_plate') > 0 || (p.astra >= RECIPES.alloy_plate.fee
+      && RECIPES.alloy_plate.inputs.every((i) => have(p, i.resource) >= i.amount));
+    if (broken && !canPlate) t.stuck += 1;
   }
   return t;
 }
 
 const args = parseArgs(process.argv.slice(2));
-const r = simulate(args);
-const income = r.claims + r.expeditionAstra;
-const sinks = r.fuelSpend + r.repairSpend;
-const ratio = income > 0 ? (sinks / income) * 100 : 0;
+const fmt = (n: number): string => Math.round(n).toLocaleString('ru-RU');
 
-const fmt = (n: number): string => n.toLocaleString('ru-RU', { maximumFractionDigits: 0 });
-console.log(`Crypto Astra — симуляция экономики (${args.days} дн., ${args.players} игроков, seed ${args.seed})`);
+interface Run extends Totals {
+  label: string;
+  players: number;
+  days: number;
+  claimsPerDay: number;
+  flightsPerDay: number;
+  invest: number;
+}
+
+function addTotals(a: Totals, b: Totals): Totals {
+  const out = { ...a };
+  for (const key of Object.keys(b) as (keyof Totals)[]) out[key] += b[key];
+  return out;
+}
+
+function run(label: string, players: number, claims: number, flights: number, invest: number): Run {
+  const sub: Args = { ...args, players, claims, maxExpeditions: flights, invest };
+  return { ...simulate(sub), label, players, days: args.days, claimsPerDay: claims, flightsPerDay: flights, invest };
+}
+
+const runs: Run[] = args.mix
+  ? ARCHETYPES.map((a) => run(a.id, Math.max(1, Math.round(args.players * a.share)), a.claims, a.flights, a.invest))
+  : [run('профиль', args.players, args.claims, args.maxExpeditions, args.invest)];
+
+let total = runs.reduce((acc, r) => addTotals(acc, r), {
+  claims: 0, expeditionAstra: 0, fuelSpend: 0, repairSpend: 0, craftSpend: 0, moduleSpend: 0,
+  shipSpend: 0, marketTax: 0, marketTurnover: 0, flights: 0, crafts: 0, modulesInstalled: 0,
+  shipsBought: 0, stuck: 0, finalAstra: 0, finalDurability: 0, finalLevel: 0, soldUnits: 0,
+} as Totals);
+const totalPlayers = runs.reduce((a, r) => a + r.players, 0);
+
+const created = total.claims + total.expeditionAstra;
+const sinksOf = (t: Totals): number => t.fuelSpend + t.repairSpend + t.craftSpend + t.moduleSpend + t.shipSpend + t.marketTax;
+const sinks = sinksOf(total);
+const ratio = created > 0 ? (sinks / created) * 100 : 0;
+const shareOf = (n: number): string => `${created > 0 ? ((n / created) * 100).toFixed(1) : '0.0'}%`;
+
+console.log(`Crypto Astra — симуляция экономики этапа 2 (${args.days} дн., ${totalPlayers} игроков, seed ${args.seed})`);
+if (args.mix) {
+  console.log(`Популяция: ${ARCHETYPES.map((a) => `${a.id} ${Math.round(a.share * 100)}%`).join(', ')}`);
+} else {
+  console.log(`Профиль: ${args.claims} Claim/день, до ${args.maxExpeditions} рейсов/день, резерв ${args.reserve} ASTRA, в прогресс ${Math.round(args.invest * 100)}% дохода`);
+}
+if (args.repairPerPct != null || args.astraMult != null) {
+  console.log(`ПРОБНЫЙ ПРОГОН: ремонт ${args.repairPerPct ?? REPAIR_ASTRA_PER_PERCENT}/%, награда ×${args.astraMult ?? 1} — в константы ещё не внесено`);
+}
 console.log('');
 console.log('Источники ASTRA:');
-console.log(`  Claim (${args.claims}/день): ${fmt(r.claims)}`);
-console.log(`  награды экспедиций (${r.flights} рейсов): ${fmt(r.expeditionAstra)}`);
-console.log(`  стартовый бонус (вне оборота): ${fmt(r.startBonus)}`);
+console.log(`  Claim: ${fmt(total.claims)}`);
+console.log(`  награды экспедиций (${fmt(total.flights)} рейсов): ${fmt(total.expeditionAstra)}`);
+console.log(`  всего выпущено: ${fmt(created)}`);
 console.log('Стоки ASTRA:');
-console.log(`  покупка топлива: ${fmt(r.fuelSpend)}`);
-console.log(`  ремонт: ${fmt(r.repairSpend)}`);
+console.log(`  топливо:            ${fmt(total.fuelSpend)} (${shareOf(total.fuelSpend)})`);
+console.log(`  ремонт:             ${fmt(total.repairSpend)} (${shareOf(total.repairSpend)})`);
+console.log(`  плата за крафт:     ${fmt(total.craftSpend)} (${shareOf(total.craftSpend)}) кр. ${fmt(total.crafts)}`);
+console.log(`  модули:             ${fmt(total.moduleSpend)} (${shareOf(total.moduleSpend)}) шт. ${fmt(total.modulesInstalled)}`);
+console.log(`  верфь:              ${fmt(total.shipSpend)} (${shareOf(total.shipSpend)}) шт. ${fmt(total.shipsBought)}`);
+console.log(`  налог рынка 5%:     ${fmt(total.marketTax)} (${shareOf(total.marketTax)}) оборот ${fmt(total.marketTurnover)}`);
+console.log(`  всего стоков: ${fmt(sinks)}`);
 console.log('');
-console.log(`Поглощение без стартового бонуса: ${ratio.toFixed(1)}% (цель 70–90%)`);
-console.log(`Средний баланс на конец: ${fmt(r.finalAstra / args.players)} ASTRA`);
-console.log(`Средняя прочность: ${(r.finalDurability / args.players).toFixed(0)}%`);
-console.log(`Игроков застряло без ремонта (ниже 50%): ${r.stuck}`);
+console.log(`Поглощение: ${ratio.toFixed(1)}% (цель 70–90%)`);
+console.log(`Средний баланс: ${fmt(total.finalAstra / totalPlayers)} ASTRA · уровень ${(total.finalLevel / totalPlayers).toFixed(1)} · прочность ${(total.finalDurability / totalPlayers).toFixed(0)}%`);
+console.log(`Продано на рынке: ${fmt(total.soldUnits)} единиц ресурсов`);
+console.log(`Застряло без ремонта: ${total.stuck} из ${totalPlayers}`);
+
+if (runs.length > 1) {
+  console.log('');
+  console.log('По архетипам:');
+  console.log('  архетип    игроков  Claim   рейсов  в прогресс  поглощение  баланс');
+  for (const r of runs) {
+    const c = r.claims + r.expeditionAstra;
+    const k = sinksOf(r);
+    console.log(`  ${r.label.padEnd(9)}  ${String(r.players).padStart(6)}  ${String(r.claimsPerDay).padStart(6)}  ${String(r.flightsPerDay).padStart(6)}  ${String(Math.round(r.invest * 100) + '%').padStart(10)}  ${((c > 0 ? (k / c) * 100 : 0).toFixed(1) + '%').padStart(10)}  ${fmt(r.finalAstra / r.players).padStart(6)}`);
+  }
+}
 
 if (ratio < 70) {
   console.log('');
-  console.log('Вывод: стоков мало. До гейта 3 нужно поднимать расходы (топливо, ремонт, крафт)');
-  console.log('или снижать доход Claim/экспедиций, а не «крутить на глаз».');
+  console.log('Вывод: стоков мало. Поднимать надо расходы игрока (ремонт, крафт, модули),');
+  console.log('а не резать Claim: иначе новичок не накопит на первый корабль.');
 } else if (ratio > 90) {
   console.log('');
   console.log('Вывод: стоки выше цели, экономика слишком жёсткая для новых игроков.');

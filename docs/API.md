@@ -33,6 +33,10 @@ application/json; charset=utf-8`. Ответы не кэшируются (`Cache
 | POST | `/expeditions/cancel` | `{ expeditionId }`, первые 10 % рейса |
 | POST | `/ships/repair` | `{ shipId }`, прочность ≥ 50 % |
 | POST | `/fuel/buy` | одна единица топлива |
+| GET | `/market` | лоты, коридор цен по каждому ресурсу, лимиты |
+| POST | `/market/lot` | выставить лот: `{ resource, amount, unitPrice }` |
+| POST | `/market/buy` | купить лот целиком: `{ lotId }` |
+| POST | `/market/cancel` | снять свой лот: `{ lotId }` |
 
 Суммы, балансы и награды клиент не передаёт: сервер считает их сам, лишние поля
 тела игнорируются.
@@ -62,6 +66,12 @@ application/json; charset=utf-8`. Ответы не кэшируются (`Cache
 | `too_many_attempts` | 429 | сработал лимит частоты; есть `Retry-After` |
 | `too_early` / `daily_limit` | 429 | Claim раньше 15 минут / суточный лимит |
 | `insufficient_funds` | 409 | не хватает ASTRA |
+| `bad_resource`, `bad_amount`, `bad_price` | 400 | рынок: неизвестный ресурс, количество не 1…1000, цена ≤ 0 |
+| `price_out_of_band` | 409 | цена вне коридора ±50 % от медианы |
+| `market_lot_limit` | 409 | у игрока уже 10 открытых лотов |
+| `lot_not_found` | 404 | лота нет |
+| `lot_closed`, `own_lot` | 409 | лот уже продан/снят; попытка купить свой |
+| `not_your_lot` | 403 | попытка снять чужой лот |
 | `ship_busy`, `ship_broken`, `not_enough_fuel` | 409 | рейс невозможен |
 | `sector_locked`, `ship_range` | 403 | сектор закрыт уровнем или дальностью |
 | `world_frozen` | 423 | сверка Ledger не сошлась, игры остановлены |
@@ -123,3 +133,38 @@ curl -s -X POST https://<worker>/claim \
 Ответ: `{ "ship": { "id", "type", "name" }, "price", "astra" }`.
 Ошибки: `bad_ship_type`, `ship_not_for_sale` (400), `ship_locked` (403),
 `ship_owned`, `insufficient_funds` (409).
+
+## Рынок
+
+Ресурсы и крафтовые компоненты продают сами игроки. Лот — это ресурс, количество
+и цена **за единицу**; покупается целиком.
+
+- при выставлении ресурс уходит в эскроу (`market_escrow`) — продать один и тот же
+  ресурс дважды нельзя;
+- покупатель платит всю сумму (`market_buy`) и получает ресурс;
+- продавцу начисляется вся выручка (`market_sale`) и отдельной записью списывается
+  налог 5 % (`market_tax`) — так налог видно в журнале, а сверка остаётся простой;
+- отмена возвращает эскроу продавцу (`market_cancel`);
+- один игрок держит не больше 10 открытых лотов, в лоте до 1000 единиц.
+
+Цена ограничена коридором: ±50 % от медианы сделок по этому ресурсу за 7 дней, а
+если сделок не было — ±50 % от базовой цены (`RESOURCE_BASE_PRICES`). Коридор
+приходит в `/market` и в `/me` (`market.resources[].band`) — клиент не считает его сам.
+
+Фрод-сигналы пишутся в `market_flags` и сделку не блокируют: `repeat_pair` (≥ 3
+сделок одной пары за сутки) и `large_trade` (сделка от 20 000 ASTRA).
+
+Ответ `/market`:
+
+```json
+{
+  "tax": 5, "limit": 10, "maxAmount": 1000, "windowDays": 7,
+  "lots": [{ "id", "resource", "name", "amount", "unitPrice", "total", "seller", "mine", "createdAt" }],
+  "mine": 1,
+  "resources": [{ "id": "iron_ore", "name": "Железная руда", "have": 40,
+                  "band": { "base": 4, "median": 4, "min": 2, "max": 6, "sales": 0 } }],
+  "astra": 500
+}
+```
+
+`POST /market/buy` отвечает `{ lotId, resource, amount, unitPrice, gross, tax, astra }`.
