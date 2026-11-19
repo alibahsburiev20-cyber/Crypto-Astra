@@ -37,6 +37,25 @@ application/json; charset=utf-8`. Ответы не кэшируются (`Cache
 | POST | `/market/lot` | выставить лот: `{ resource, amount, unitPrice }` |
 | POST | `/market/buy` | купить лот целиком: `{ lotId }` |
 | POST | `/market/cancel` | снять свой лот: `{ lotId }` |
+| GET | `/season` | сезон, своё место, топ-20, призы, прошлые сезоны |
+
+### `GET /season`
+
+```json
+{
+  "season": { "id": "s1", "number": 1, "startsAt": 1700000000000, "endsAt": 1704838400000,
+              "status": "active", "daysLeft": 42, "lengthDays": 56, "players": 24, "pointsTotal": 3140 },
+  "me":   { "label": "Пилот A1B2C3", "rank": 7, "points": 180, "level": 5, "reward": 400 },
+  "top":  [{ "rank": 1, "label": "Пилот 9F2C11", "points": 640, "level": 9, "ships": 4, "isMe": false }],
+  "rewards": [{ "place": 1, "astra": 2000 }, { "place": "4–10", "astra": 400 }, { "place": "участие", "astra": 150 }],
+  "past": [{ "id": "s1", "number": 1, "closedAt": 1704838400000, "players": 24,
+             "winner": { "label": "Пилот 9F2C11", "points": 640, "reward": 2000 },
+             "me": { "rank": 7, "points": 180, "reward": 400 } }]
+}
+```
+
+Призы в `top` не дублируются: клиент показывает своё место и таблицу наград.
+Правила сезона — `docs/SEASON.md`.
 
 Суммы, балансы и награды клиент не передаёт: сервер считает их сам, лишние поля
 тела игнорируются.
