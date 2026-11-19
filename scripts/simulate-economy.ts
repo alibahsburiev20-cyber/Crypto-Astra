@@ -17,6 +17,7 @@
 import {
   CLAIM_DAILY_MAX, FUEL_DAILY_MAX, FUEL_REGEN_MS, FUEL_UNIT_PRICE, REPAIR_ASTRA_PER_PERCENT, START_ASTRA, START_FUEL,
 } from '../worker/src/shared/constants';
+import { seasonRewardFor } from '../worker/src/world/modules/season';
 import {
   EXPEDITION_TYPES, MODULES, MODULE_MAX_LEVEL, MODULE_ORDER, PLANETS, RECIPE_ORDER, RECIPES, RESOURCE_BASE_PRICES,
   SHIPS, marketTax, moduleFx, moduleParts, modulePrice, sectorById,
@@ -40,6 +41,8 @@ interface Args {
   invest: number;
   /** Смешанная популяция: новички, обычные, активные. */
   mix: boolean;
+  /** Считать призы за закрытие сезона (гейт 3). */
+  season: boolean;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -61,6 +64,7 @@ function parseArgs(argv: string[]): Args {
     astraMult: argv.includes('--astra-mult') ? arg('astra-mult', 1) : null,
     invest: Math.min(1, Math.max(0, arg('invest', 0.4))),
     mix: argv.includes('--mix'),
+    season: argv.includes('--season'),
   };
 }
 
@@ -98,6 +102,8 @@ interface SimShip {
 interface Player {
   astra: number;
   fuel: number;
+  /** Очки сезона: в игре это баланс `points`, он же рейтинг. */
+  points: number;
   xp: number;
   level: number;
   ships: SimShip[];
@@ -126,6 +132,8 @@ interface Totals {
   finalDurability: number;
   finalLevel: number;
   soldUnits: number;
+  seasonRewards: number;
+  seasonPlayers: number;
 }
 
 const SHIP_ORDER: ShipType[] = ['hauler', 'miner', 'explorer', 'cruiser'];
@@ -201,8 +209,11 @@ function simulate(args: Args): Totals {
     moduleSpend: 0, shipSpend: 0, marketTax: 0, marketTurnover: 0,
     flights: 0, crafts: 0, modulesInstalled: 0, shipsBought: 0, stuck: 0,
     finalAstra: 0, finalDurability: 0, finalLevel: 0, soldUnits: 0,
+    seasonRewards: 0, seasonPlayers: 0,
   };
   const regenPerDay = Math.floor(DAY_MS / FUEL_REGEN_MS);
+  // Очки сезона по игрокам: нужны, чтобы прикинуть призы за закрытие сезона.
+  const scores: number[] = [];
 
   for (let n = 0; n < args.players; n++) {
     const claimsPerDay = args.claims;
@@ -211,6 +222,7 @@ function simulate(args: Args): Totals {
     const p: Player = {
       astra: START_ASTRA,
       fuel: START_FUEL,
+      points: 0,
       xp: 0,
       level: 1,
       ships: [{ type: 'scout', durability: 100, modules: {} }],
@@ -264,6 +276,7 @@ function simulate(args: Args): Totals {
       // ── Рейсы ──────────────────────────────────────────────────────────────
       let flightsToday = 0;
       let boughtToday = 0;
+      let pointsToday = 0;
       while (flightsToday < flightsPerDay) {
         const ship = p.ships
           .filter((s) => s.durability > 0)
@@ -315,7 +328,7 @@ function simulate(args: Args): Totals {
         const planet: PlanetDef = open.reduce((a, b) => (score(b) > score(a) ? b : a));
         const reward = computeReward({
           planet, shipType: ship.type, kind, seed: hexSeed(rnd), eventBonusBp: 1000,
-          extraWear: 0, durability: ship.durability, expeditionsToday: flightsToday, pointsToday: 0, fx,
+          extraWear: 0, durability: ship.durability, expeditionsToday: flightsToday, pointsToday, fx,
         });
 
         p.fuel -= cost;
@@ -324,6 +337,8 @@ function simulate(args: Args): Totals {
         ship.durability = Math.max(0, ship.durability - reward.wear);
         p.xp += reward.xp;
         p.level = levelFromXp(p.xp);
+        p.points += reward.points;
+        pointsToday += reward.points;
         t.expeditionAstra += astraGain;
         p.fund += astraGain * invest;
         t.flights += 1;
@@ -407,7 +422,17 @@ function simulate(args: Args): Totals {
     const canPlate = have(p, 'alloy_plate') > 0 || (p.astra >= RECIPES.alloy_plate.fee
       && RECIPES.alloy_plate.inputs.every((i) => have(p, i.resource) >= i.amount));
     if (broken && !canPlate) t.stuck += 1;
+    scores.push(p.points);
   }
+  // Призы закрытого сезона: те же места и суммы, что в SEASON_REWARDS.
+  scores.sort((a, b) => b - a);
+  scores.forEach((points, i) => {
+    const reward = seasonRewardFor(i + 1, points);
+    if (reward > 0) {
+      t.seasonRewards += reward;
+      t.seasonPlayers += 1;
+    }
+  });
   return t;
 }
 
@@ -442,6 +467,7 @@ let total = runs.reduce((acc, r) => addTotals(acc, r), {
   claims: 0, expeditionAstra: 0, fuelSpend: 0, repairSpend: 0, craftSpend: 0, moduleSpend: 0,
   shipSpend: 0, marketTax: 0, marketTurnover: 0, flights: 0, crafts: 0, modulesInstalled: 0,
   shipsBought: 0, stuck: 0, finalAstra: 0, finalDurability: 0, finalLevel: 0, soldUnits: 0,
+  seasonRewards: 0, seasonPlayers: 0,
 } as Totals);
 const totalPlayers = runs.reduce((a, r) => a + r.players, 0);
 
@@ -478,6 +504,15 @@ console.log(`Поглощение: ${ratio.toFixed(1)}% (цель 70–90%)`);
 console.log(`Средний баланс: ${fmt(total.finalAstra / totalPlayers)} ASTRA · уровень ${(total.finalLevel / totalPlayers).toFixed(1)} · прочность ${(total.finalDurability / totalPlayers).toFixed(0)}%`);
 console.log(`Продано на рынке: ${fmt(total.soldUnits)} единиц ресурсов`);
 console.log(`Застряло без ремонта: ${total.stuck} из ${totalPlayers}`);
+if (args.season) {
+  // Призы — это тоже выпуск ASTRA, поэтому поглощение считаем уже с ними.
+  const createdWithSeason = created + total.seasonRewards;
+  const ratioWithSeason = createdWithSeason > 0 ? (sinks / createdWithSeason) * 100 : 0;
+  console.log('');
+  console.log(`Сезон 8 недель: призы ${fmt(total.seasonRewards)} ASTRA на ${fmt(total.seasonPlayers)} игроков`);
+  console.log(`  это ${(created > 0 ? (total.seasonRewards / created) * 100 : 0).toFixed(1)}% выпуска за ${args.days} дн.`);
+  console.log(`Поглощение с призами: ${ratioWithSeason.toFixed(1)}% (цель 70–90%)`);
+}
 
 if (runs.length > 1) {
   console.log('');

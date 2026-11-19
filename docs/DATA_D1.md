@@ -23,6 +23,21 @@ HttpOnly-cookie. Истёкшие и отозванные строки стар�
 **Источник истины — `WorldLobby`**, а не эта таблица. При недоступности лобби cron
 использует её как список миров.
 
+### season_history
+
+Итоги закрытых сезонов: `world_id`, `season_id`, `season_number`, `starts_at`,
+`ends_at`, `closed_at`, `players`, `points_total`, `rewards_total`, `top_json`
+(первые десять мест с подписями), `created_at`. Первичный ключ
+`(world_id, season_id)`: повторная запись того же сезона ничего не меняет.
+Источник — снимок `season_close` из мира.
+
+### world_snapshots
+
+Архив снимков: `id`, `world_id`, `kind` (`weekly` / `season_close`), `season_id`,
+`created_at`, `size`, `sha256`, `storage` (`r2` или `d1`), `r2_key`,
+`head_seq`, `head_hash`, `ok`, `payload`. При подключённом бакете payload в D1 не
+пишется — только ключ R2. Проверка: `npm run verify-snapshot`.
+
 ### auth_limits
 
 `key` (например `login_ip:203.0.113.7`, `login_email:<sha256>`), `attempts`,
@@ -44,6 +59,7 @@ npx wrangler d1 migrations apply DB --remote
 | `0002_sessions.sql` | sessions |
 | `0003_world_seats.sql` | world_seats |
 | `0004_auth_limits.sql` | auth_limits |
+| `0005_season_archive.sql` | season_history, world_snapshots |
 
 Правила: не менять уже применённые файлы, добавлять новый номер. Перед выкладкой
 проверять на локальной D1.

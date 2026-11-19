@@ -27,3 +27,25 @@ export const REPAIR_ASTRA_PER_PERCENT = 2;
 export function utcDay(now: number): number {
   return Math.floor(now / DAY_MS);
 }
+
+// ── Сезоны (этап 3, концепция §II.10) ─────────────────────────────────────────
+// Сезон — восемь недель. Очки начисляются только за рейсы и живут в Ledger как
+// актив `points`; при закрытии сезона они списываются записью `season_reset`,
+// поэтому баланс «Очки» всегда означает очки текущего сезона.
+export const SEASON_DAYS = 56;
+export const SEASON_LENGTH_MS = SEASON_DAYS * DAY_MS;
+/** Сколько строк рейтинга отдаём клиенту и сколько мест получают награду. */
+export const SEASON_TOP_LIMIT = 20;
+export const SEASON_PAID_PLACES = 10;
+/**
+ * Награда за место в закрытом сезоне, ASTRA. Цифры маленькие намеренно: сезон
+ * закрывается раз в восемь недель, а экономика уже сходится на 79 % поглощения.
+ * Приз в 2 000 ASTRA — это ~4 дня активной игры, а не печатный станок.
+ */
+export const SEASON_REWARDS = { first: 2000, second: 1200, third: 800, top10: 400, participation: 150 } as const;
+/** Меньше одного очка — награды за участие нет: иначе можно получить приз, ничего не делая. */
+export const SEASON_MIN_POINTS = 1;
+/** Периодичность снимка мира для D1/R2. */
+export const SNAPSHOT_INTERVAL_MS = 7 * DAY_MS;
+/** Сколько снимков отдаём воркеру за один cron-проход. */
+export const SNAPSHOT_BATCH = 5;

@@ -1,3 +1,4 @@
+import { syncArchive } from './archive';
 import { cleanupAuthLimits } from './auth/rateLimit';
 import { cleanupSessions } from './auth/sessions';
 import type { Env } from './env';
@@ -65,6 +66,13 @@ export default {
       } catch (e) {
         console.error('poke failed', id, e);
       }
+    }
+    // Архив: снимки миров в R2 (если бакет подключён) и историю сезонов в D1.
+    try {
+      const archived = await syncArchive(env, ids);
+      if (archived.archived || archived.failed) console.log('archive', archived);
+    } catch (e) {
+      console.error('archive failed', e);
     }
     // Гигиена D1: истёкшие refresh-сессии и старые счётчики частоты.
     const now = Date.now();

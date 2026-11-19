@@ -138,8 +138,8 @@
 | §I.2, §II.4: в Ledger попадает любое изменение баланса, топлива, **ресурсов, опыта, прочности** | Ledger пишет только `astra`, `fuel`, `points`; ресурсы лежат в `resources`, опыт в `players.xp`, прочность в `ships.durability` | расширить домен активов и сверку `verifyLedger` (миграция `balances`/`ledger` + записи на старте, износ, ремонт, ресурсы) |
 | §II.9: Turnstile на входе при подозрительной частоте, лимиты запросов | сделано в коде; правила Cloudflare Rate Limiting включаются вручную | включить секреты и правила при деплое |
 | §II.9: Telegram initData, сброс пароля по email | нет | `auth/telegramInitData`, `auth/emailTokens`, Email Service (нужен Workers Paid) |
-| §II.6: задачи `craft_finish`, `season_close`, `snapshot_export` | нет | этапы 2–3 |
-| §II.10, §II.11: сезоны, пул, CryptoCoinsAd, админка | нет | этапы 2–5, включая R2 |
+| §II.6: задачи `craft_finish`, `season_close`, `snapshot_export` | сделано: крафт — этап 2, закрытие сезона и снимки — этап 3 | — |
+| §II.10, §II.11: сезоны, пул, CryptoCoinsAd, админка | сезоны сделаны (этап 3: рейтинг, призы, архив снимков); пул, реклама и админка — нет | этапы 4–5, R2 вместе с бакетом |
 | §IV: дерево ~480 файлов (`docs/`, `public/`, SPA `src/`, `telegram/`, скрипты `seed`, `check-ledger`, `simulate-economy`, …) | около 70 файлов, клиент — один `app.js` без сборки | планомерно по этапам; см. §V.1 |
 | §V.2: нагрузочный тест, восстановление из R2, замер параметров | нет | до публичного запуска |
 | Админка за Cloudflare Access | нет | этап 5 |

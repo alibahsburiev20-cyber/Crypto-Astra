@@ -13,6 +13,7 @@
     "seed": "tsx scripts/seed-local.ts",
     "simulate": "tsx scripts/simulate-economy.ts",
     "check-ledger": "tsx scripts/check-ledger.ts",
+    "verify-snapshot": "tsx scripts/verify-snapshot.ts",
     "typecheck:scripts": "tsc -p tsconfig.scripts.json",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "config:sync": "node scripts/sync-wrangler.mjs",

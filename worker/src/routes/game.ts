@@ -31,6 +31,11 @@ export async function ledger(url: URL, env: Env, a: AuthContext): Promise<Respon
   return json({ entries: await world(env, a).listLedger(a.userId, limit) });
 }
 
+// Сезон: рейтинг, своё место, награды и прошлые сезоны. Только чтение.
+export async function season(env: Env, a: AuthContext): Promise<Response> {
+  return json(await world(env, a).getSeason(a.userId));
+}
+
 // Idempotency-Key создаёт клиент один раз на действие и хранит до ответа. Суммы клиент не передаёт.
 export async function claim(request: Request, env: Env, a: AuthContext): Promise<Response> {
   const key = idemKey(request);

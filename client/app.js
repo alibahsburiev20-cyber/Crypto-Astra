@@ -21,6 +21,7 @@ const ERRORS = {
   turnstile_required: 'Подтвердите, что вы не робот',
   too_many_attempts: 'Слишком много попыток. Подождите и попробуйте снова',
   world_frozen: 'Мир заморожен: журнал не сходится',
+  season_not_found: 'Сезон не найден',
   ship_busy: 'Корабль уже в рейсе',
   ship_broken: 'Прочность 0%. Нужен ремонт',
   sector_locked: 'Сектор ещё закрыт',
@@ -119,6 +120,8 @@ let mode = 'register';
 let view = 'bridge';
 let state = null;
 let ledger = [];
+// Полный отчёт по сезону приходит из /season: в /me лежит только компактный блок.
+let seasonData = null;
 let note = '';
 let clock = 0;
 // Разница «серверное время − часы устройства». Все таймеры считаются по серверу,
@@ -337,6 +340,19 @@ function verifyLine() {
   return el('p', { class: 'muted' }, `Сверка журнала: OK · ${ago}.${tail}`);
 }
 
+const MONTHS = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+
+// Дата сезона без года: сезон длиной восемь недель редко переходит год,
+// а если переходит — месяц и день всё равно однозначны.
+function fmtDay(ms) {
+  const d = new Date(Number(ms) || 0);
+  return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`;
+}
+function fmtDayFull(ms) {
+  const d = new Date(Number(ms) || 0);
+  return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+}
+
 function fmtDur(ms) {
   const m = Math.round(ms / 60000);
   return m < 120 ? `${m} мин` : `${Math.round(m / 60)} ч`;
@@ -344,6 +360,13 @@ function fmtDur(ms) {
 
 function shipArt(type) {
   return el('div', { class: 'ship-viewer' }, el('img', { src: `/sprites/ships/${type}.png`, alt: '', width: '256', height: '128' }));
+}
+
+// «#3 из 24» или «пока без места», если игрок ещё не в рейтинге.
+function rankText(season) {
+  if (!season) return 'Сезон ещё не начался';
+  if (!season.rank) return `Место в рейтинге появится после первого рейса · игроков ${season.players}`;
+  return `#${season.rank} из ${season.players} · осталось ${season.daysLeft} дн.`;
 }
 
 function cards() {
@@ -359,6 +382,7 @@ function cards() {
 }
 
 function renderBridge() {
+  const season = state.season;
   const ship = state.ships[0];
   const active = state.expeditions.active;
   const claimLeft = left(state.nextClaimAt);
@@ -401,6 +425,15 @@ function renderBridge() {
         el('p', { class: 'muted' }, `${b.astra} ASTRA · ${b.points} очков`),
         el('button', { type: 'button', class: 'ghost', onClick: () => setView('wallet') }, 'Открыть кошелёк'),
       ),
+      season ? el('div', { class: 'block season-block' },
+        el('h3', {},
+          el('img', { src: '/icons/nav/season.png', alt: '', width: '18', height: '18', class: 'icon-sm' }),
+          `Сезон ${season.number}`),
+        el('p', { class: 'muted' }, `${rankText(season)} · ${season.points} очков`),
+        el('p', { class: 'muted', 'data-prefix': 'До конца сезона ', 'data-until': season.endsAt },
+          `До конца сезона ${fmtLeft(left(season.endsAt))}`),
+        el('button', { type: 'button', class: 'ghost', onClick: () => setView('season') }, 'Открыть сезон'),
+      ) : null,
     ),
     note ? el('p', { class: 'ok' }, note) : null,
   );
@@ -763,6 +796,97 @@ function renderMarket() {
   );
 }
 
+// ── Сезон ─────────────────────────────────────────────────────────────────────
+// Экран рейтинга. Компактный блок сезона приходит в /me, полный рейтинг — из
+// /season: так /me не тащит сто строк на каждую загрузку мостика.
+async function loadSeason() {
+  const { status, data } = await authed('/season');
+  if (status === 200) seasonData = data;
+  else if (status !== 0) note = `Ошибка: ${errText(data.error)}`;
+  if (view === 'season') render();
+}
+
+function rankCell(rank) {
+  if (rank <= 3) {
+    return el('span', { class: 'rating-place' },
+      el('img', { src: `/icons/season/medal_${rank}.png`, alt: `${rank} место`, width: '26', height: '26', loading: 'lazy' }));
+  }
+  return el('span', { class: 'rating-place muted' }, `#${rank}`);
+}
+
+function renderSeason() {
+  const brief = state.season;
+  const data = seasonData;
+  if (!data) {
+    return el('div', { class: 'screen' },
+      el('div', { class: 'screen-title' }, el('h2', {}, `Сезон ${brief ? brief.number : 1}`), el('span', { class: 'badge' }, '8 недель')),
+      el('p', { class: 'muted' }, 'Считаем рейтинг…'),
+      note ? el('p', { class: 'error' }, note) : null,
+    );
+  }
+  const season = data.season;
+  const me = data.me;
+  const total = Math.max(1, season.lengthDays);
+  const passed = Math.max(0, Math.min(total, total - season.daysLeft));
+  const pct = Math.round((passed / total) * 100);
+
+  const hero = el('div', { class: 'season-hero' },
+    el('img', { class: 'season-emblem', src: '/icons/season/trophy.png', alt: '', width: '116', height: '116' }),
+    el('div', { class: 'season-hero-body' },
+      el('h3', {}, `Сезон ${season.number}`),
+      el('p', { class: 'muted' }, `${fmtDayFull(season.startsAt)} — ${fmtDayFull(season.endsAt)} · осталось ${season.daysLeft} дн.`),
+      el('div', { class: 'season-progress', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(pct) },
+        el('span', { style: `width:${pct}%` })),
+      el('ul', { class: 'season-stats' },
+        el('li', {}, el('span', { class: 'muted' }, 'Ваше место'), el('b', {}, me.rank ? `#${me.rank} из ${season.players}` : `— из ${season.players}`)),
+        el('li', {}, el('span', { class: 'muted' }, 'Очки сезона'), el('b', {}, String(me.points))),
+        el('li', {}, el('span', { class: 'muted' }, 'Приз при таком месте'), el('b', {}, me.reward ? `${me.reward} ASTRA` : 'пока нет')))),
+  );
+
+  const rating = data.top.length
+    ? el('ol', { class: 'rating' }, ...data.top.map((row) => el('li', { class: `rating-row${row.isMe ? ' is-me' : ''}` },
+      rankCell(row.rank),
+      el('span', { class: 'rating-name' },
+        row.label,
+        row.isMe ? el('span', { class: 'rating-me' }, ' вы') : null,
+        el('span', { class: 'rating-sub' }, `уровень ${row.level} · кораблей ${row.ships}`)),
+      el('span', { class: 'rating-points' }, `${row.points}`))))
+    : el('p', { class: 'muted' }, 'В этом сезоне ещё никто не летал. Первый рейс — и вы в рейтинге.');
+
+  const rewards = el('div', { class: 'block' },
+    el('h3', {}, 'Награды за сезон'),
+    el('ul', { class: 'plain' }, ...data.rewards.map((r) => el('li', {},
+      el('span', {}, r.place === 'участие' ? 'Всем, кто набрал очки' : `${r.place} место`),
+      el('span', {}, `${astraNum(r.astra)} ASTRA`)))),
+    el('p', { class: 'muted' }, 'Призы начисляются один раз при закрытии сезона. Затем очки обнуляются, а мир получает следующий сезон.'));
+
+  const past = data.past.length
+    ? el('div', { class: 'block' },
+      el('h3', {}, 'Прошлые сезоны'),
+      ...data.past.map((p) => el('div', { class: 'past-season' },
+        el('div', {}, el('b', {}, `Сезон ${p.number}`), el('span', { class: 'muted' }, ` · закрыт ${fmtDayFull(p.closedAt)}`)),
+        el('p', { class: 'muted' }, p.winner
+          ? `Победитель: ${p.winner.label} · ${p.winner.points} очков · ${astraNum(p.winner.reward)} ASTRA`
+          : 'Никто не набрал очков — призы не начислялись.'),
+        el('p', { class: 'muted' }, p.me
+          ? `Ваше место: #${p.me.rank} из ${p.players} · ${p.me.points} очков · ${astraNum(p.me.reward)} ASTRA`
+          : `Ваше место: вне итогов (в сезоне участвовало ${p.players})`))))
+    : el('p', { class: 'muted' }, 'Это первый сезон мира: списка прошлых сезонов пока нет.');
+
+  return el('div', { class: 'screen' },
+    el('div', { class: 'screen-title' }, el('h2', {}, 'Сезон'), el('span', { class: 'badge' }, `${season.players} игроков`)),
+    el('p', { class: 'muted' }, 'Восемь недель, очки за рейсы и призы за места. Очки нельзя купить, передать или получить за деньги.'),
+    hero,
+    el('div', { class: 'screen-title' }, el('h2', {}, 'Рейтинг'), el('span', { class: 'badge' }, `топ ${data.top.length}`)),
+    rating,
+    rewards,
+    past,
+    el('div', { class: 'btn-row' },
+      el('button', { type: 'button', class: 'ghost', onClick: () => { seasonData = null; render(); loadSeason(); } }, 'Обновить рейтинг')),
+    note ? el('p', { class: 'note' }, note) : null,
+  );
+}
+
 function renderWallet() {
   const f = state.fuel;
   return el('div', { class: 'screen' },
@@ -851,6 +975,7 @@ function render() {
       : view === 'craft' ? renderCraftScreen()
         : view === 'modules' ? renderModules()
           : view === 'market' ? renderMarket()
+            : view === 'season' ? renderSeason()
             : view === 'wallet' ? renderWallet()
             : view === 'ledger' ? renderLedger() : renderBridge();
   panel.append(body);
@@ -936,6 +1061,8 @@ function doCancelLot(lotId) { return act(`mkt-cancel:${lotId}`, '/market/cancel'
 function setView(v) {
   view = v;
   note = '';
+  // Рейтинг в /me не лежит: при входе в раздел подтягиваем полный отчёт.
+  if (v === 'season') loadSeason();
   loadGame();
 }
 
