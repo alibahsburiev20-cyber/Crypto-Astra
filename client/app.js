@@ -195,6 +195,9 @@ function idemDone(scope) { sessionStorage.removeItem(`idem:${scope}`); }
 function show(which) {
   $('#auth').hidden = which !== 'auth';
   $('#game').hidden = which !== 'game';
+  // Публичное описание игры нужно только на экране входа.
+  const landing = $('#landing');
+  if (landing) landing.hidden = which === 'game';
 }
 
 function setMode(m) {
@@ -826,6 +829,11 @@ function mountAds() {
   if (ads.provider) slot.dataset.provider = String(ads.provider);
   if (ads.unit_id) slot.dataset.unitId = String(ads.unit_id);
   slot.hidden = false;
+  // Подпись обязательна: сеть требует, чтобы реклама отличалась от контента игры.
+  // Награды за клик или просмотр нет — ASTRA за рекламу не начисляется.
+  if (!slot.querySelector('.ad-label')) {
+    slot.append(el('span', { class: 'ad-label' }, 'Реклама'));
+  }
   const s = document.createElement('script');
   s.src = ads.script_url;
   s.async = true;
