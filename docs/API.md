@@ -38,6 +38,17 @@ application/json; charset=utf-8`. Ответы не кэшируются (`Cache
 | POST | `/market/buy` | купить лот целиком: `{ lotId }` |
 | POST | `/market/cancel` | снять свой лот: `{ lotId }` |
 | GET | `/season` | сезон, своё место, топ-20, призы, прошлые сезоны |
+| GET | `/social` | миссии дня и недели, достижения, Astra Pass |
+| POST | `/missions/claim` | `{ missionId }`, награда готовой миссии |
+| POST | `/pass/claim` | `{ level }`, награда уровня Pass |
+| GET | `/guild` | своя гильдия, участники, топ, код приглашения |
+| POST | `/guild/create` | `{ name, tag }`, создание за 500 ASTRA |
+| POST | `/guild/join` | `{ code }` |
+| POST | `/guild/leave` | выйти; лидер передаёт роль или распускает гильдию |
+| POST | `/guild/kick` | `{ playerId }` |
+| POST | `/guild/role` | `{ playerId, role }`: `officer` или `member` |
+| POST | `/guild/rename` | `{ name, tag }`, только лидер |
+| POST | `/referrals/apply` | `{ code }`, применить код приглашения |
 
 ### `GET /season`
 

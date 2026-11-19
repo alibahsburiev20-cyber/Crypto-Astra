@@ -14,6 +14,7 @@ import {
 import { fxOfShip } from './shipModules';
 import { addResource, assertPlayable, bumpDaily, dailyOf, fuelCap } from './maintenance';
 import { applyDurability, applyXp } from './progress';
+import { qualifyReferral } from './referrals';
 
 interface ShipRow { id: string; type: ShipType; durability: number; status: string }
 
@@ -302,4 +303,7 @@ export function finishExpedition(sql: SqlStorage, expeditionId: string, now: num
   bumpDaily(sql, playerId, day, 'expeditions', 1);
   if (reward.points > 0) bumpDaily(sql, playerId, day, 'points_gained', reward.points);
   sql.exec(`UPDATE expeditions SET status = 'completed', reward_json = ? WHERE id = ?`, JSON.stringify(reward), expeditionId);
+  // Реферальная награда платится здесь, на пятом завершённом рейсе приглашённого:
+  // приглашающий может быть офлайн, транзакция всё равно общая.
+  qualifyReferral(sql, playerId, now);
 }

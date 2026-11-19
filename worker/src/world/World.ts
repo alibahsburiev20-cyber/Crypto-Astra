@@ -8,12 +8,19 @@ import { createPlayer } from './modules/players';
 import { buildState, listLedger } from './modules/state';
 import { seasonReport } from './modules/season';
 import { ackSnapshots, pendingSnapshots } from './modules/snapshots';
+import { achievementsView } from './modules/achievements';
+import {
+  createGuild, guildView, joinGuild, kickMember, leaveGuild, renameGuild, setRole,
+} from './modules/guilds';
+import { claimMission, missionsView } from './modules/missions';
+import { claimPass, passView } from './modules/pass';
+import { applyReferral, referralView } from './modules/referrals';
 import { installModule } from './modules/shipModules';
 import { buyShip } from './modules/ships';
 import { buyLot, cancelLot, createLot, marketView, type CreateLotInput } from './modules/market';
 import { buyFuel, repairShip } from './modules/upkeep';
 import { verifyLedger, type LedgerReport } from './ledger';
-import { backfillProgressLedger, backfillResourceLedger, migrateLegacyExpeditions } from './migrate';
+import { backfillProgressLedger, backfillResourceLedger, migrateLegacyExpeditions, migratePassClaimsSeason } from './migrate';
 import { nextAlarmAt } from './scheduler';
 import { WORLD_SCHEMA } from './schema';
 
@@ -30,6 +37,7 @@ export class World extends DurableObject<Env> {
       this.ctx.storage.transactionSync(() => {
         migrateLegacyExpeditions(this.sql, Date.now());
         for (const stmt of WORLD_SCHEMA) this.sql.exec(stmt);
+        migratePassClaimsSeason(this.sql);
         backfillResourceLedger(this.sql, Date.now());
         backfillProgressLedger(this.sql, Date.now());
       });
@@ -96,6 +104,89 @@ export class World extends DurableObject<Env> {
   async cancelLot(playerId: string, idemKey: string, lotId: string) {
     const now = Date.now();
     const result = this.ctx.storage.transactionSync(() => cancelLot(this.sql, playerId, idemKey, lotId, now));
+    await this.arm();
+    return result;
+  }
+
+  // ── Социальное (этап 4) ────────────────────────────────────────────────────
+  // Чтение собирается в один ответ на экран, чтобы клиенту не нужно было
+  // делать три запроса: «Задания» = миссии + достижения + Pass.
+  getSocial(playerId: string) {
+    const now = Date.now();
+    return this.ctx.storage.transactionSync(() => ({
+      missions: missionsView(this.sql, playerId, now),
+      achievements: achievementsView(this.sql, playerId),
+      pass: passView(this.sql, playerId, now),
+    }));
+  }
+
+  async claimMission(playerId: string, idemKey: string, missionId: string) {
+    const now = Date.now();
+    const result = this.ctx.storage.transactionSync(() => claimMission(this.sql, playerId, idemKey, missionId, now));
+    await this.arm();
+    return result;
+  }
+
+  async claimPass(playerId: string, idemKey: string, level: number) {
+    const now = Date.now();
+    const result = this.ctx.storage.transactionSync(() => claimPass(this.sql, playerId, idemKey, level, now));
+    await this.arm();
+    return result;
+  }
+
+  getGuild(playerId: string) {
+    const now = Date.now();
+    return this.ctx.storage.transactionSync(() => ({
+      guild: guildView(this.sql, playerId),
+      referrals: referralView(this.sql, playerId, now),
+    }));
+  }
+
+  async createGuild(playerId: string, idemKey: string, body: { name: string; tag: string }) {
+    const now = Date.now();
+    const result = this.ctx.storage.transactionSync(() => createGuild(this.sql, playerId, idemKey, body, now));
+    await this.arm();
+    return result;
+  }
+
+  async joinGuild(playerId: string, idemKey: string, code: string) {
+    const now = Date.now();
+    const result = this.ctx.storage.transactionSync(() => joinGuild(this.sql, playerId, idemKey, code, now));
+    await this.arm();
+    return result;
+  }
+
+  async leaveGuild(playerId: string, idemKey: string) {
+    const now = Date.now();
+    const result = this.ctx.storage.transactionSync(() => leaveGuild(this.sql, playerId, idemKey, now));
+    await this.arm();
+    return result;
+  }
+
+  async kickGuildMember(playerId: string, idemKey: string, target: string) {
+    const now = Date.now();
+    const result = this.ctx.storage.transactionSync(() => kickMember(this.sql, playerId, idemKey, target, now));
+    await this.arm();
+    return result;
+  }
+
+  async setGuildRole(playerId: string, idemKey: string, body: { target: string; role: string }) {
+    const now = Date.now();
+    const result = this.ctx.storage.transactionSync(() => setRole(this.sql, playerId, idemKey, body, now));
+    await this.arm();
+    return result;
+  }
+
+  async renameGuild(playerId: string, idemKey: string, body: { name: string; tag: string }) {
+    const now = Date.now();
+    const result = this.ctx.storage.transactionSync(() => renameGuild(this.sql, playerId, idemKey, body, now));
+    await this.arm();
+    return result;
+  }
+
+  async applyReferral(playerId: string, idemKey: string, code: string) {
+    const now = Date.now();
+    const result = this.ctx.storage.transactionSync(() => applyReferral(this.sql, playerId, idemKey, code, now));
     await this.arm();
     return result;
   }

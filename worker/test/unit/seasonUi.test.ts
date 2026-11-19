@@ -50,6 +50,6 @@ describe('клиент сезона (этап 3)', () => {
   it('стили сезона есть, док рассчитан на девять разделов', () => {
     expect(css).toContain('.season-hero');
     expect(css).toContain('.rating-row.is-me');
-    expect(css).toContain('repeat(9, 1fr)');
+    expect(css).toContain('repeat(11, 1fr)');
   });
 });

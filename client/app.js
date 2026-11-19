@@ -22,6 +22,27 @@ const ERRORS = {
   too_many_attempts: 'Слишком много попыток. Подождите и попробуйте снова',
   world_frozen: 'Мир заморожен: журнал не сходится',
   season_not_found: 'Сезон не найден',
+  bad_mission: 'Такой миссии нет',
+  mission_claimed: 'Награда за эту миссию уже получена',
+  mission_incomplete: 'Миссия ещё не выполнена',
+  bad_pass_level: 'Такого уровня Pass нет',
+  pass_locked: 'Уровень ещё закрыт: нужно больше очков',
+  pass_claimed: 'Награда этого уровня уже получена',
+  bad_guild_name: 'Название гильдии: от 3 до 24 символов',
+  bad_guild_tag: 'Тег гильдии: 2–5 латинских букв или цифр',
+  guild_not_found: 'Гильдия с таким кодом не найдена',
+  guild_full: 'В гильдии нет свободных мест',
+  guild_name_taken: 'Такое название уже занято',
+  already_in_guild: 'Вы уже в гильдии',
+  not_in_guild: 'Вы не в гильдии',
+  guild_member_not_found: 'Такого участника нет в гильдии',
+  not_allowed: 'Недостаточно прав',
+  bad_role: 'Такой роли нет',
+  bad_target: 'Выберите другого игрока',
+  referral_not_found: 'Код приглашения не найден',
+  self_referral: 'Свой код приглашения применить нельзя',
+  referral_already_applied: 'Код приглашения уже применён',
+  referral_limit: 'У пригласившего исчерпан лимит приглашений',
   ship_busy: 'Корабль уже в рейсе',
   ship_broken: 'Прочность 0%. Нужен ремонт',
   sector_locked: 'Сектор ещё закрыт',
@@ -122,6 +143,9 @@ let state = null;
 let ledger = [];
 // Полный отчёт по сезону приходит из /season: в /me лежит только компактный блок.
 let seasonData = null;
+// Социальное (этап 4): «Задания» — миссии, достижения и Pass; «Команда» — гильдия и рефералы.
+let socialData = null;
+let guildData = null;
 let note = '';
 let clock = 0;
 // Разница «серверное время − часы устройства». Все таймеры считаются по серверу,
@@ -887,6 +911,199 @@ function renderSeason() {
   );
 }
 
+// ── Задания и Astra Pass (этап 4) ────────────────────────────────────────────
+// Прогресс миссий считает сервер по журналу и таблицам игры, поэтому клиент
+// только рисует то, что пришло: никаких счётчиков на стороне браузера.
+async function loadSocial() {
+  const { status, data } = await authed('/social');
+  if (status === 200) socialData = data;
+  else if (status !== 0) note = `Ошибка: ${errText(data.error)}`;
+  if (view === 'missions') render();
+}
+
+function missionCard(m) {
+  const pct = Math.round((m.progress / m.target) * 100);
+  return el('div', { class: `mission${m.claimed ? ' is-done' : ''}` },
+    el('div', { class: 'mission-head' },
+      el('b', {}, m.title),
+      el('span', { class: 'badge' }, m.claimed ? 'получено' : `${m.progress}/${m.target}`)),
+    el('p', { class: 'muted' }, m.hint),
+    el('div', { class: 'bar', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(pct) },
+      el('span', { style: `width:${pct}%` })),
+    el('div', { class: 'mission-foot' },
+      el('span', { class: 'muted' }, `+${m.astra} ASTRA · +${m.points} очков`),
+      m.claimed
+        ? el('span', { class: 'ok' }, '✓')
+        : el('button', { type: 'button', class: 'primary', disabled: m.ready ? null : 'disabled', onClick: () => doClaimMission(m.id) }, m.ready ? 'Забрать' : 'В процессе')),
+  );
+}
+
+function passRow(level) {
+  return el('li', { class: `pass-level${level.claimed ? ' is-claimed' : ''}${level.unlocked ? '' : ' is-locked'}` },
+    el('span', { class: 'pass-num' }, String(level.level)),
+    el('span', { class: 'pass-label' },
+      level.label,
+      el('span', { class: 'rating-sub' }, level.unlocked ? 'уровень открыт' : `нужно ${level.threshold} очков`)),
+    level.claimed
+      ? el('span', { class: 'ok' }, '✓')
+      : el('button', { type: 'button', class: 'ghost', disabled: level.ready ? null : 'disabled', onClick: () => doClaimPass(level.level) }, 'Забрать'));
+}
+
+function renderMissions() {
+  const data = socialData;
+  if (!data) {
+    return el('div', { class: 'screen' },
+      el('div', { class: 'screen-title' }, el('h2', {}, 'Задания'), el('span', { class: 'badge' }, 'день и неделя')),
+      el('p', { class: 'muted' }, 'Считаем прогресс…'),
+      note ? el('p', { class: 'error' }, note) : null,
+    );
+  }
+  const { missions, achievements, pass } = data;
+  return el('div', { class: 'screen' },
+    el('div', { class: 'screen-title' }, el('h2', {}, 'Задания'), el('span', { class: 'badge' }, `${missions.ready} готово`)),
+    el('p', { class: 'muted' }, 'Миссии обновляются по UTC: дневные — каждый день, недельная — в понедельник. Прогресс считается по фактам игры, а не по кнопкам.'),
+    el('div', { class: 'mission-grid' }, ...missions.daily.map(missionCard)),
+    el('div', { class: 'block' },
+      el('h3', {}, 'Миссия недели'),
+      missionCard(missions.weekly)),
+
+    el('div', { class: 'screen-title' }, el('h2', {}, 'Astra Pass'), el('span', { class: 'badge' }, `уровень ${pass.level}`)),
+    el('div', { class: 'pass-head' },
+      el('img', { class: 'pass-icon', src: '/icons/social/pass.png', alt: '', width: '72', height: '72' }),
+      el('div', {},
+        el('p', {}, `Очки сезона: ${pass.points}`),
+        el('p', { class: 'muted' }, pass.next ? `До уровня ${pass.next.level}: ${Math.max(0, pass.next.threshold - pass.points)} очков` : 'Все уровни открыты — забирайте награды.'),
+        pass.slotActive ? el('p', { class: 'ok' }, 'Второй слот крафта открыт') : null)),
+    el('ul', { class: 'pass-track' }, ...pass.levels.map(passRow)),
+    el('p', { class: 'muted' }, 'Pass бесплатный: платного трека нет, ASTRA и очки за деньги не продаются.'),
+
+    el('div', { class: 'screen-title' }, el('h2', {}, 'Достижения'), el('span', { class: 'badge' }, `${achievements.unlocked} из ${achievements.list.length}`)),
+    el('div', { class: 'ach-grid' }, ...achievements.list.map((a) => el('div', { class: `ach${a.unlocked ? ' is-open' : ''}` },
+      el('img', { src: '/icons/social/badge.png', alt: '', width: '40', height: '40', loading: 'lazy' }),
+      el('b', {}, a.title),
+      el('span', { class: 'rating-sub' }, a.unlocked ? 'получено' : a.hint)))),
+    el('div', { class: 'btn-row' },
+      el('button', { type: 'button', class: 'ghost', onClick: () => { socialData = null; render(); loadSocial(); } }, 'Обновить')),
+    note ? el('p', { class: note.startsWith('Ошибка') ? 'error' : 'ok' }, note) : null,
+  );
+}
+
+// ── Гильдия и рефералы (этап 4) ──────────────────────────────────────────────
+async function loadGuild() {
+  const { status, data } = await authed('/guild');
+  if (status === 200) guildData = data;
+  else if (status !== 0) note = `Ошибка: ${errText(data.error)}`;
+  if (view === 'guild') render();
+}
+
+function roleName(role) {
+  return role === 'leader' ? 'лидер' : role === 'officer' ? 'офицер' : 'участник';
+}
+
+function guildTopList(top) {
+  return top.length
+    ? el('ol', { class: 'rating' }, ...top.map((row) => el('li', { class: `rating-row${row.isMine ? ' is-me' : ''}` },
+      el('span', { class: 'rating-place muted' }, `#${row.rank}`),
+      el('span', { class: 'rating-name' }, `${row.name}`,
+        el('span', { class: 'rating-sub' }, `[${row.tag}] · ${row.members} участников`)),
+      el('span', { class: 'rating-points' }, `${row.points}`))))
+    : el('p', { class: 'muted' }, 'Гильдий пока нет. Первая — ваша.');
+}
+
+function renderGuild() {
+  const data = guildData;
+  if (!data) {
+    return el('div', { class: 'screen' },
+      el('div', { class: 'screen-title' }, el('h2', {}, 'Команда'), el('span', { class: 'badge' }, 'гильдии')),
+      el('p', { class: 'muted' }, 'Загружаем…'),
+      note ? el('p', { class: 'error' }, note) : null,
+    );
+  }
+  const { guild, referrals } = data;
+  const head = guild.mine
+    ? el('div', { class: 'guild-hero' },
+      el('img', { class: 'guild-emblem', src: '/icons/social/banner.png', alt: '', width: '76', height: '76' }),
+      el('div', { class: 'guild-hero-body' },
+        el('h3', {}, `${guild.mine.name} [${guild.mine.tag}]`),
+        el('p', { class: 'muted' }, `Место в рейтинге: #${guild.rank ?? '—'} · очки гильдии: ${guild.mine.points}`),
+        el('p', { class: 'muted' }, `Вы: ${roleName(guild.role)} · участников ${guild.members.length} из ${guild.maxMembers}`),
+        el('div', { class: 'guild-code' },
+          el('span', { class: 'muted' }, 'Код приглашения'),
+          el('b', {}, guild.mine.inviteCode),
+          el('button', { type: 'button', class: 'ghost', onClick: () => {
+            try { navigator.clipboard.writeText(guild.mine.inviteCode); note = 'Код скопирован'; render(); } catch { note = `Код: ${guild.mine.inviteCode}`; render(); }
+          } }, 'Копировать'))))
+    : el('div', { class: 'block' },
+      el('h3', {}, 'Создать гильдию'),
+      el('p', { class: 'muted' }, `Стоимость — ${guild.cost} ASTRA (уходит из экономики, а не другому игроку). До ${guild.maxMembers} человек.`),
+      (() => {
+        const name = el('input', { type: 'text', maxlength: '24', placeholder: 'Название гильдии', 'aria-label': 'Название гильдии' });
+        const tag = el('input', { type: 'text', maxlength: '5', placeholder: 'ТЕГ', 'aria-label': 'Тег гильдии' });
+        return el('div', { class: 'form' }, name, tag,
+          el('button', { type: 'button', class: 'primary', onClick: () => doCreateGuild(name.value, tag.value) }, `Создать за ${guild.cost} ASTRA`));
+      })());
+
+  const joinBlock = guild.mine ? null : el('div', { class: 'block' },
+    el('h3', {}, 'Вступить по коду'),
+    (() => {
+      const code = el('input', { type: 'text', maxlength: '6', placeholder: 'ABC123', 'aria-label': 'Код приглашения гильдии' });
+      return el('div', { class: 'form' }, code,
+        el('button', { type: 'button', class: 'primary', onClick: () => doJoinGuild(code.value) }, 'Вступить'));
+    })());
+
+  const members = guild.mine
+    ? el('div', { class: 'block' },
+      el('h3', {}, 'Участники'),
+      el('ul', { class: 'members' }, ...guild.members.map((m) => el('li', { class: 'member' },
+        el('span', { class: 'member-name' }, m.label, m.isMe ? el('span', { class: 'rating-me' }, ' вы') : null,
+          el('span', { class: 'rating-sub' }, `${roleName(m.role)} · уровень ${m.level}`)),
+        el('span', { class: 'rating-points' }, `${m.points}`),
+        guild.role === 'leader' && !m.isMe && m.role !== 'leader'
+          ? el('span', { class: 'member-actions' },
+            el('button', { type: 'button', class: 'ghost', onClick: () => doGuildRole(m.playerId, m.role === 'officer' ? 'member' : 'officer') },
+              m.role === 'officer' ? 'Разжаловать' : 'Офицер'),
+            el('button', { type: 'button', class: 'ghost danger', onClick: () => doGuildKick(m.playerId) }, 'Исключить'))
+          : guild.role === 'officer' && !m.isMe && m.role === 'member'
+            ? el('button', { type: 'button', class: 'ghost danger', onClick: () => doGuildKick(m.playerId) }, 'Исключить')
+            : null))))
+    : null;
+
+  const guildActions = guild.mine
+    ? el('div', { class: 'btn-row' },
+      el('button', { type: 'button', class: 'ghost danger', onClick: () => doGuildLeave() }, 'Покинуть гильдию'))
+    : null;
+
+  const referralsBlock = el('div', { class: 'block' },
+    el('h3', {}, 'Приглашения'),
+    el('p', { class: 'muted' }, `Код: ${referrals.code} · награда ${referrals.reward} ASTRA каждому после ${referrals.qualifyAt} завершённых рейсов приглашённого.`),
+    referrals.myInviter
+      ? el('p', { class: 'ok' }, `Вас пригласил ${referrals.myInviter.label}` + (referrals.myInviter.status === 'qualified' ? ' — награда уже выплачена' : ` — прогресс ${referrals.myProgress}/${referrals.qualifyAt}`))
+      : (() => {
+        const code = el('input', { type: 'text', maxlength: '7', placeholder: 'КОД', 'aria-label': 'Код приглашения' });
+        return el('div', { class: 'form' }, code,
+          el('button', { type: 'button', class: 'primary', onClick: () => doApplyReferral(code.value) }, 'Применить код'));
+      })(),
+    el('p', { class: 'muted' }, `Приглашено: ${referrals.invited.length} из ${referrals.limit} · выплачено ${referrals.earned} ASTRA`),
+    referrals.invited.length
+      ? el('ul', { class: 'plain' }, ...referrals.invited.map((r) => el('li', {},
+        el('span', {}, r.label),
+        el('span', { class: r.status === 'qualified' ? 'ok' : 'muted' }, r.status === 'qualified' ? 'награда выплачена' : 'ещё летает'))))
+      : el('p', { class: 'muted' }, 'Пока никого. Код можно отправить другу — награда придёт, когда он отлетает пять рейсов.'));
+
+  return el('div', { class: 'screen' },
+    el('div', { class: 'screen-title' }, el('h2', {}, 'Команда'), el('span', { class: 'badge' }, guild.mine ? `${guild.members.length}/${guild.maxMembers}` : 'свободный пилот')),
+    el('p', { class: 'muted' }, 'Гильдия — это круг общения и общий рейтинг, а не множитель дохода: очков и ASTRA она не добавляет.'),
+    head,
+    joinBlock,
+    members,
+    guildActions,
+    el('div', { class: 'screen-title' }, el('h2', {}, 'Рейтинг гильдий'), el('span', { class: 'badge' }, `топ ${guild.top.length}`)),
+    guildTopList(guild.top),
+    referralsBlock,
+    note ? el('p', { class: note.startsWith('Ошибка') ? 'error' : 'ok' }, note) : null,
+  );
+}
+
 function renderWallet() {
   const f = state.fuel;
   return el('div', { class: 'screen' },
@@ -976,6 +1193,8 @@ function render() {
         : view === 'modules' ? renderModules()
           : view === 'market' ? renderMarket()
             : view === 'season' ? renderSeason()
+              : view === 'missions' ? renderMissions()
+                : view === 'guild' ? renderGuild()
             : view === 'wallet' ? renderWallet()
             : view === 'ledger' ? renderLedger() : renderBridge();
   panel.append(body);
@@ -1057,12 +1276,22 @@ function doSellLot(resource, amount, unitPrice) {
 }
 function doBuyLot(lotId) { return act(`mkt-buy:${lotId}`, '/market/buy', { lotId }); }
 function doCancelLot(lotId) { return act(`mkt-cancel:${lotId}`, '/market/cancel', { lotId }); }
+function doClaimMission(missionId) { return act(`mission:${missionId}`, '/missions/claim', { missionId }).then(loadSocial); }
+function doClaimPass(level) { return act(`pass:${level}`, '/pass/claim', { level }).then(loadSocial); }
+function doCreateGuild(name, tag) { return act(`guild-create:${name}:${tag}`, '/guild/create', { name, tag }).then(loadGuild); }
+function doJoinGuild(code) { return act(`guild-join:${code}`, '/guild/join', { code }).then(loadGuild); }
+function doGuildLeave() { return act('guild-leave', '/guild/leave', {}).then(loadGuild); }
+function doGuildKick(playerId) { return act(`guild-kick:${playerId}`, '/guild/kick', { playerId }).then(loadGuild); }
+function doGuildRole(playerId, role) { return act(`guild-role:${playerId}:${role}`, '/guild/role', { playerId, role }).then(loadGuild); }
+function doApplyReferral(code) { return act(`ref:${code}`, '/referrals/apply', { code }).then(loadGuild); }
 
 function setView(v) {
   view = v;
   note = '';
   // Рейтинг в /me не лежит: при входе в раздел подтягиваем полный отчёт.
   if (v === 'season') loadSeason();
+  if (v === 'missions') loadSocial();
+  if (v === 'guild') loadGuild();
   loadGame();
 }
 

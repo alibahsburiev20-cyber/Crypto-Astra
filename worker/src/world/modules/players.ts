@@ -2,6 +2,7 @@ import { CLAIM_INTERVAL_MS, START_ASTRA, START_FUEL, WORLD_CAPACITY } from '../.
 import { applyDelta, getBalance } from '../balances';
 import { ApiError } from '../errors';
 import { ensureMaintenance } from './maintenance';
+import { ensureCode } from './referrals';
 import { applyDurability } from './progress';
 
 export function playerExists(sql: SqlStorage, playerId: string): boolean {
@@ -24,6 +25,8 @@ export function createPlayer(sql: SqlStorage, playerId: string, now: number): { 
   applyDurability(sql, { playerId, shipId, delta: 100, reason: 'ship_delivery', sourceRef: 'start' }, now);
   applyDelta(sql, { playerId, asset: 'astra', delta: START_ASTRA, reason: 'start_bonus', sourceRef: 'start' }, now);
   applyDelta(sql, { playerId, asset: 'fuel', delta: START_FUEL, reason: 'start_bonus', sourceRef: 'start' }, now);
+  // Код приглашения выдаётся сразу: игрок видит его в разделе «Команда» с первого входа.
+  ensureCode(sql, playerId, now);
   ensureMaintenance(sql, now);
   return { created: true };
 }

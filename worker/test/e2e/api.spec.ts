@@ -220,5 +220,75 @@ if (!BASE) {
       expect(res.status).toBe(401);
       expect(res.data.error).toBe('unauthorized');
     });
+
+    it('GET /social отдаёт миссии, достижения и Pass', async () => {
+      const res = await api('/social');
+      expect(res.status).toBe(200);
+      const body = res.data as Record<string, any>;
+      expect(body.missions.daily).toHaveLength(3);
+      expect(body.missions.weekly.id.startsWith('w_')).toBe(true);
+      expect(body.missions.daily[0]).toHaveProperty('progress');
+      expect(body.missions.daily[0]).toHaveProperty('target');
+      expect(body.achievements.list.length).toBeGreaterThanOrEqual(10);
+      expect(body.pass.levels).toHaveLength(10);
+      expect(body.pass.level).toBeGreaterThanOrEqual(0);
+      expect(body.pass.levels[0]).toHaveProperty('threshold');
+    });
+
+    it('незавершённую миссию забрать нельзя', async () => {
+      const social = await api('/social');
+      const mission = (social.data.missions.daily as { id: string; ready: boolean }[])
+        .find((m) => !m.ready);
+      if (!mission) return; // новичок без прогресса, но на всякий случай
+      const res = await api('/missions/claim', {
+        method: 'POST', key: `m-${Date.now()}`, body: { missionId: mission.id },
+      });
+      expect(res.status).toBe(409);
+      expect(res.data.error).toBe('mission_incomplete');
+    });
+
+    it('GET /guild: свободный пилот видит цену, рейтинг и свой код приглашения', async () => {
+      const res = await api('/guild');
+      expect(res.status).toBe(200);
+      const body = res.data as Record<string, any>;
+      expect(body.guild.mine).toBeNull();
+      expect(body.guild.cost).toBe(500);
+      expect(Array.isArray(body.guild.top)).toBe(true);
+      expect(String(body.referrals.code)).toMatch(/^[A-Z0-9]{7}$/);
+      expect(body.referrals.reward).toBe(150);
+    });
+
+    it('гильдия создаётся и покидается', async () => {
+      const created = await api('/guild/create', {
+        method: 'POST', key: `g-${Date.now()}`, body: { name: `Эскадра ${Date.now() % 100000}`, tag: 'E2E' },
+      });
+      expect(created.status).toBe(200);
+      expect(created.data.guild.tag).toBe('E2E');
+      expect(String(created.data.guild.inviteCode)).toMatch(/^[A-Z0-9]{6}$/);
+
+      const view = await api('/guild');
+      expect(view.data.guild.mine.name).toBe(created.data.guild.name);
+      expect(view.data.guild.role).toBe('leader');
+      expect(view.data.guild.members).toHaveLength(1);
+
+      const left = await api('/guild/leave', { method: 'POST', key: `gl-${Date.now()}`, body: {} });
+      expect(left.status).toBe(200);
+      const after = await api('/guild');
+      expect(after.data.guild.mine).toBeNull();
+    });
+
+    it('свой код приглашения применить нельзя', async () => {
+      const view = await api('/guild');
+      const res = await api('/referrals/apply', {
+        method: 'POST', key: `ref-${Date.now()}`, body: { code: view.data.referrals.code },
+      });
+      expect(res.status).toBe(400);
+      expect(res.data.error).toBe('self_referral');
+    });
+
+    it('/social и /guild закрыты для гостя', async () => {
+      expect((await api('/social', { auth: false })).status).toBe(401);
+      expect((await api('/guild', { auth: false })).status).toBe(401);
+    });
   });
 }

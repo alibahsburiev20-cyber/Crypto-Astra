@@ -130,3 +130,78 @@ export async function marketCancel(request: Request, env: Env, a: AuthContext): 
   if (!lotId) throw new ApiError(400, 'lot_not_found');
   return json(await world(env, a).cancelLot(a.userId, idemKey(request), lotId));
 }
+
+// ── Социальное (этап 4) ──────────────────────────────────────────────────────
+
+// Экран «Задания»: миссии дня и недели, достижения и Astra Pass одним ответом.
+export async function social(env: Env, a: AuthContext): Promise<Response> {
+  return json(await world(env, a).getSocial(a.userId));
+}
+
+export async function missionClaim(request: Request, env: Env, a: AuthContext): Promise<Response> {
+  const body = await readJson(request);
+  const missionId = typeof body.missionId === 'string' ? body.missionId : '';
+  if (!missionId) throw new ApiError(400, 'bad_mission');
+  return json(await world(env, a).claimMission(a.userId, idemKey(request), missionId));
+}
+
+export async function passClaim(request: Request, env: Env, a: AuthContext): Promise<Response> {
+  const body = await readJson(request);
+  const level = Number(body.level);
+  if (!Number.isInteger(level)) throw new ApiError(400, 'bad_pass_level');
+  return json(await world(env, a).claimPass(a.userId, idemKey(request), level));
+}
+
+// Экран «Команда»: гильдия, участники, рейтинг гильдий и рефералы.
+export async function guild(env: Env, a: AuthContext): Promise<Response> {
+  return json(await world(env, a).getGuild(a.userId));
+}
+
+export async function guildCreate(request: Request, env: Env, a: AuthContext): Promise<Response> {
+  const body = await readJson(request);
+  const name = typeof body.name === 'string' ? body.name : '';
+  const tag = typeof body.tag === 'string' ? body.tag : '';
+  if (!name || !tag) throw new ApiError(400, 'bad_guild_name');
+  return json(await world(env, a).createGuild(a.userId, idemKey(request), { name, tag }));
+}
+
+export async function guildJoin(request: Request, env: Env, a: AuthContext): Promise<Response> {
+  const body = await readJson(request);
+  const code = typeof body.code === 'string' ? body.code : '';
+  if (!code) throw new ApiError(400, 'guild_not_found');
+  return json(await world(env, a).joinGuild(a.userId, idemKey(request), code));
+}
+
+export async function guildLeave(request: Request, env: Env, a: AuthContext): Promise<Response> {
+  return json(await world(env, a).leaveGuild(a.userId, idemKey(request)));
+}
+
+export async function guildKick(request: Request, env: Env, a: AuthContext): Promise<Response> {
+  const body = await readJson(request);
+  const target = typeof body.playerId === 'string' ? body.playerId : '';
+  if (!target) throw new ApiError(400, 'bad_target');
+  return json(await world(env, a).kickGuildMember(a.userId, idemKey(request), target));
+}
+
+export async function guildRole(request: Request, env: Env, a: AuthContext): Promise<Response> {
+  const body = await readJson(request);
+  const target = typeof body.playerId === 'string' ? body.playerId : '';
+  const role = typeof body.role === 'string' ? body.role : '';
+  if (!target || !role) throw new ApiError(400, 'bad_role');
+  return json(await world(env, a).setGuildRole(a.userId, idemKey(request), { target, role }));
+}
+
+export async function guildRename(request: Request, env: Env, a: AuthContext): Promise<Response> {
+  const body = await readJson(request);
+  const name = typeof body.name === 'string' ? body.name : '';
+  const tag = typeof body.tag === 'string' ? body.tag : '';
+  if (!name || !tag) throw new ApiError(400, 'bad_guild_name');
+  return json(await world(env, a).renameGuild(a.userId, idemKey(request), { name, tag }));
+}
+
+export async function referralApply(request: Request, env: Env, a: AuthContext): Promise<Response> {
+  const body = await readJson(request);
+  const code = typeof body.code === 'string' ? body.code : '';
+  if (!code) throw new ApiError(400, 'referral_not_found');
+  return json(await world(env, a).applyReferral(a.userId, idemKey(request), code));
+}

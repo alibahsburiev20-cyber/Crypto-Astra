@@ -4,11 +4,13 @@ import { ApiError } from '../errors';
 import { withIdempotency } from '../idempotency';
 import { enqueue } from '../scheduler';
 import { assertPlayable, applyResourceDelta, getResource, isFrozen } from './maintenance';
+import { craftSlotsFor } from './pass';
 
 // Крафт (этап 2, срез 3). Запуск списывает ресурсы и плату в ASTRA одной
 // транзакцией и ставит задачу craft_finish; готовый компонент начисляет сервер,
 // клиент только показывает результат.
 
+/** Базовый слот один; второй открывает забранная награда 3 уровня Astra Pass. */
 export const CRAFT_SLOTS = 1;
 
 export interface CraftView {
@@ -57,7 +59,8 @@ export function startCraft(sql: SqlStorage, playerId: string, idemKey: string, r
       `SELECT COUNT(*) AS c FROM craft_jobs WHERE player_id = ? AND status = 'running'`,
       playerId,
     ).toArray();
-    if (Number(running[0].c) >= CRAFT_SLOTS) throw new ApiError(409, 'craft_queue_full');
+    const slots = craftSlotsFor(sql, playerId);
+    if (Number(running[0].c) >= slots) throw new ApiError(409, 'craft_queue_full');
 
     for (const input of recipe.inputs) {
       if (getResource(sql, playerId, input.resource) < input.amount) throw new ApiError(409, 'insufficient_resources');
@@ -85,7 +88,7 @@ export function startCraft(sql: SqlStorage, playerId: string, idemKey: string, r
       value: {
         job: { id: jobId, recipe: recipe.id, name: recipe.name, startedAt: now, endsAt, fee: recipe.fee },
         astra: getBalance(sql, playerId, 'astra'),
-        slots: CRAFT_SLOTS,
+        slots,
       },
       store: true,
     };

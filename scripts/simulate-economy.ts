@@ -1,10 +1,13 @@
 /**
- * Симуляция экономики этапа 2 на реальных формулах и ценах игры.
+ * Симуляция экономики этапа 2 и социального этапа 4 на реальных формулах и ценах игры.
  *
- * Запуск: npm run simulate -- --players 200 --days 30 --claims 32 --max-expeditions 5
+ * Запуск: npm run simulate -- --players 200 --days 30 --claims 32 --max-expeditions 5 --social
  *
  * Что считается (срез 7): Claim, награды экспедиций, топливо, ремонт, плата за крафт,
  * модули, верфь и налог рынка. Цель — стоки возвращают 70–90 % выпущенной валюты.
+ * С флагом `--social` добавляется выпуск этапа 4 (миссии, Astra Pass, рефералы) и
+ * сток за создание гильдий: награды берутся из тех же констант, что и в игре, а
+ * прогресс миссий — из действий игрока в симуляции, а не из «примерно столько».
  *
  * Модель поведения (это допущения, а не правила игры):
  *  · игрок заходит раз в день, делает Claim и до N рейсов;
@@ -15,8 +18,10 @@
  *    идёт только 5 % налога, а не вся выручка).
  */
 import {
-  CLAIM_DAILY_MAX, FUEL_DAILY_MAX, FUEL_REGEN_MS, FUEL_UNIT_PRICE, REPAIR_ASTRA_PER_PERCENT, START_ASTRA, START_FUEL,
+  CLAIM_DAILY_MAX, FUEL_DAILY_MAX, FUEL_REGEN_MS, FUEL_UNIT_PRICE, GUILD_CREATE_COST, PASS_REWARDS,
+  PASS_THRESHOLDS, REFERRAL_REWARD, REPAIR_ASTRA_PER_PERCENT, START_ASTRA, START_FUEL,
 } from '../worker/src/shared/constants';
+import { dailyMissions, weeklyMission, type Metric } from '../worker/src/world/modules/missions';
 import { seasonRewardFor } from '../worker/src/world/modules/season';
 import {
   EXPEDITION_TYPES, MODULES, MODULE_MAX_LEVEL, MODULE_ORDER, PLANETS, RECIPE_ORDER, RECIPES, RESOURCE_BASE_PRICES,
@@ -43,6 +48,10 @@ interface Args {
   mix: boolean;
   /** Считать призы за закрытие сезона (гейт 3). */
   season: boolean;
+  /** Считать выпуск этапа 4: миссии, Astra Pass, рефералы, гильдии. */
+  social: boolean;
+  /** Доля игроков, пришедших по приглашению (допущение модели). */
+  invited: number;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -65,6 +74,8 @@ function parseArgs(argv: string[]): Args {
     invest: Math.min(1, Math.max(0, arg('invest', 0.4))),
     mix: argv.includes('--mix'),
     season: argv.includes('--season'),
+    social: argv.includes('--social'),
+    invited: Math.min(1, Math.max(0, arg('invited', 0.25))),
   };
 }
 
@@ -134,9 +145,24 @@ interface Totals {
   soldUnits: number;
   seasonRewards: number;
   seasonPlayers: number;
+  /** Действия игроков за прогон: из них считается прогресс миссий этапа 4. */
+  sales: number;
+  purchases: number;
+  repairs: number;
+  sessions: number;
+  /** Сумма очков сезона: по ней определяется уровень Astra Pass. */
+  points: number;
 }
 
 const SHIP_ORDER: ShipType[] = ['hauler', 'miner', 'explorer', 'cruiser'];
+/** Пустые счётчики: один список на все места, где собираем итоги. */
+const ZERO: Totals = {
+  claims: 0, expeditionAstra: 0, fuelSpend: 0, repairSpend: 0, craftSpend: 0, moduleSpend: 0,
+  shipSpend: 0, marketTax: 0, marketTurnover: 0, flights: 0, crafts: 0, modulesInstalled: 0,
+  shipsBought: 0, stuck: 0, finalAstra: 0, finalDurability: 0, finalLevel: 0, soldUnits: 0,
+  seasonRewards: 0, seasonPlayers: 0, sales: 0, purchases: 0, repairs: 0, sessions: 0, points: 0,
+};
+const zeroTotals = (): Totals => ({ ...ZERO });
 
 function installed(ship: SimShip): { module: ModuleId; level: number }[] {
   return MODULE_ORDER.filter((id) => (ship.modules[id] ?? 0) > 0)
@@ -204,13 +230,7 @@ function needs(p: Player): Map<string, number> {
 
 function simulate(args: Args): Totals {
   const rnd = mulberry32(args.seed);
-  const t: Totals = {
-    claims: 0, expeditionAstra: 0, fuelSpend: 0, repairSpend: 0, craftSpend: 0,
-    moduleSpend: 0, shipSpend: 0, marketTax: 0, marketTurnover: 0,
-    flights: 0, crafts: 0, modulesInstalled: 0, shipsBought: 0, stuck: 0,
-    finalAstra: 0, finalDurability: 0, finalLevel: 0, soldUnits: 0,
-    seasonRewards: 0, seasonPlayers: 0,
-  };
+  const t: Totals = zeroTotals();
   const regenPerDay = Math.floor(DAY_MS / FUEL_REGEN_MS);
   // Очки сезона по игрокам: нужны, чтобы прикинуть призы за закрытие сезона.
   const scores: number[] = [];
@@ -243,6 +263,7 @@ function simulate(args: Args): Totals {
       if (needsPlate) p.res.alloy_plate -= 1;
       p.astra -= cost;
       t.repairSpend += cost;
+      t.repairs += 1;
       ship.durability = 100;
       return true;
     };
@@ -264,6 +285,7 @@ function simulate(args: Args): Totals {
     };
 
     for (let day = 0; day < args.days; day++) {
+      t.sessions += 1;
       p.fuel = Math.min(fleetCap(p), p.fuel + regenPerDay);
       p.craftMinutes = 24 * 60; // один слот крафта на игрока, но за день его много
       const claims = claimsPerDay;
@@ -374,6 +396,7 @@ function simulate(args: Args): Totals {
         ship.modules[next.id] = next.level;
         p.fund -= price;
         t.modulesInstalled += 1;
+        t.purchases += 1;
       }
 
       // ── Верфь ──────────────────────────────────────────────────────────────
@@ -411,10 +434,12 @@ function simulate(args: Args): Totals {
         t.marketTurnover += revenue;
         t.marketTax += marketTax(revenue);
         t.soldUnits += units;
+        t.sales += 1; // один лот за день
       }
     }
 
     t.finalAstra += p.astra;
+    t.points += p.points;
     t.finalDurability += p.ships.reduce((a, s) => a + s.durability, 0) / p.ships.length;
     t.finalLevel += p.level;
     // Застрял: все корабли ниже 50 %, пластины нет и на крафт пластины не хватает.
@@ -434,6 +459,71 @@ function simulate(args: Args): Totals {
     }
   });
   return t;
+}
+
+
+interface SocialTotals {
+  missionsAstra: number;
+  missionsPoints: number;
+  weeklyAstra: number;
+  passAstra: number;
+  passLevel: number;
+  referralAstra: number;
+  referrals: number;
+  guildSpend: number;
+  emission: number;
+}
+
+/**
+ * Выпуск этапа 4 на действиях игрока из симуляции: награды — те же константы,
+ * что в игре, набор миссий — та же детерминированная функция дня/недели.
+ * Это модель, а не факт: доля приглашённых и создателей гильдий — допущения.
+ */
+function socialOf(r: Run, invitedShare: number): SocialTotals {
+  const perDay = (n: number): number => n / Math.max(1, r.players * r.days);
+  const metric: Record<Metric, number> = {
+    expeditions: perDay(r.flights),
+    crafts: perDay(r.crafts),
+    // В Totals.claims лежит ASTRA за Claim (5 за раз), поэтому делим.
+    claims: perDay(r.claims / 5),
+    repairs: perDay(r.repairs),
+    sales: perDay(r.sales),
+    purchases: perDay(r.purchases),
+  };
+  const out: SocialTotals = {
+    missionsAstra: 0, missionsPoints: 0, weeklyAstra: 0, passAstra: 0, passLevel: 0,
+    referralAstra: 0, referrals: 0, guildSpend: 0, emission: 0,
+  };
+  const playerCount = Math.max(1, Math.round(r.players));
+  const weeks = Math.floor(r.days / 7);
+  for (let i = 0; i < playerCount; i += 1) {
+    const id = `sim-${r.label}-${i}`;
+    for (let d = 0; d < r.days; d += 1) {
+      for (const mission of dailyMissions(id, 20000 + d)) {
+        if (metric[mission.metric] < mission.target) continue;
+        out.missionsAstra += mission.astra;
+        out.missionsPoints += mission.points;
+      }
+    }
+    for (let w = 0; w < weeks; w += 1) {
+      const mission = weeklyMission(id, 2800 + w);
+      if (metric[mission.metric] * 7 < mission.target) continue;
+      out.weeklyAstra += mission.astra;
+      out.missionsPoints += mission.points;
+    }
+    const points = r.points / playerCount;
+    const level = PASS_THRESHOLDS.filter((t) => points >= t).length;
+    out.passLevel += level;
+    for (let lv = 1; lv <= level; lv += 1) out.passAstra += PASS_REWARDS[lv]?.astra ?? 0;
+  }
+  out.passLevel = out.passLevel / playerCount;
+  // Приглашённый получает награду, когда отлетает 5 рейсов; в симуляции летают все.
+  out.referrals = Math.round(playerCount * invitedShare);
+  out.referralAstra = out.referrals * REFERRAL_REWARD * 2;
+  // Гильдии — сток: одна на десять игроков, создатель платит 500 из своих.
+  out.guildSpend = Math.ceil(playerCount / 10) * GUILD_CREATE_COST;
+  out.emission = out.missionsAstra + out.weeklyAstra + out.passAstra + out.referralAstra;
+  return out;
 }
 
 const args = parseArgs(process.argv.slice(2));
@@ -463,16 +553,13 @@ const runs: Run[] = args.mix
   ? ARCHETYPES.map((a) => run(a.id, Math.max(1, Math.round(args.players * a.share)), a.claims, a.flights, a.invest))
   : [run('профиль', args.players, args.claims, args.maxExpeditions, args.invest)];
 
-let total = runs.reduce((acc, r) => addTotals(acc, r), {
-  claims: 0, expeditionAstra: 0, fuelSpend: 0, repairSpend: 0, craftSpend: 0, moduleSpend: 0,
-  shipSpend: 0, marketTax: 0, marketTurnover: 0, flights: 0, crafts: 0, modulesInstalled: 0,
-  shipsBought: 0, stuck: 0, finalAstra: 0, finalDurability: 0, finalLevel: 0, soldUnits: 0,
-  seasonRewards: 0, seasonPlayers: 0,
-} as Totals);
+const total = runs.reduce((acc, r) => addTotals(acc, r), zeroTotals());
 const totalPlayers = runs.reduce((a, r) => a + r.players, 0);
 
 const created = total.claims + total.expeditionAstra;
 const sinksOf = (t: Totals): number => t.fuelSpend + t.repairSpend + t.craftSpend + t.moduleSpend + t.shipSpend + t.marketTax;
+/** Награды за закрытие сезона считаются выпуском, а не стоком. */
+const seasonOf = (): number => (args.season ? total.seasonRewards : 0);
 const sinks = sinksOf(total);
 const ratio = created > 0 ? (sinks / created) * 100 : 0;
 const shareOf = (n: number): string => `${created > 0 ? ((n / created) * 100).toFixed(1) : '0.0'}%`;
@@ -514,6 +601,40 @@ if (args.season) {
   console.log(`Поглощение с призами: ${ratioWithSeason.toFixed(1)}% (цель 70–90%)`);
 }
 
+// Этап 4: миссии, Astra Pass и рефералы печатают ASTRA, гильдии — сток.
+// Поглощение пересчитывается с ними: иначе отчёт врёт в лучшую сторону.
+let ratioFinal = ratio;
+let createdFinal = created + seasonOf();
+if (args.social) {
+  const social = runs.reduce((acc, r) => {
+    const one = socialOf(r, args.invited);
+    return {
+      missionsAstra: acc.missionsAstra + one.missionsAstra,
+      missionsPoints: acc.missionsPoints + one.missionsPoints,
+      weeklyAstra: acc.weeklyAstra + one.weeklyAstra,
+      passAstra: acc.passAstra + one.passAstra,
+      passLevel: acc.passLevel + one.passLevel * r.players,
+      referralAstra: acc.referralAstra + one.referralAstra,
+      referrals: acc.referrals + one.referrals,
+      guildSpend: acc.guildSpend + one.guildSpend,
+      emission: acc.emission + one.emission,
+    } as SocialTotals;
+  }, { missionsAstra: 0, missionsPoints: 0, weeklyAstra: 0, passAstra: 0, passLevel: 0, referralAstra: 0, referrals: 0, guildSpend: 0, emission: 0 } as SocialTotals);
+  const sinksFinal = sinks + social.guildSpend;
+  createdFinal = created + seasonOf() + social.emission;
+  ratioFinal = createdFinal > 0 ? (sinksFinal / createdFinal) * 100 : 0;
+  const shareFinal = (n: number): string => `${createdFinal > 0 ? ((n / createdFinal) * 100).toFixed(1) : '0.0'}%`;
+  console.log('');
+  console.log('Социальное (этап 4):');
+  console.log(`  миссии дневные:     ${fmt(social.missionsAstra)} ASTRA (${shareFinal(social.missionsAstra)}) · ${fmt(social.missionsPoints)} очков`);
+  console.log(`  миссия недельная:   ${fmt(social.weeklyAstra)} ASTRA (${shareFinal(social.weeklyAstra)})`);
+  console.log(`  Astra Pass:         ${fmt(social.passAstra)} ASTRA (${shareFinal(social.passAstra)}) · средний уровень ${(social.passLevel / totalPlayers).toFixed(1)}`);
+  console.log(`  рефералы:           ${fmt(social.referralAstra)} ASTRA (${shareFinal(social.referralAstra)}) · ${fmt(social.referrals)} приглашённых`);
+  console.log(`  всего выпущено с социальным: ${fmt(createdFinal)}`);
+  console.log(`  создание гильдий:   -${fmt(social.guildSpend)} ASTRA (сток)`);
+  console.log(`Поглощение с социальным: ${ratioFinal.toFixed(1)}% (цель 70–90%)`);
+}
+
 if (runs.length > 1) {
   console.log('');
   console.log('По архетипам:');
@@ -525,11 +646,11 @@ if (runs.length > 1) {
   }
 }
 
-if (ratio < 70) {
+if (ratioFinal < 70) {
   console.log('');
   console.log('Вывод: стоков мало. Поднимать надо расходы игрока (ремонт, крафт, модули),');
   console.log('а не резать Claim: иначе новичок не накопит на первый корабль.');
-} else if (ratio > 90) {
+} else if (ratioFinal > 90) {
   console.log('');
   console.log('Вывод: стоки выше цели, экономика слишком жёсткая для новых игроков.');
 }
