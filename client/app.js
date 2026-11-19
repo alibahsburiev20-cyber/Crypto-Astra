@@ -1,3 +1,6 @@
+// Признак «JS работает»: без него CSS не прячет секции перед анимацией появления.
+document.documentElement.classList.add('js');
+
 const $ = (s) => document.querySelector(s);
 
 const ERRORS = {
@@ -192,12 +195,29 @@ function idemKey(scope) {
 }
 function idemDone(scope) { sessionStorage.removeItem(`idem:${scope}`); }
 
+// Три состояния страницы: лендинг, лендинг + модалка входа, игра.
+// `auth` — это модальное окно над лендингом, поэтому сам лендинг остаётся видимым.
 function show(which) {
-  $('#auth').hidden = which !== 'auth';
+  const overlay = $('#auth-overlay');
+  if (overlay) overlay.hidden = which !== 'auth';
   $('#game').hidden = which !== 'game';
-  // Публичное описание игры нужно только на экране входа.
   const landing = $('#landing');
   if (landing) landing.hidden = which === 'game';
+  document.body.classList.toggle('modal-open', which === 'auth');
+}
+
+// Открыть окно регистрации или входа с лендинга.
+function openAuth(m) {
+  setMode(m === 'login' ? 'login' : 'register');
+  show('auth');
+  $('#auth-error').textContent = '';
+  // Фокус ставим после отрисовки, иначе Safari игнорирует его на скрытом поле.
+  setTimeout(() => { const field = $('#email'); if (field) field.focus(); }, 30);
+}
+
+function closeAuth() {
+  show('landing');
+  resetTurnstile();
 }
 
 function setMode(m) {
@@ -863,11 +883,11 @@ function mountAds() {
 
 async function loadGame() {
   const { status, data } = await authed('/me');
-  if (status === 401) { show('auth'); return; }
+  if (status === 401) { openAuth('login'); return; }
   if (status !== 200) {
     // 0 — сеть, истёкший токен уже обработан выше. Не сбрасываем экран молча.
     note = `Ошибка: ${errText(data.error)}`;
-    if (state) render(); else show('auth');
+    if (state) render(); else openAuth('login');
     return;
   }
   state = data;
@@ -952,7 +972,18 @@ $('#logout').addEventListener('click', async () => {
   await request('/auth/logout', { method: 'POST' });
   token = null;
   state = null;
-  show('auth');
+  closeAuth();
+});
+for (const b of document.querySelectorAll('[data-open-auth]')) {
+  b.addEventListener('click', () => openAuth(b.dataset.openAuth));
+}
+$('#auth-close').addEventListener('click', closeAuth);
+$('#auth-overlay').addEventListener('click', (e) => {
+  // Клик мимо карточки закрывает окно, клик внутри — нет.
+  if (e.target === $('#auth-overlay')) closeAuth();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !$('#auth-overlay').hidden) closeAuth();
 });
 for (const b of document.querySelectorAll('[data-view]')) b.addEventListener('click', () => setView(b.dataset.view));
 for (const b of document.querySelectorAll('[data-soon]')) b.addEventListener('click', () => {
@@ -978,10 +1009,29 @@ setInterval(() => {
     if (health.status === 200) syncServerTime(health.data.now);
     await loadConfig();
     if (await refresh()) await loadGame();
-    else show('auth');
+    else show('landing');
   } catch (e) {
     console.error('boot failed', e);
-    show('auth');
+    openAuth('login');
     $('#auth-error').textContent = errText('network');
   }
+})();
+
+// Появление секций при прокрутке. При `prefers-reduced-motion` всё показываем сразу:
+// анимация — украшение, а не условие читаемости.
+(() => {
+  const blocks = document.querySelectorAll('.reveal');
+  const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduce || !('IntersectionObserver' in window)) {
+    for (const b of blocks) b.classList.add('in');
+    return;
+  }
+  const io = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      entry.target.classList.add('in');
+      io.unobserve(entry.target);
+    }
+  }, { threshold: 0.12, rootMargin: '0px 0px -40px' });
+  for (const b of blocks) io.observe(b);
 })();

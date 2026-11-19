@@ -13,6 +13,8 @@
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
+  <div class="stars" aria-hidden="true"></div>
+
   <header class="brandbar">
     <div class="brand">
       <img src="/icons/currency/astra.png" alt="" width="40" height="40">
@@ -21,60 +23,266 @@
         <p class="tagline">Космическая экономическая игра</p>
       </div>
     </div>
-    <span class="stage-pill">Этап 2 · Экономика</span>
+    <nav class="landing-nav" aria-label="Вход в игру">
+      <button type="button" class="link" data-open-auth="login">Войти</button>
+      <button type="button" class="cta cta-small" data-open-auth="register">Регистрация</button>
+    </nav>
   </header>
 
-  <section id="auth" class="auth-card" hidden>
-    <div class="tabs">
-      <button type="button" id="tab-register" class="tab active">Регистрация</button>
-      <button type="button" id="tab-login" class="tab">Вход</button>
-    </div>
-    <form id="auth-form" autocomplete="on">
-      <label>Email <input id="email" type="email" required autocomplete="email"></label>
-      <label>Пароль (8–128 символов) <input id="password" type="password" required minlength="8" maxlength="128" autocomplete="current-password"></label>
-      <div id="turnstile" class="turnstile" hidden></div>
-      <button type="submit" id="auth-submit" class="cta">Зарегистрироваться</button>
-      <p id="auth-error" class="error" role="alert"></p>
-    </form>
-    <p class="auth-note">ASTRA — внутриигровая валюта. Выплат нет, купить её нельзя.</p>
-  </section>
-
   <!-- Публичное описание игры. Рекламная сеть перед одобрением площадки смотрит
-       сайт без регистрации: здесь должен быть оригинальный текст, а не пустая форма. -->
-  <section id="landing" class="landing" aria-label="Об игре">
-    <h2>Что это за игра</h2>
-    <p>Crypto Astra — бесплатная браузерная космическая экономическая игра. Вы командир
-      маленькой базы: отправляете корабль на планеты за рудой, кремнием и льдом, платите
-      за топливо и ремонт, крафтите компоненты, ставите модули и торгуете излишками с
-      другими пилотами.</p>
-    <p>Постоянного присутствия игра не требует: Claim доступен раз в 15 минут, короткий
-      рейс длится 15 минут, средний — 4 часа, дальний — сутки. Достаточно заходить на
-      несколько минут в день.</p>
+       сайт без регистрации: здесь должен быть оригинальный текст с картинками,
+       а не пустая форма входа. -->
+  <main id="landing" class="landing" aria-label="Об игре">
 
-    <div class="landing-grid">
-      <div class="block">
-        <h3>Цикл игры</h3>
-        <ol class="plain landing-steps">
-          <li><b>Claim</b> — пассивный доход ASTRA раз в 15 минут.</li>
-          <li><b>Рейс</b> — тратит топливо и прочность, привозит ресурсы и ASTRA.</li>
-          <li><b>Крафт</b> — энергоячейка, схема и сплавная пластина из ресурсов.</li>
-          <li><b>Модули и верфь</b> — двигатель, сканер, бур, трюм, новые корпуса.</li>
-          <li><b>Рынок</b> — продажа излишков другим пилотам, налог 5 %.</li>
-        </ol>
+    <section class="hero">
+      <div class="hero-copy">
+        <span class="hero-kicker">Этап 2 · Экономика</span>
+        <h2>Командуй базой на краю галактики</h2>
+        <p class="hero-lead">Crypto Astra — бесплатная браузерная космическая экономическая игра.
+          Вы командир маленькой базы: отправляете корабли на планеты за рудой, кремнием и льдом,
+          платите за топливо и ремонт, крафтите компоненты, ставите модули и торгуете излишками
+          с другими пилотами.</p>
+        <div class="hero-actions">
+          <button type="button" class="cta" data-open-auth="register">
+            <img src="/icons/currency/astra.png" alt="" width="18" height="18">
+            Зарегистрироваться бесплатно
+          </button>
+          <button type="button" class="ghost" data-open-auth="login">У меня есть аккаунт</button>
+        </div>
+        <ul class="hero-facts">
+          <li>Бесплатно, без установки</li>
+          <li>5–10 минут в день</li>
+          <li>Работает с телефона</li>
+        </ul>
       </div>
-      <div class="block">
-        <h3>Частые вопросы</h3>
-        <p><b>ASTRA можно вывести или купить?</b> Нет. Это внутриигровая валюта: вывода,
-          обмена на деньги и выплат нет, купить её тоже нельзя.</p>
-        <p><b>Нужно платить, чтобы играть?</b> Нет. Регистрация бесплатная, платных
-          функций и лутбоксов нет.</p>
-        <p><b>Можно играть с телефона?</b> Да, интерфейс адаптирован под мобильный экран.</p>
-        <p><b>Что вы храните?</b> Email, хеш пароля и сессии. IP-адрес — только для лимитов
-          входа и регистрации, с очисткой по расписанию. Игровые действия пишутся в
-          журнал мира.</p>
+      <div class="hero-art" aria-hidden="true">
+        <div class="hero-orbit hero-orbit-a"><img src="/icons/planets/ferra.png" alt="" width="72" height="72"></div>
+        <div class="hero-orbit hero-orbit-b"><img src="/icons/planets/lumen.png" alt="" width="56" height="56"></div>
+        <div class="hero-orbit hero-orbit-c"><img src="/icons/planets/cinder.png" alt="" width="44" height="44"></div>
+        <img class="hero-ship" src="/sprites/ships/explorer.png" alt="Корабль Explorer" width="320" height="160">
       </div>
-    </div>
-  </section>
+    </section>
+
+    <section class="landing-section reveal">
+      <div class="section-head">
+        <h2>Из чего состоит игра</h2>
+        <p class="muted">Пять действий, из которых складывается день командира.</p>
+      </div>
+      <div class="feature-grid">
+        <article class="feature">
+          <img src="/icons/nav/overview.png" alt="" width="40" height="40">
+          <h3>Claim</h3>
+          <p>ASTRA капает раз в 15 минут, до 96 раз в сутки. Это базовая рента, пока корабли в пути.</p>
+        </article>
+        <article class="feature">
+          <img src="/icons/nav/expeditions.png" alt="" width="40" height="40">
+          <h3>Рейсы</h3>
+          <p>Короткий рейс — 15 минут, средний — 4 часа, дальний — сутки. В пути случаются события,
+            а износ прочности придётся чинить.</p>
+        </article>
+        <article class="feature">
+          <img src="/icons/nav/craft.png" alt="" width="40" height="40">
+          <h3>Крафт</h3>
+          <p>Из руды и льда собираются энергоячейка, схема и сплавная пластина. Они нужны модулям
+            и крупному ремонту.</p>
+        </article>
+        <article class="feature">
+          <img src="/icons/nav/modules.png" alt="" width="40" height="40">
+          <h3>Модули и верфь</h3>
+          <p>Семь модулей по пять уровней: двигатель, бак, сканер, трюм, бур, щит и ремкомплект.
+            Новые корпуса покупаются за ASTRA.</p>
+        </article>
+        <article class="feature">
+          <img src="/icons/nav/market.png" alt="" width="40" height="40">
+          <h3>Рынок</h3>
+          <p>Пилоты продают друг другу ресурсы и компоненты. Лот держит товар в эскроу, налог 5 %
+            уходит в экономику мира.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="landing-section reveal">
+      <div class="section-head">
+        <h2>Ваш флот</h2>
+        <p class="muted">Каждый корпус открывается уровнем и покупается один раз. Характеристики —
+          из игры, без округлений в свою пользу.</p>
+      </div>
+      <div class="ship-grid">
+        <article class="ship-card">
+          <img src="/sprites/ships/scout.png" alt="Scout" width="128" height="64">
+          <h3>Scout</h3>
+          <p class="ship-stats">трюм 10 · бак 5 · 1 слот</p>
+          <p class="muted">Стартовый корабль. Достаётся бесплатно при регистрации.</p>
+        </article>
+        <article class="ship-card">
+          <img src="/sprites/ships/hauler.png" alt="Hauler" width="128" height="64">
+          <h3>Hauler</h3>
+          <p class="ship-stats">трюм 40 · бак 8 · 2 слота</p>
+          <p class="muted">1 500 ASTRA, с 5 уровня. Возит много и недорого.</p>
+        </article>
+        <article class="ship-card">
+          <img src="/sprites/ships/miner.png" alt="Miner" width="128" height="64">
+          <h3>Miner</h3>
+          <p class="ship-stats">трюм 25 · добыча ×1,5 · 2 слота</p>
+          <p class="muted">2 000 ASTRA, с 5 уровня. Больше ресурсов за рейс.</p>
+        </article>
+        <article class="ship-card">
+          <img src="/sprites/ships/explorer.png" alt="Explorer" width="128" height="64">
+          <h3>Explorer</h3>
+          <p class="ship-stats">бак 12 · 3 слота · сектор 4</p>
+          <p class="muted">6 000 ASTRA, с 12 уровня. Открывает дальние сектора.</p>
+        </article>
+        <article class="ship-card">
+          <img src="/sprites/ships/cruiser.png" alt="Cruiser" width="128" height="64">
+          <h3>Cruiser</h3>
+          <p class="ship-stats">трюм 60 · 4 слота</p>
+          <p class="muted">20 000 ASTRA, с 20 уровня. Флагман среднего флота.</p>
+        </article>
+        <article class="ship-card">
+          <img src="/sprites/ships/flagship.png" alt="Flagship" width="128" height="64">
+          <h3>Flagship</h3>
+          <p class="ship-stats">трюм 120 · 6 слотов</p>
+          <p class="muted">За ASTRA не продаётся: чертёж и крафт — отдельная цель сезона.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="landing-section reveal">
+      <div class="section-head">
+        <h2>Мир</h2>
+        <p class="muted">Пятнадцать планет в пяти секторах. Сектор открывается уровнем командира,
+          дальность — корпусом корабля.</p>
+      </div>
+      <div class="planet-grid landing-planets">
+        <article class="planet-tile">
+          <img src="/icons/planets/ferra.png" alt="Ferra" width="72" height="72">
+          <h3>Ferra</h3>
+          <p class="muted">Сектор 1 · железо, медь</p>
+        </article>
+        <article class="planet-tile">
+          <img src="/icons/planets/cinder.png" alt="Cinder" width="72" height="72">
+          <h3>Cinder</h3>
+          <p class="muted">Сектор 1 · кремний, железо</p>
+        </article>
+        <article class="planet-tile">
+          <img src="/icons/planets/lumen.png" alt="Lumen" width="72" height="72">
+          <h3>Lumen</h3>
+          <p class="muted">Сектор 1 · лёд, медь</p>
+        </article>
+        <article class="planet-tile">
+          <img src="/icons/planets/tessera.png" alt="Tessera" width="72" height="72">
+          <h3>Tessera</h3>
+          <p class="muted">Сектор 2 · титан, кремний</p>
+        </article>
+        <article class="planet-tile">
+          <img src="/icons/planets/marrow.png" alt="Marrow" width="72" height="72">
+          <h3>Marrow</h3>
+          <p class="muted">Сектор 2 · гелий-3, лёд</p>
+        </article>
+        <article class="planet-tile">
+          <img src="/icons/planets/glacia.png" alt="Glacia" width="72" height="72">
+          <h3>Glacia</h3>
+          <p class="muted">Сектор 2 · лёд, кристалл</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="landing-section reveal">
+      <div class="section-head">
+        <h2>Крафт и рынок</h2>
+        <p class="muted">Ресурсы — не мусор в трюме, а актив: их крафтят, ставят в модули и продают
+          другим пилотам.</p>
+      </div>
+      <div class="craft-row">
+        <article class="craft-tile">
+          <img src="/icons/resources/energy_cell.png" alt="" width="56" height="56">
+          <h3>Энергоячейка</h3>
+          <p class="muted">3 льда + 2 кремния · 30 минут · 50 ASTRA</p>
+        </article>
+        <article class="craft-tile">
+          <img src="/icons/resources/circuit.png" alt="" width="56" height="56">
+          <h3>Схема</h3>
+          <p class="muted">3 меди + 2 кремния · 20 минут · 40 ASTRA</p>
+        </article>
+        <article class="craft-tile">
+          <img src="/icons/resources/alloy_plate.png" alt="" width="56" height="56">
+          <h3>Сплавная пластина</h3>
+          <p class="muted">3 железа + 2 меди · 20 минут · 60 ASTRA</p>
+        </article>
+      </div>
+      <div class="market-note">
+        <img src="/icons/nav/market.png" alt="" width="32" height="32">
+        <p><b>Рынок игроков.</b> Лот покупается целиком, цена держится в коридоре ±50 % от медианы
+          сделок за неделю. Налог 5 % — единственный доход системы с оборота. Астронавты торгуют
+          только внутри игры: вывести ASTRA нельзя.</p>
+      </div>
+    </section>
+
+    <section class="landing-section reveal">
+      <div class="section-head">
+        <h2>Частые вопросы</h2>
+      </div>
+      <div class="faq">
+        <details>
+          <summary>ASTRA можно вывести или купить?</summary>
+          <p>Нет. Это внутриигровая валюта: вывода, обмена на деньги и выплат нет, купить её тоже
+            нельзя. Всё, что заработано, остаётся в игре.</p>
+        </details>
+        <details>
+          <summary>Нужно платить, чтобы играть?</summary>
+          <p>Нет. Регистрация бесплатная, платных функций и лутбоксов нет. Реклама на сайте не даёт
+            наград и ASTRA.</p>
+        </details>
+        <details>
+          <summary>Сколько времени занимает игра?</summary>
+          <p>Claim — раз в 15 минут, короткий рейс — 15 минут. Обычно хватает 5–10 минут в день,
+            чтобы забрать награды и отправить корабль дальше.</p>
+        </details>
+        <details>
+          <summary>Можно играть с телефона?</summary>
+          <p>Да, интерфейс адаптирован под мобильный экран: нижняя панель разделов, крупные кнопки,
+            тот же аккаунт.</p>
+        </details>
+        <details>
+          <summary>Что вы храните?</summary>
+          <p>Email, хеш пароля и сессии. IP-адрес — только для лимитов входа и регистрации,
+            с очисткой по расписанию. Игровые действия пишутся в журнал мира.</p>
+        </details>
+      </div>
+    </section>
+
+    <section class="landing-cta reveal">
+      <h2>Готовы к первому рейсу?</h2>
+      <p class="muted">500 ASTRA, 3 единицы топлива и Scout — на старте. Дальше всё зависит
+        от того, как вы распорядитесь базой.</p>
+      <button type="button" class="cta" data-open-auth="register">
+        <img src="/icons/currency/astra.png" alt="" width="18" height="18">
+        Создать командира
+      </button>
+      <p class="muted small">Нужен только email и пароль. Подтверждение — без SMS и паспорта.</p>
+    </section>
+  </main>
+
+  <!-- Регистрация и вход живут в модальном окне: лендинг остаётся на заднем плане,
+       а модалка открывается любой кнопкой с data-open-auth. -->
+  <div id="auth-overlay" class="auth-overlay" hidden>
+    <section id="auth" class="auth-card" role="dialog" aria-modal="true" aria-labelledby="auth-title">
+      <button type="button" class="auth-close" id="auth-close" aria-label="Закрыть окно">×</button>
+      <h2 id="auth-title" class="auth-title">Начать игру</h2>
+      <div class="tabs">
+        <button type="button" id="tab-register" class="tab active">Регистрация</button>
+        <button type="button" id="tab-login" class="tab">Вход</button>
+      </div>
+      <form id="auth-form" autocomplete="on">
+        <label>Email <input id="email" type="email" required autocomplete="email"></label>
+        <label>Пароль (8–128 символов) <input id="password" type="password" required minlength="8" maxlength="128" autocomplete="current-password"></label>
+        <div id="turnstile" class="turnstile" hidden></div>
+        <button type="submit" id="auth-submit" class="cta">Зарегистрироваться</button>
+        <p id="auth-error" class="error" role="alert"></p>
+      </form>
+      <p class="auth-note">ASTRA — внутриигровая валюта. Выплат нет, купить её нельзя.</p>
+    </section>
+  </div>
 
   <section id="game" class="game-shell" hidden>
     <aside class="sidebar" aria-label="Разделы">
