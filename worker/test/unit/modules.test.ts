@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DAY_MS } from '../../src/shared/constants';
+import { DAY_MS, REPAIR_ASTRA_PER_PERCENT } from '../../src/shared/constants';
 import { MODULES, MODULE_MAX_LEVEL, modulePrice } from '../../src/shared/gameData';
 import { applyDelta, getBalance } from '../../src/world/balances';
 import { verifyLedger } from '../../src/world/ledger';
@@ -139,7 +139,7 @@ describe('модули (срез 4 этапа 2)', () => {
     giveParts(sql, tx, 'fuel_system', 2);
     tx(() => installModule(sql, 'p1', 'k1', { shipId: ship, module: 'fuel_system' }, T0 + 100));
     expect(fuelCap(sql, 'p1')).toBe(6);
-    expect(repairCost(20, 1, fxOfShip(sql, ship).repair)).toBe(300);
+    expect(repairCost(20, 1, fxOfShip(sql, ship).repair)).toBe(20 * REPAIR_ASTRA_PER_PERCENT);
 
     // Ремкомплект ставим на второй корабль: у Scout слот занят.
     const second = crypto.randomUUID();

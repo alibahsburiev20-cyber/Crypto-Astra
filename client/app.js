@@ -41,6 +41,15 @@ const ERRORS = {
   ship_not_for_sale: 'Этот корабль не продаётся за ASTRA',
   ship_locked: 'Уровень ещё мал для этого корабля',
   ship_owned: 'Такой корабль уже в ангаре',
+  bad_resource: 'Этот ресурс не торгуется',
+  bad_amount: 'Количество от 1 до 1000',
+  bad_price: 'Цена должна быть больше нуля',
+  market_lot_limit: 'На рынке уже 10 ваших лотов — снимите один',
+  price_out_of_band: 'Цена вне коридора: смотрите подсказку под полем',
+  lot_not_found: 'Лот не найден — возможно, его уже купили',
+  lot_closed: 'Лот уже закрыт',
+  own_lot: 'Нельзя купить свой лот',
+  not_your_lot: 'Это чужой лот',
   too_early: 'Claim ещё не готов',
   daily_limit: 'Суточный лимит Claim исчерпан',
   expedition_not_found: 'Рейс не найден',
@@ -73,6 +82,11 @@ const REASONS = {
   module_buy: 'Покупка модуля',
   module_parts: 'Компоненты модуля',
   ship_purchase: 'Покупка корабля',
+  market_escrow: 'Ресурс на рынок (эскроу)',
+  market_buy: 'Покупка на рынке',
+  market_sale: 'Продажа на рынке',
+  market_tax: 'Налог рынка',
+  market_cancel: 'Снятие лота',
   migration: 'Перенос истории',
 };
 const ASSETS = { astra: 'ASTRA', fuel: 'Топливо', points: 'Очки' };
@@ -634,6 +648,94 @@ function renderModules() {
   );
 }
 
+// Рынок — отдельный раздел. Лот держит ресурс в эскроу, поэтому продать один
+// и тот же ресурс дважды нельзя. Цена ограничена коридором вокруг медианы
+// сделок за неделю: подсказка под полем считается на сервере (market.band).
+function marketLotRow(lot) {
+  const short = state.balances.astra < lot.total;
+  return el('div', { class: 'block market-row' },
+    el('img', { src: `/icons/resources/${lot.resource}.png`, alt: '', width: '44', height: '44', class: 'market-art', loading: 'lazy' }),
+    el('div', { class: 'market-info' },
+      el('h3', {}, lot.name, el('span', { class: 'badge' }, `${lot.amount} шт`), lot.mine ? el('span', { class: 'badge' }, 'ваш') : null),
+      el('p', { class: 'muted' }, `${astraNum(lot.unitPrice)} ASTRA за единицу · всего ${astraNum(lot.total)}`),
+      el('p', { class: 'muted' }, lot.mine ? 'Ваш лот. Ресурс лежит в эскроу, пока лот открыт.' : `Продавец: ${lot.seller}`),
+      lot.mine
+        ? el('button', {
+          type: 'button', class: 'ghost',
+          disabled: state.frozen ? '' : null,
+          onClick: () => doCancelLot(lot.id),
+        }, 'Снять лот и вернуть ресурс')
+        : el('button', {
+          type: 'button',
+          disabled: state.frozen || short ? '' : null,
+          onClick: () => doBuyLot(lot.id),
+        }, short ? `Не хватает ${astraNum(lot.total - state.balances.astra)} ASTRA` : `Купить за ${astraNum(lot.total)} ASTRA`),
+    ),
+  );
+}
+
+function renderMarket() {
+  const m = state.market;
+  if (!m) return el('div', { class: 'screen' }, el('p', { class: 'muted' }, 'Сервер ещё не отдаёт рынок.'));
+  const saved = window.__mkt || {};
+  const resource = m.resources.find((r) => r.id === saved.resource) || m.resources.find((r) => r.have > 0) || m.resources[0];
+  const band = resource.band;
+  const amount = Math.max(1, Math.min(m.maxAmount, Number(saved.amount) || Math.min(resource.have || 1, 10)));
+  const price = Number(saved.price) || band.median;
+  const total = amount * price;
+  const tax = Math.floor(total * m.tax / 100);
+  const outOfBand = price < band.min || price > band.max;
+  const canSell = !state.frozen && resource.have >= amount && amount >= 1 && price > 0 && !outOfBand && m.mine < m.limit;
+
+  const resSelect = el('select', {
+    onChange: (e) => { window.__mkt = { ...(window.__mkt || {}), resource: e.currentTarget.value }; render(); },
+  }, ...m.resources.map((r) => el('option', { value: r.id, selected: r.id === resource.id ? '' : null },
+    `${r.name} · в трюме ${r.have}`)));
+
+  const amountInput = el('input', {
+    type: 'number', min: '1', max: String(m.maxAmount), step: '1', value: String(amount), inputmode: 'numeric',
+    onInput: (e) => { window.__mkt = { ...(window.__mkt || {}), amount: Number(e.currentTarget.value) }; },
+  });
+  const priceInput = el('input', {
+    type: 'number', min: String(band.min), max: String(band.max), step: '1', value: String(price), inputmode: 'numeric',
+    onInput: (e) => { window.__mkt = { ...(window.__mkt || {}), price: Number(e.currentTarget.value) }; },
+  });
+
+  const form = el('div', { class: 'block market-form' },
+    el('h3', {}, 'Выставить лот'),
+    el('label', {}, 'Ресурс', resSelect),
+    el('label', {}, 'Количество', amountInput),
+    el('label', {}, 'Цена за единицу, ASTRA', priceInput),
+    el('p', { class: `market-band${outOfBand ? ' error' : ''}` },
+      `Коридор ${band.min}–${band.max} ASTRA · медиана ${band.median}`,
+      band.sales ? ` по ${band.sales} сделкам за ${m.windowDays} дн.` : ' — сделок ещё не было, берём базовую цену.',
+      ' Налог ', el('b', {}, `${m.tax}%`), ': получите ', el('b', {}, `${astraNum(total - tax)} ASTRA`), ` из ${astraNum(total)}.`),
+    el('p', { class: 'muted' }, outOfBand
+      ? `Цена вне коридора. Поставьте от ${band.min} до ${band.max}.`
+      : resource.have >= amount
+        ? `Ресурс уйдёт в эскроу: ${amount} из ${resource.have} шт.`
+        : `В трюме только ${resource.have} шт — уменьшите количество.`),
+    el('button', {
+      type: 'button',
+      disabled: canSell ? null : '',
+      onClick: () => doSellLot(resource.id, amount, price),
+    }, outOfBand ? 'Цена вне коридора' : resource.have < amount ? 'Не хватает ресурса' : m.mine >= m.limit ? 'Лимит лотов' : 'Выставить лот'),
+  );
+
+  return el('div', { class: 'screen' },
+    el('div', { class: 'screen-title' }, el('h2', {}, 'Рынок'), el('span', { class: 'badge' }, `налог ${m.tax}%`)),
+    el('p', { class: 'muted' },
+      `Торгуют игроки между собой. Лот покупается целиком, цена — за единицу. Ваших лотов ${m.mine} из ${m.limit}, максимум ${astraNum(m.maxAmount)} единиц в лоте.`),
+    cards(),
+    form,
+    el('div', { class: 'screen-title' }, el('h2', {}, 'Лоты'), el('span', { class: 'badge' }, `${m.lots.length}`)),
+    m.lots.length
+      ? el('div', {}, ...m.lots.map(marketLotRow))
+      : el('p', { class: 'muted' }, 'Открытых лотов нет. Можно выставить свой — его купят другие пилоты.'),
+    note ? el('p', { class: note.startsWith('Ошибка') ? 'error' : 'ok' }, note) : null,
+  );
+}
+
 function renderWallet() {
   const f = state.fuel;
   return el('div', { class: 'screen' },
@@ -651,6 +753,12 @@ function renderWallet() {
         disabled: state.frozen || state.balances.fuel >= f.cap || f.boughtToday >= f.dailyMax || state.balances.astra < f.price ? '' : null,
         onClick: doBuyFuel,
       }, 'Купить 1'),
+    ),
+    el('div', { class: 'block' },
+      el('h3', {}, 'Рынок'),
+      el('p', { class: 'muted' }, 'Ресурсы и компоненты можно продать другим пилотам. Лот держит ресурс в эскроу, налог 5%.'),
+      el('button', { type: 'button', class: 'ghost', onClick: () => setView('market') },
+        el('img', { src: '/icons/nav/market.png', alt: '', width: '18', height: '18', class: 'icon-sm' }), 'Открыть рынок'),
     ),
     el('div', { class: 'block' },
       el('h3', {}, 'Крафт'),
@@ -697,7 +805,8 @@ function render() {
     : view === 'fleet' ? renderFleet()
       : view === 'craft' ? renderCraftScreen()
         : view === 'modules' ? renderModules()
-          : view === 'wallet' ? renderWallet()
+          : view === 'market' ? renderMarket()
+            : view === 'wallet' ? renderWallet()
             : view === 'ledger' ? renderLedger() : renderBridge();
   panel.append(body);
   for (const btn of document.querySelectorAll('[data-view]')) btn.classList.toggle('active', btn.dataset.view === view);
@@ -766,6 +875,13 @@ function doBuyFuel() { return act(`fuel:${state?.fuel.boughtToday}`, '/fuel/buy'
 function doCraft(recipe) { return act(`craft:${recipe}`, '/craft/start', { recipe }); }
 function doInstall(shipId, module) { return act(`module:${shipId}:${module}`, '/modules/install', { shipId, module }); }
 function doBuyShip(type) { return act(`buy-ship:${type}`, '/ships/buy', { type }); }
+function doSellLot(resource, amount, unitPrice) {
+  // Ключ включает параметры: исправленная цена — новое действие, а не повтор.
+  return act(`mkt-lot:${resource}:${amount}:${unitPrice}`, '/market/lot', { resource, amount, unitPrice })
+    .then(() => { window.__mkt = {}; });
+}
+function doBuyLot(lotId) { return act(`mkt-buy:${lotId}`, '/market/buy', { lotId }); }
+function doCancelLot(lotId) { return act(`mkt-cancel:${lotId}`, '/market/cancel', { lotId }); }
 
 function setView(v) {
   view = v;

@@ -18,7 +18,11 @@ export const FUEL_DAILY_MAX = 20;
 export const EXPEDITION_FULL_REWARD = 8;
 export const POINTS_SOFT_CAP = 700;
 export const POINTS_HARD_CAP = 1000;
-export const REPAIR_ASTRA_PER_PERCENT = 15;
+// 15 из концепции оказалось неподъёмным: при износе 5–15 % за рейс игрок тратил
+// на ремонт больше, чем приносили Claim и рейсы вместе (симуляция, docs/ECONOMY.md).
+// 2 ASTRA за процент держит ремонт примерно в трети дохода и оставляет экономику
+// в целевом коридоре 70–90 % поглощения.
+export const REPAIR_ASTRA_PER_PERCENT = 2;
 
 export function utcDay(now: number): number {
   return Math.floor(now / DAY_MS);

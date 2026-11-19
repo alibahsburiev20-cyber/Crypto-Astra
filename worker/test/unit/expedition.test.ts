@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DAY_MS, START_ASTRA, START_FUEL } from '../../src/shared/constants';
+import { DAY_MS, REPAIR_ASTRA_PER_PERCENT, START_ASTRA, START_FUEL } from '../../src/shared/constants';
 import { PLANET_BY_ID, EVENTS } from '../../src/shared/gameData';
 import { getBalance } from '../../src/world/balances';
 import { verifyLedger } from '../../src/world/ledger';
@@ -39,8 +39,8 @@ describe('формулы этапа 1', () => {
     expect(fuelCost(1, 'medium')).toBe(2);
     expect(fuelCost(1, 'long')).toBe(4);
     expect(fuelCost(1.2, 'short')).toBe(2);
-    expect(repairCost(20, 1)).toBe(300);
-    expect(repairCost(20, 1.5)).toBe(450);
+    expect(repairCost(20, 1)).toBe(20 * REPAIR_ASTRA_PER_PERCENT);
+    expect(repairCost(20, 1.5)).toBe(30 * REPAIR_ASTRA_PER_PERCENT);
     expect(durabilityLoss('00'.repeat(8), false, 0)).toBe(5);
     expect(durabilityLoss('ff'.repeat(8), false, 0)).toBe(15);
     expect(durabilityLoss('ff'.repeat(8), true, 0)).toBe(25);
@@ -193,7 +193,7 @@ describe('экспедиция', () => {
 });
 
 describe('ремонт, топливо, заморозка', () => {
-  it('ремонт выше 50% списывает 15×процент, ниже 50% требует пластину и не трогает баланс', () => {
+  it('ремонт выше 50% списывает цену за процент, ниже 50% требует пластину и не трогает баланс', () => {
     const { sql, tx } = makeWorld();
     tx(() => createPlayer(sql, 'p1', T0));
     const id = shipId(sql);
@@ -203,11 +203,12 @@ describe('ремонт, топливо, заморозка', () => {
     expect(getBalance(sql, 'p1', 'astra')).toBe(START_ASTRA);
     tx(() => applyDurability(sql, { playerId: 'p1', shipId: id, delta: 40, reason: 'test_wear' }, T0));
     const repaired = tx(() => repairShip(sql, 'p1', 'r1', id, T0));
-    expect(repaired.cost).toBe(300);
+    const expected = 20 * REPAIR_ASTRA_PER_PERCENT;
+    expect(repaired.cost).toBe(expected);
     expect(repaired.durability).toBe(100);
-    expect(getBalance(sql, 'p1', 'astra')).toBe(START_ASTRA - 300);
-    expect(tx(() => repairShip(sql, 'p1', 'r1', id, T0)).cost).toBe(300);
-    expect(getBalance(sql, 'p1', 'astra')).toBe(START_ASTRA - 300);
+    expect(getBalance(sql, 'p1', 'astra')).toBe(START_ASTRA - expected);
+    expect(tx(() => repairShip(sql, 'p1', 'r1', id, T0)).cost).toBe(expected);
+    expect(getBalance(sql, 'p1', 'astra')).toBe(START_ASTRA - expected);
     expect(verifyLedger(sql).ok).toBe(true);
   });
 

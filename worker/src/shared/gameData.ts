@@ -316,3 +316,34 @@ export function moduleEffectText(id: ModuleId, level: number): string {
     default: return '';
   }
 }
+
+// ── Рынок (этап 2, срез 6) ────────────────────────────────────────────────────
+// Торговля внутри мира: лоты с эскроу, налог в систему и коридор цены вокруг
+// медианы сделок за неделю. Базовая цена нужна, пока сделок ещё не было.
+export const RESOURCE_BASE_PRICES: Record<string, number> = {
+  iron_ore: 4,
+  copper_ore: 6,
+  silicon: 8,
+  ice: 5,
+  helium3: 10,
+  titanium: 14,
+  crystal: 18,
+  astralite: 30,
+  void_crystal: 45,
+  quantum_dust: 60,
+  energy_cell: 120,
+  circuit: 140,
+  alloy_plate: 180,
+};
+
+/** 5 % в базисных пунктах: 500 bp = 5 %. */
+export const MARKET_TAX_BP = 500;
+export const MARKET_LOT_LIMIT = 10;
+export const MARKET_MAX_AMOUNT = 1000;
+export const MARKET_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+/** Коридор: ±50 % от медианы. */
+export const MARKET_CORRIDOR_BP = 5000;
+
+export function marketTax(gross: number): number {
+  return Math.floor((gross * MARKET_TAX_BP) / 10000);
+}
