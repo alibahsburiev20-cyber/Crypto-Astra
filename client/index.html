@@ -139,7 +139,9 @@
         </div>
       </header>
       <div id="ad-slot" class="ad-slot" hidden aria-label="Реклама"></div>
-      <p id="frozen" class="error" hidden>Мир заморожен: сверка журнала не сошлась. Игровые действия остановлены.</p>
+      <!-- Плашка «мир заморожен» создаётся скриптом только при реальном расхождении:
+           в статическом HTML её нет, иначе поисковик и рекламная модерация читают
+           «мир заморожен» на живой странице. -->
       <div id="panel"></div>
       <nav class="dock" aria-label="Разделы">
         <button type="button" data-view="bridge" class="active">Обзор</button>

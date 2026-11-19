@@ -793,6 +793,24 @@ function renderLedger() {
   );
 }
 
+// Плашка «мир заморожен» появляется только когда сверка действительно не сошлась.
+// В статическом HTML её нет: иначе рекламная модерация и поисковик видят на живой
+// странице строку «мир заморожен» и решают, что игра сломана.
+function renderFrozen() {
+  const content = document.querySelector('.content');
+  if (!content) return;
+  const node = document.getElementById('frozen');
+  if (!state.frozen) {
+    if (node) node.remove();
+    return;
+  }
+  if (node) return;
+  const banner = el('p', { id: 'frozen', class: 'error' },
+    'Мир заморожен: сверка журнала не сошлась. Игровые действия остановлены.');
+  const panel = content.querySelector('#panel');
+  content.insertBefore(banner, panel);
+}
+
 function render() {
   if (!state) return;
   const b = state.balances;
@@ -803,7 +821,7 @@ function render() {
   setText('#top-fuel', `${b.fuel}/${state.fuel.cap}`);
   setText('#top-points', b.points);
   setText('#top-level', state.level);
-  $('#frozen').hidden = !state.frozen;
+  renderFrozen();
   const panel = $('#panel');
   panel.replaceChildren();
   const body = view === 'flight' ? renderFlight()
