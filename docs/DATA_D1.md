@@ -38,6 +38,14 @@ HttpOnly-cookie. Истёкшие и отозванные строки стар�
 `head_seq`, `head_hash`, `ok`, `payload`. При подключённом бакете payload в D1 не
 пишется — только ключ R2. Проверка: `npm run verify-snapshot`.
 
+### pool_entries
+
+Учёт пула (этап 5): `id`, `kind` (`in` / `out` / `ops`), `amount` (минимальные
+единицы валюты), `currency` (`EUR` / `USD`), `ref` (уникальный номер платежа),
+`note` (публичное пояснение без персональных данных), `season_id`, `created_at`.
+Таблица append-only: `UPDATE` и `DELETE` запрещены триггерами. Игровых данных
+здесь нет — только деньги вокруг игры, см. `POOL.md`.
+
 ### auth_limits
 
 `key` (например `login_ip:203.0.113.7`, `login_email:<sha256>`), `attempts`,
@@ -60,9 +68,16 @@ npx wrangler d1 migrations apply DB --remote
 | `0003_world_seats.sql` | world_seats |
 | `0004_auth_limits.sql` | auth_limits |
 | `0005_season_archive.sql` | season_history, world_snapshots |
+| `0006_pool.sql` | pool_entries (append-only, `ref` уникален), индексы и триггеры |
 
 Правила: не менять уже применённые файлы, добавлять новый номер. Перед выкладкой
 проверять на локальной D1.
+
+**Самолечение.** Деплой идёт из браузера через Workers Builds, где
+`wrangler d1 migrations apply --remote` недоступен. Поэтому `worker/src/db/bootstrap.ts`
+идемпотентно создаёт таблицы пула (при первом запросе к `/pool.json`) и архива
+(в cron перед первой выгрузкой). На мигрированной базе это no-op; миграции
+остаются каноном для схемы и ревью.
 
 ## Резервные копии
 

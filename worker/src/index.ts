@@ -1,5 +1,6 @@
 import { syncArchive } from './archive';
 import { cleanupAuthLimits } from './auth/rateLimit';
+import { ensureArchiveSchema } from './db/bootstrap';
 import { cleanupSessions } from './auth/sessions';
 import type { Env } from './env';
 import { route } from './http/router';
@@ -68,6 +69,9 @@ export default {
       }
     }
     // Архив: снимки миров в R2 (если бакет подключён) и историю сезонов в D1.
+    // Таблицы создаём сами: деплой идёт из браузера, `wrangler d1 migrations`
+    // оттуда не запустить. На мигрированной базе это no-op.
+    await ensureArchiveSchema(env.DB);
     try {
       const archived = await syncArchive(env, ids);
       if (archived.archived || archived.failed) console.log('archive', archived);

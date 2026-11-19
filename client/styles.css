@@ -751,3 +751,41 @@ footer { max-width: 1180px; margin: 0 auto; padding: 0 22px 26px; color: var(--m
   .member-actions { grid-column: 1 / -1; justify-content: flex-end; }
   .pass-level { grid-template-columns: 30px minmax(0, 1fr) auto; }
 }
+
+/* ── Astra Pool: публичный отчёт (этап 5, срез 5.2) ────────────────────────── */
+.pool-page .brand { text-decoration: none; color: inherit; }
+.pool-hero { padding-bottom: 22px; }
+.pool-art img { image-rendering: pixelated; filter: drop-shadow(0 10px 24px rgba(240, 138, 36, .28)); }
+.pool-flags { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.pool-flag {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 10px; border-radius: 999px; font-size: 11px; letter-spacing: .02em;
+  border: 1px solid var(--line); background: rgba(10, 18, 36, .6); color: var(--muted);
+}
+.pool-flag.is-on { color: var(--ok, #45e0a5); border-color: rgba(69, 224, 165, .45); }
+.pool-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px;
+}
+.pool-card {
+  padding: 12px 14px; border: 1px solid var(--line); border-radius: 14px;
+  background: linear-gradient(150deg, rgba(18, 30, 56, .82), rgba(9, 15, 30, .78));
+  display: grid; gap: 6px;
+}
+.pool-card-label { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.pool-card b { font-size: 18px; font-variant-numeric: tabular-nums; }
+.pool-note { margin: 12px 0 0; font-size: 12px; color: var(--muted); }
+.pool-table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 14px; }
+.pool-table { width: 100%; border-collapse: collapse; font-size: 12px; min-width: 520px; }
+.pool-table th, .pool-table td { padding: 9px 12px; text-align: left; border-bottom: 1px solid var(--line); }
+.pool-table th { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.pool-table tr:last-child td { border-bottom: 0; }
+.pool-table td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pool-rules { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; }
+.pool-rule {
+  padding: 14px 16px; border: 1px solid var(--line); border-radius: 14px;
+  background: rgba(10, 18, 36, .55);
+}
+.pool-rule h3 { margin: 0 0 6px; font-size: 14px; }
+.pool-rule p { margin: 0; font-size: 12px; line-height: 1.55; color: var(--muted); }
+.pool-rule code { font-size: 11px; color: var(--text); }
+a.side-item { text-decoration: none; }

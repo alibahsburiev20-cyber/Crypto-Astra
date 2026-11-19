@@ -19,6 +19,14 @@ application/json; charset=utf-8`. Ответы не кэшируются (`Cache
 пригласившего) и `turnstileToken`. `/auth/login` — `email`, `password`,
 `turnstileToken` при требовании проверки.
 
+| Метод | Путь | Назначение |
+|---|---|---|
+| GET | `/pool.json` | публичный отчёт пула: итоги по валютам, последние операции, флаг выплат |
+| GET | `/pool/report` | алиас `/pool.json` |
+
+Пул ведётся отдельно от Ledger: ASTRA — внутриигровая валюта, её нельзя купить
+или вывести. Правила и запись — `docs/POOL.md`.
+
 ## С авторизацией
 
 Заголовок `Authorization: Bearer <access_token>` (JWT HS256, 15 минут).
@@ -49,6 +57,16 @@ application/json; charset=utf-8`. Ответы не кэшируются (`Cache
 | POST | `/guild/role` | `{ playerId, role }`: `officer` или `member` |
 | POST | `/guild/rename` | `{ name, tag }`, только лидер |
 | POST | `/referrals/apply` | `{ code }`, применить код приглашения |
+
+## Админка пула (этап 5)
+
+Заголовок `X-Admin-Token: <ADMIN_TOKEN>`. Без секрета в окружении — 503
+`admin_disabled`, без заголовка — 401, с неверным — 403.
+
+| Метод | Путь | Назначение |
+|---|---|---|
+| GET | `/admin/pool` | все записи пула с `ref` и `id` плюс итоги |
+| POST | `/admin/pool/entry` | `{ kind: "in" \| "out" \| "ops", amount, currency: "EUR" \| "USD", ref, note? }` |
 
 ### `GET /season`
 

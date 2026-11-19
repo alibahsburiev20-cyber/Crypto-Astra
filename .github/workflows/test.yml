@@ -30,7 +30,7 @@ jobs:
       - run: npm ci
       - name: Подготовить локальную D1
         run: |
-          printf 'JWT_SECRET=ci-secret-ci-secret-ci-secret-12345678\n' > .dev.vars
+          printf 'JWT_SECRET=ci-secret-ci-secret-ci-secret-12345678\nADMIN_TOKEN=ci-admin-token\n' > .dev.vars
           npx wrangler d1 migrations apply DB --local
       - name: E2E против wrangler dev
         run: |

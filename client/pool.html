@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Astra Pool — отчёт пула Crypto Astra</title>
+  <meta name="description" content="Публичный отчёт Astra Pool: сколько денег пришло в пул, сколько зарезервировано на операции и сколько выплачено призов. Выплат игрокам сейчас нет, ASTRA не покупается и не выводится.">
+  <link rel="icon" type="image/png" href="/icons/currency/astra.png">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body class="pool-page">
+  <div class="stars" aria-hidden="true"></div>
+
+  <header class="brandbar">
+    <a class="brand" href="/">
+      <img src="/icons/currency/astra.png" alt="" width="40" height="40">
+      <div>
+        <h1>Crypto Astra</h1>
+        <p class="tagline">Astra Pool · отчёт</p>
+      </div>
+    </a>
+    <nav class="landing-nav" aria-label="Навигация">
+      <a class="link" href="/">В игру</a>
+      <a class="cta cta-small" href="/#landing">Регистрация</a>
+    </nav>
+  </header>
+
+  <main class="landing pool" aria-label="Отчёт пула">
+    <section class="hero pool-hero">
+      <div class="hero-copy">
+        <span class="hero-kicker">Этап 5 · Учёт и отчёт</span>
+        <h2>Astra Pool</h2>
+        <p class="hero-lead">Пул — это деньги вокруг игры: взносы участников, призы и расходы
+          на операции. Здесь лежит <b>публичный отчёт</b> по уже учтённым операциям. Игровая
+          валюта ASTRA живёт отдельно: её нельзя купить, продать или вывести, и на этот отчёт
+          она не влияет.</p>
+        <div class="pool-flags" aria-live="polite">
+          <span class="pool-flag" data-pool="payouts">Выплаты игрокам: выключены</span>
+          <span class="pool-flag" data-pool="updated">Данные загружаются…</span>
+        </div>
+      </div>
+      <div class="hero-art pool-art" aria-hidden="true">
+        <img src="/icons/social/banner.png" alt="" width="132" height="132">
+      </div>
+    </section>
+
+    <section class="landing-section" aria-label="Итоги пула">
+      <div class="section-head">
+        <h2>Итоги</h2>
+        <p class="muted">Суммы в валюте записи, в минимальных единицах: для EUR и USD — центы.
+          Если пул пуст, отчёт показывает нули, а не «примерно столько».</p>
+      </div>
+      <div class="pool-grid" data-pool="totals">
+        <article class="pool-card">
+          <span class="pool-card-label">Взносы</span>
+          <b data-pool="in">—</b>
+        </article>
+        <article class="pool-card">
+          <span class="pool-card-label">Резерв на операции (20 %)</span>
+          <b data-pool="fee">—</b>
+        </article>
+        <article class="pool-card">
+          <span class="pool-card-label">Призовой фонд</span>
+          <b data-pool="fund">—</b>
+        </article>
+        <article class="pool-card">
+          <span class="pool-card-label">Выплачено призов</span>
+          <b data-pool="prizes">—</b>
+        </article>
+        <article class="pool-card">
+          <span class="pool-card-label">Расходы на операции</span>
+          <b data-pool="ops">—</b>
+        </article>
+        <article class="pool-card">
+          <span class="pool-card-label">Остаток на счетах</span>
+          <b data-pool="balance">—</b>
+        </article>
+      </div>
+      <p class="pool-note" data-pool="note"></p>
+    </section>
+
+    <section class="landing-section" aria-label="Последние операции">
+      <div class="section-head">
+        <h2>Последние операции</h2>
+        <p class="muted">Показываем вид операции, сумму, валюту и публичное пояснение.
+          Имён, адресов и номеров платежей здесь нет.</p>
+      </div>
+      <div class="pool-table-wrap">
+        <table class="pool-table">
+          <thead>
+            <tr><th scope="col">Дата</th><th scope="col">Операция</th><th scope="col">Сумма</th><th scope="col">Пояснение</th></tr>
+          </thead>
+          <tbody data-pool="entries">
+            <tr><td colspan="4" class="muted">Пока операций нет.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="landing-section" aria-label="Правила пула">
+      <div class="section-head">
+        <h2>Правила</h2>
+        <p class="muted">Коротко и без обещаний прибыли.</p>
+      </div>
+      <div class="pool-rules">
+        <article class="pool-rule">
+          <h3>Что такое пул</h3>
+          <p>Деньги на призы и операции. Не инвестиция, не ценные бумаги, не токен.
+            Участие добровольное, доход не гарантируется.</p>
+        </article>
+        <article class="pool-rule">
+          <h3>Куда идут 20 %</h3>
+          <p>Резерв на операции: домен, хостинг, реклама и работа. Остальное — призовой
+            фонд. Резерв — отчётная величина, а не автоматический перевод.</p>
+        </article>
+        <article class="pool-rule">
+          <h3>Когда будут выплаты</h3>
+          <p>Только после гейта 4: проверка платежей на малых суммах и заключение юриста
+            по Pass, косметике и пулу. До наступления гейта 4 флаг выплат выключен в коде.</p>
+        </article>
+        <article class="pool-rule">
+          <h3>Как проверяется учёт</h3>
+          <p>Записи append-only, у каждой операции уникальный номер. Повторный платёж
+            с тем же номером не удвоит отчёт. Журнал кошельков мира проверяется отдельно
+            и виден в игре в разделе «Журнал».</p>
+        </article>
+        <article class="pool-rule">
+          <h3>ASTRA — не деньги</h3>
+          <p>Внутриигровая валюта. Покупка, вывод и обмен на деньги запрещены; награды
+            за клики по рекламе не начисляются. Пул не покупает ASTRA и не продаёт её.</p>
+        </article>
+        <article class="pool-rule">
+          <h3>Что видно здесь</h3>
+          <p>Только агрегаты и публичные пояснения. Персональные данные и платёжные
+            реквизиты не публикуются. Сам отчёт — JSON по адресу <code>/pool.json</code>.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="landing-cta">
+      <h2>Вопросы по пулу</h2>
+      <p class="muted">Правила, API и ограничения — в документе
+        <a href="https://github.com/alibahsburiev20-cyber/Crypto-Astra/blob/main/docs/POOL.md">docs/POOL.md</a>.
+        Если что-то в отчёте не сходится — это баг, и его надо чинить, а не «объяснять».</p>
+      <a class="cta" href="/">Вернуться в игру</a>
+    </section>
+  </main>
+
+  <footer>
+    ASTRA Coins — внутриигровая валюта. Это не деньги, не токен и не актив; выплат нет,
+    прибыли не обещаем. Пул ведётся отдельно от игрового журнала.
+  </footer>
+  <script type="module" src="/pool.js"></script>
+</body>
+</html>

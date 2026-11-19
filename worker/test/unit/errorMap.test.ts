@@ -39,7 +39,8 @@ describe('карта ошибок', () => {
   it('статусы в таблице — валидные HTTP-коды', () => {
     for (const [code, status] of Object.entries(STATUS_BY_CODE)) {
       expect(status, code).toBeGreaterThanOrEqual(400);
-      expect(status, code).toBeLessThan(500);
+      // 503 бывает у «выключено/не настроено»: админка и пул до миграции.
+      expect(status, code).toBeLessThan(600);
     }
   });
 
