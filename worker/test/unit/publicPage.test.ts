@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 const root = new URL('../../../', import.meta.url);
 const html = readFileSync(new URL('client/index.html', root), 'utf8');
 const app = readFileSync(new URL('client/app.js', root), 'utf8');
+const css = readFileSync(new URL('client/styles.css', root), 'utf8');
 
 describe('публичная страница (гейт 2)', () => {
   it('описание игры есть в статическом HTML, не только в скрипте', () => {
@@ -50,6 +51,11 @@ describe('публичная страница (гейт 2)', () => {
     expect(app).toContain('function openAuth');
     expect(app).toContain('function closeAuth');
     expect(app).toContain("show('landing')");
+  });
+
+  it('в игровом экране шапка не предлагает войти или зарегистрироваться', () => {
+    expect(app).toContain("classList.toggle('in-game'");
+    expect(css).toContain('body.in-game .landing-nav');
   });
 
   it('в статическом HTML нет плашки «мир заморожен»', () => {

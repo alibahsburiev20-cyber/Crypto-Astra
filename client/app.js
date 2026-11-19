@@ -204,6 +204,8 @@ function show(which) {
   const landing = $('#landing');
   if (landing) landing.hidden = which === 'game';
   document.body.classList.toggle('modal-open', which === 'auth');
+  // В игре шапка не должна предлагать вход и регистрацию: командир уже внутри.
+  document.body.classList.toggle('in-game', which === 'game');
 }
 
 // Открыть окно регистрации или входа с лендинга.

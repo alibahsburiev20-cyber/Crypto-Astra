@@ -81,6 +81,8 @@ h2 { margin: 0 0 10px; font-size: 17px; letter-spacing: -.01em; }
 .landing { position: relative; z-index: 1; max-width: 1180px; margin: 0 auto; padding: 0 22px 64px; }
 
 .landing-nav { display: flex; align-items: center; gap: 10px; }
+/* Вошедшему командиру кнопки «Войти» и «Регистрация» в шапке не нужны. */
+body.in-game .landing-nav { display: none; }
 .cta-small { padding: 9px 14px; font-size: 12px; }
 
 /* Hero */
