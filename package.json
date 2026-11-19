@@ -17,6 +17,8 @@
     "typecheck:scripts": "tsc -p tsconfig.scripts.json",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "config:sync": "node scripts/sync-wrangler.mjs",
+    "db:migrate": "wrangler d1 migrations apply DB --remote",
+    "db:migrate:preview": "wrangler d1 migrations apply DB --remote --preview",
     "build": "node scripts/embed-client.mjs",
     "ads-forecast": "tsx scripts/ads-forecast.ts"
   },

@@ -19,6 +19,10 @@ directory = "client"
 binding = "DB"
 database_name = "astra-global"
 database_id = "49cf3fff-baaa-4c06-b750-9946778e7380"
+# База для превью-сборок: отдельная, чтобы тестовые аккаунты и миграции не
+# задевали живой мир. Нужна ещё и для `d1 migrations apply DB --remote --preview`:
+# без этого поля wrangler ищет базу только среди основных.
+preview_database_id = "a9656807-8f65-4f3d-bf77-1ac7fd49e6a3"
 migrations_dir = "worker/migrations/d1"
 
 [[durable_objects.bindings]]
