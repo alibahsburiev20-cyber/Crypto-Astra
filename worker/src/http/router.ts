@@ -1,7 +1,11 @@
 import { requireAuth } from '../auth/guards';
 import type { Env } from '../env';
 import { config, login, logout, refresh, register } from '../routes/auth';
-import { buyFuel, cancelExpedition, chooseEvent, claim, craftStart, ledger, market, marketBuy, marketCancel, marketLot, me, moduleInstall, repair, season, shipBuy, startExpedition } from '../routes/game';
+import {
+  buyFuel, cancelExpedition, chooseEvent, claim, craftStart, guild, guildCreate, guildJoin, guildKick, guildLeave,
+  guildRename, guildRole, ledger, market, marketBuy, marketCancel, marketLot, me, missionClaim, moduleInstall, passClaim,
+  referralApply, repair, season, shipBuy, social, startExpedition,
+} from '../routes/game';
 import { errorResponse, json } from './response';
 
 export async function route(request: Request, env: Env): Promise<Response> {
@@ -17,7 +21,7 @@ export async function route(request: Request, env: Env): Promise<Response> {
     if (m === 'POST' && p === '/auth/refresh') return await refresh(request, env);
     if (m === 'POST' && p === '/auth/logout') return await logout(request, env);
 
-    if (p === '/me' || p === '/season' || p === '/claim' || p === '/ledger' || p === '/expeditions/start' || p === '/expeditions/cancel' || p === '/expeditions/choose' || p === '/expeditions/choose-event' || p === '/ships/repair' || p === '/fuel/buy' || p === '/craft/start' || p === '/modules/install' || p === '/ships/buy' || p === '/market' || p === '/market/lot' || p === '/market/buy' || p === '/market/cancel') {
+    if (p === '/me' || p === '/season' || p === '/claim' || p === '/ledger' || p === '/expeditions/start' || p === '/expeditions/cancel' || p === '/expeditions/choose' || p === '/expeditions/choose-event' || p === '/ships/repair' || p === '/fuel/buy' || p === '/craft/start' || p === '/modules/install' || p === '/ships/buy' || p === '/market' || p === '/market/lot' || p === '/market/buy' || p === '/market/cancel' || p === '/social' || p === '/missions/claim' || p === '/pass/claim' || p === '/guild' || p === '/guild/create' || p === '/guild/join' || p === '/guild/leave' || p === '/guild/kick' || p === '/guild/role' || p === '/guild/rename' || p === '/referrals/apply') {
       const a = await requireAuth(request, env);
       if (m === 'GET' && p === '/me') return await me(env, a);
       if (m === 'GET' && p === '/ledger') return await ledger(url, env, a);
@@ -36,6 +40,17 @@ export async function route(request: Request, env: Env): Promise<Response> {
       if (m === 'POST' && p === '/market/lot') return await marketLot(request, env, a);
       if (m === 'POST' && p === '/market/buy') return await marketBuy(request, env, a);
       if (m === 'POST' && p === '/market/cancel') return await marketCancel(request, env, a);
+      if (m === 'GET' && p === '/social') return await social(env, a);
+      if (m === 'POST' && p === '/missions/claim') return await missionClaim(request, env, a);
+      if (m === 'POST' && p === '/pass/claim') return await passClaim(request, env, a);
+      if (m === 'GET' && p === '/guild') return await guild(env, a);
+      if (m === 'POST' && p === '/guild/create') return await guildCreate(request, env, a);
+      if (m === 'POST' && p === '/guild/join') return await guildJoin(request, env, a);
+      if (m === 'POST' && p === '/guild/leave') return await guildLeave(request, env, a);
+      if (m === 'POST' && p === '/guild/kick') return await guildKick(request, env, a);
+      if (m === 'POST' && p === '/guild/role') return await guildRole(request, env, a);
+      if (m === 'POST' && p === '/guild/rename') return await guildRename(request, env, a);
+      if (m === 'POST' && p === '/referrals/apply') return await referralApply(request, env, a);
     }
     return json({ error: 'not_found' }, 404);
   } catch (e) {

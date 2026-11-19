@@ -6,7 +6,9 @@ import {
 import { durationOf, fuelCost, repairCost, rewardRange, xpThreshold } from './expeditionMath';
 import { fxOfShip, moduleStateFor } from './shipModules';
 import { listExpeditions } from './expeditions';
-import { craftCatalog, listCraftJobs, CRAFT_SLOTS } from './crafting';
+import { craftCatalog, listCraftJobs } from './crafting';
+import { craftSlotsFor } from './pass';
+import { guildOf, roleOf } from './guilds';
 import { dailyOf, fuelCap, getResource, isFrozen, verifyStatus } from './maintenance';
 import { playerPayload } from '../scheduler';
 import { marketView } from './market';
@@ -86,7 +88,7 @@ export function buildState(sql: SqlStorage, playerId: string, now: number) {
     frozen: isFrozen(sql),
     verify: verifyStatus(sql, now),
     // Крафт: каталог рецептов и запущенные задачи. Очередь — один слот.
-    craft: { slots: CRAFT_SLOTS, running: listCraftJobs(sql, playerId), recipes: craftCatalog() },
+    craft: { slots: craftSlotsFor(sql, playerId), running: listCraftJobs(sql, playerId), recipes: craftCatalog() },
     // Модули: каталог с ценами по уровням и состояние каждого корабля.
     modules: moduleStateFor(sql, playerId),
     catalog: SHIP_ORDER.map((type) => {
@@ -104,6 +106,11 @@ export function buildState(sql: SqlStorage, playerId: string, now: number) {
     // Сезон: номер, рамки, дни до конца и место в рейтинге. Полный рейтинг —
     // в отдельном /season, чтобы /me не раздувался на сто игроков.
     season: seasonBrief(sql, playerId, now),
+    // Гильдия короткой строкой для мостика: полный экран — отдельным /guild.
+    guild: (() => {
+      const g = guildOf(sql, playerId);
+      return g ? { id: g.id, name: g.name, tag: g.tag, role: roleOf(sql, playerId) } : null;
+    })(),
   };
 }
 

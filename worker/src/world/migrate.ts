@@ -87,3 +87,20 @@ export function backfillProgressLedger(sql: SqlStorage, now: number): void {
      ON CONFLICT (key) DO UPDATE SET value = '1'`,
   );
 }
+
+// Astra Pass появился с привязкой к сезону позже самой таблицы: в мире, который
+// уже успел создать `pass_claims` без `season_id`, награды нельзя было бы
+// забрать во втором сезоне. Пересоздаём таблицу, сохраняя старые отметки как
+// награды «прошлого сезона» — слот крафта и бейджи считаются по всем сезонам.
+export function migratePassClaimsSeason(sql: SqlStorage): void {
+  const columns = sql.exec('PRAGMA table_info(pass_claims)').toArray();
+  if (columns.length === 0) return; // таблицы ещё нет: её создаст WORLD_SCHEMA
+  if (columns.some((c) => String(c.name) === 'season_id')) return;
+  sql.exec(`CREATE TABLE pass_claims_season (
+    player_id TEXT NOT NULL, level INTEGER NOT NULL, season_id TEXT NOT NULL,
+    claimed_at INTEGER NOT NULL, PRIMARY KEY (player_id, level, season_id))`);
+  sql.exec(`INSERT INTO pass_claims_season (player_id, level, season_id, claimed_at)
+    SELECT player_id, level, '', claimed_at FROM pass_claims`);
+  sql.exec('DROP TABLE pass_claims');
+  sql.exec('ALTER TABLE pass_claims_season RENAME TO pass_claims');
+}

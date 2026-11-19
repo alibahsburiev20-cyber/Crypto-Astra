@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { getBalance } from '../../src/world/balances';
-import { migrateLegacyExpeditions } from '../../src/world/migrate';
+import { migrateLegacyExpeditions, migratePassClaimsSeason } from '../../src/world/migrate';
 import { createPlayer } from '../../src/world/modules/players';
 import { WORLD_SCHEMA } from '../../src/world/schema';
 import { verifyLedger } from '../../src/world/ledger';
@@ -48,5 +48,28 @@ describe('переход со старой таблицы рейсов', () => {
     expect(cols).toContain('planet');
     expect(sql.exec('SELECT COUNT(*) AS c FROM expeditions').toArray()[0].c).toBe(0);
     expect(verifyLedger(sql).ok).toBe(true);
+  });
+  it('старая таблица Pass без сезона пересоздаётся и сохраняет отметки', () => {
+    const db = new DatabaseSync(':memory:');
+    db.exec(`CREATE TABLE pass_claims (
+      player_id TEXT NOT NULL, level INTEGER NOT NULL, claimed_at INTEGER NOT NULL,
+      PRIMARY KEY (player_id, level))`);
+    db.exec("INSERT INTO pass_claims VALUES ('p1', 3, 1000)");
+    const sql = {
+      exec(q: string, ...b: unknown[]) {
+        const st = db.prepare(q);
+        const rows: Record<string, unknown>[] = /^\s*(SELECT|PRAGMA)/i.test(q) ? (st.all(...(b as never[])) as never) : (st.run(...(b as never[])), []);
+        return { toArray: () => rows, [Symbol.iterator]: () => rows[Symbol.iterator]() };
+      },
+    } as unknown as SqlStorage;
+
+    migratePassClaimsSeason(sql);
+    migratePassClaimsSeason(sql); // повторный запуск ничего не ломает
+
+    const cols = sql.exec('PRAGMA table_info(pass_claims)').toArray().map((c) => String(c.name));
+    expect(cols).toContain('season_id');
+    const rows = sql.exec('SELECT player_id, level, season_id FROM pass_claims').toArray();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ player_id: 'p1', level: 3, season_id: '' });
   });
 });

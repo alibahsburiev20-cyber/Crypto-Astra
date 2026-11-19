@@ -1,7 +1,7 @@
 import { ApiError } from '../world/errors';
 
 // Коды ошибок Durable Object (доходят как message) → HTTP-статус.
-const STATUS_BY_CODE: Record<string, number> = {
+export const STATUS_BY_CODE: Record<string, number> = {
   player_not_found: 404,
   reservation_not_found: 404,
   insufficient_funds: 409,
@@ -52,6 +52,31 @@ const STATUS_BY_CODE: Record<string, number> = {
   not_your_lot: 403,
   market_lot_limit: 409,
   price_out_of_band: 409,
+  // Этап 4: социальное. Любой новый код обязан попасть сюда, иначе мир
+  // вернёт 500 internal, а клиент не покажет нормальный текст.
+  bad_mission: 400,
+  mission_incomplete: 409,
+  mission_claimed: 409,
+  bad_pass_level: 400,
+  pass_locked: 409,
+  pass_claimed: 409,
+  bad_guild_name: 400,
+  bad_guild_tag: 400,
+  guild_not_found: 404,
+  guild_full: 409,
+  guild_already_member: 409,
+  already_in_guild: 409,
+  guild_name_taken: 409,
+  guild_member_not_found: 404,
+  not_in_guild: 409,
+  bad_role: 400,
+  bad_target: 400,
+  not_allowed: 403,
+  self_referral: 400,
+  referral_already_applied: 409,
+  referral_limit: 409,
+  referral_not_found: 404,
+  season_not_found: 404,
 };
 
 export function json(data: unknown, status = 200, headers: Record<string, string> = {}): Response {
