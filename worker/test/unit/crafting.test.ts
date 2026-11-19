@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DAY_MS } from '../../src/shared/constants';
-import { RECIPES } from '../../src/shared/gameData';
+import { MODULE_ORDER, MODULES, PLANETS, RECIPES, RECIPE_ORDER, SECTORS } from '../../src/shared/gameData';
 import { applyDelta, getBalance } from '../../src/world/balances';
 import { verifyLedger } from '../../src/world/ledger';
 import { finishCraft, listCraftJobs, startCraft } from '../../src/world/modules/crafting';
@@ -20,7 +20,7 @@ function world() {
 
 function givePlateMaterials(sql: SqlStorage, tx: <T>(fn: () => T) => T) {
   tx(() => addResource(sql, 'p1', 'iron_ore', 3, T0 + 1));
-  tx(() => addResource(sql, 'p1', 'titanium', 1, T0 + 2));
+  tx(() => addResource(sql, 'p1', 'copper_ore', 2, T0 + 2));
 }
 
 describe('крафт (срез 3 этапа 2)', () => {
@@ -31,7 +31,7 @@ describe('крафт (срез 3 этапа 2)', () => {
     const res = tx(() => startCraft(sql, 'p1', 'k1', 'alloy_plate', T0 + 1000));
 
     expect(getResource(sql, 'p1', 'iron_ore')).toBe(0);
-    expect(getResource(sql, 'p1', 'titanium')).toBe(0);
+    expect(getResource(sql, 'p1', 'copper_ore')).toBe(0);
     expect(getBalance(sql, 'p1', 'astra')).toBe(astraBefore - RECIPES.alloy_plate.fee);
     expect(res.job.endsAt).toBe(T0 + 1000 + RECIPES.alloy_plate.ms);
     expect(listCraftJobs(sql, 'p1').length).toBe(1);
@@ -66,7 +66,7 @@ describe('крафт (срез 3 этапа 2)', () => {
     givePlateMaterials(sql, tx);
     tx(() => startCraft(sql, 'p1', 'k1', 'alloy_plate', T0 + 1000));
     tx(() => addResource(sql, 'p1', 'iron_ore', 3, T0 + 2));
-    tx(() => addResource(sql, 'p1', 'titanium', 1, T0 + 3));
+    tx(() => addResource(sql, 'p1', 'copper_ore', 2, T0 + 3));
     expect(() => tx(() => startCraft(sql, 'p1', 'k2', 'alloy_plate', T0 + 2000))).toThrow(/craft_queue_full/);
   });
 
@@ -118,5 +118,44 @@ describe('крафт (срез 3 этапа 2)', () => {
     givePlateMaterials(sql, tx);
     sql.exec(`INSERT INTO meta (key, value) VALUES ('frozen', '1') ON CONFLICT (key) DO UPDATE SET value = '1'`);
     expect(() => tx(() => startCraft(sql, 'p1', 'k1', 'alloy_plate', T0 + 1000))).toThrow(/world_frozen/);
+  });
+});
+
+describe('доступность рецептов и модулей (срез 3, пересмотр после замечания)', () => {
+  // Ресурсы, которые можно добыть на планетах первого сектора: туда пускают с
+  // первого уровня. Титан, кристалл и гелий-3 лежат в секторе 2 и выше — их
+  // нельзя класть в рецепт, который нужен для ремонта и модулей новичку.
+  const firstSector = new Set<string>();
+  for (const planet of PLANETS) {
+    const sector = SECTORS.find((s) => s.id === planet.sector);
+    if (sector && sector.level <= 1) for (const r of planet.resources) firstSector.add(r);
+  }
+
+  it('все рецепты собираются из ресурсов первого сектора', () => {
+    const problems: string[] = [];
+    for (const id of RECIPE_ORDER) {
+      for (const input of RECIPES[id].inputs) {
+        if (!firstSector.has(input.resource)) problems.push(`${id}: ${input.resource}`);
+      }
+    }
+    expect(problems).toEqual([]);
+  });
+
+  it('компоненты модулей либо добываются в первом секторе, либо крафтятся', () => {
+    const craftable = new Set<string>(RECIPE_ORDER);
+    const problems: string[] = [];
+    for (const id of MODULE_ORDER) {
+      for (const part of MODULES[id].parts) {
+        if (!firstSector.has(part.resource) && !craftable.has(part.resource)) {
+          problems.push(`${id}: ${part.resource}`);
+        }
+      }
+    }
+    expect(problems).toEqual([]);
+  });
+
+  it('пластина для крупного ремонта крафтится из того, что можно добыть сразу', () => {
+    const plate = RECIPES.alloy_plate.inputs.map((i) => i.resource);
+    expect(plate.every((r) => firstSector.has(r))).toBe(true);
   });
 });

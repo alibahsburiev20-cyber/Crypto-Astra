@@ -169,20 +169,25 @@ export interface Recipe {
   fee: number;
 }
 
+// Все рецепты собираются из ресурсов **первого сектора** (железо, медь, кремний,
+// лёд). Это не мелочь: металл и кристаллы лежат в секторах 2+, а туда пускают с
+// 5-го уровня. Прежние рецепты (титан, гелий-3, кристалл) были недостижимы первые
+// часы игры — и пластину для ремонта нельзя было получить вообще.
+// Инвариант проверяется тестом «рецепты доступны с первого уровня».
 export const RECIPES: Record<RecipeId, Recipe> = {
   energy_cell: {
     id: 'energy_cell', name: 'Энергоячейка',
-    inputs: [{ resource: 'helium3', amount: 3 }, { resource: 'silicon', amount: 2 }],
+    inputs: [{ resource: 'ice', amount: 3 }, { resource: 'silicon', amount: 2 }],
     ms: 30 * 60 * 1000, fee: 50,
   },
   circuit: {
     id: 'circuit', name: 'Схема',
-    inputs: [{ resource: 'copper_ore', amount: 2 }, { resource: 'silicon', amount: 1 }, { resource: 'crystal', amount: 1 }],
+    inputs: [{ resource: 'copper_ore', amount: 3 }, { resource: 'silicon', amount: 2 }],
     ms: 20 * 60 * 1000, fee: 40,
   },
   alloy_plate: {
     id: 'alloy_plate', name: 'Сплавная пластина',
-    inputs: [{ resource: 'iron_ore', amount: 3 }, { resource: 'titanium', amount: 1 }],
+    inputs: [{ resource: 'iron_ore', amount: 3 }, { resource: 'copper_ore', amount: 2 }],
     ms: 20 * 60 * 1000, fee: 60,
   },
 };
@@ -227,9 +232,11 @@ export const MODULES: Record<ModuleId, ModuleDef> = {
     id: 'fuel_system', name: 'Топливная система', effect: 'tank', perLevel: 1, basePrice: 900,
     parts: [{ resource: 'energy_cell', amount: 1 }, { resource: 'circuit', amount: 1 }],
   },
+  // Кристалл лежит в секторе 2 и выше — сканер собираем из схем и кремния,
+  // иначе его нельзя прокачать первые часы игры (тест доступности это ловит).
   scanner: {
     id: 'scanner', name: 'Сканер', effect: 'scanner', perLevel: 0.15, basePrice: 1500,
-    parts: [{ resource: 'circuit', amount: 2 }, { resource: 'crystal', amount: 3 }],
+    parts: [{ resource: 'circuit', amount: 2 }, { resource: 'silicon', amount: 4 }],
   },
   cargo_bay: {
     id: 'cargo_bay', name: 'Грузовой отсек', effect: 'cargo', perLevel: 0.1, basePrice: 2000,
