@@ -59,6 +59,8 @@ WorldLobby, регистрация и вход с ротацией refresh-то�
 | `docs/STAGE2.md`, `docs/STAGE3.md`, `docs/STAGE4.md`, `docs/STAGE5.md` | что сделано по срезам: экономика, сезоны, социальное, деньги |
 | `docs/POOL.md` | правила пула, API и публичный отчёт |
 | `docs/ASTRA-PAY-AUDIT.md` | аудит и план Astra Pay Core: USDT TRC-20, депозиты, выплаты, Signer |
+| `docs/PAY-SIGNER.md` | как включить Signer через дашборд: секреты, биндинг, проверка |
+| `docs/ASTRA-PAY-RUNBOOK.md` | что делать при аварии: стоп-флаг, зависшая выплата, утечка ключа, чек-лист mainnet |
 | `docs/SEASON.md` | правила сезона: очки, рейтинг, призы, закрытие, архив |
 | `docs/ENVIRONMENTS.md` | production, превью-сборки, локальная разработка: миграции, секреты, когда появляются снимки |
 | `docs/ECONOMY.md` | симуляция экономики и её числа |

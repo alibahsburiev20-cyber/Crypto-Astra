@@ -20,7 +20,8 @@
     "db:migrate": "wrangler d1 migrations apply DB --remote",
     "db:migrate:preview": "wrangler d1 migrations apply DB --remote --preview",
     "build": "node scripts/embed-client.mjs",
-    "ads-forecast": "tsx scripts/ads-forecast.ts"
+    "ads-forecast": "tsx scripts/ads-forecast.ts",
+    "pay:loadtest": "tsx scripts/pay-loadtest.ts"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261110.1",
