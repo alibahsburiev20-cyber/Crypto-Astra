@@ -28,4 +28,31 @@ export interface Env {
    * когда появится доход и смысл платить за хранение.
    */
   ARCHIVE?: R2Bucket;
+  /**
+   * Astra Pay (этап 1). Все флаги по умолчанию выключены: включённым считается
+   * только значение `"on"`. Дочерние флаги не работают без `PAYMENTS_ENABLED`.
+   */
+  PAYMENTS_ENABLED?: string;
+  DEPOSITS_ENABLED?: string;
+  PURCHASES_ENABLED?: string;
+  POOL_ENABLED?: string;
+  PAYOUTS_ENABLED?: string;
+  SWEEP_ENABLED?: string;
+  /** Создавать таблицы `pay_*` при выключенных деньгах — для проверки схемы. */
+  PAY_SCHEMA_CHECK?: string;
+  /** `nile` (по умолчанию) или `mainnet`. Mainnet — только этап 12. */
+  PAY_NETWORK?: string;
+  /** Адрес контракта USDT. Пусто — берётся стандартный для сети. */
+  PAY_USDT_CONTRACT?: string;
+  /** Ключ TronGrid. Необязателен: без него лимит опроса ниже. */
+  TRONGRID_API_KEY?: string;
+  /**
+   * Service binding на отдельный Worker-подписант. Пока биндинга нет, адреса
+   * игрокам не выдаются: лучше ошибка, чем адрес от неизвестного источника.
+   */
+  SIGNER?: Fetcher;
+  /** Токен к Signer-контуру. Живёт только в секретах Worker. */
+  SIGNER_TOKEN?: string;
+  /** Адрес горячего кошелька, с которого уходят выплаты. Публичный, не секрет. */
+  PAY_HOT_ADDRESS?: string;
 }

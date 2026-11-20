@@ -23,9 +23,67 @@ application/json; charset=utf-8`. Ответы не кэшируются (`Cache
 |---|---|---|
 | GET | `/pool.json` | публичный отчёт пула: итоги по валютам, последние операции, флаг выплат |
 | GET | `/pool/report` | алиас `/pool.json` |
+| GET | `/pay/status.json` | состояние Astra Pay: сеть, контракт USDT, флаги, версия схемы |
+| GET | `/pay/products.json` | каталог: косметика и услуги, цены строкой, `purchasesEnabled` |
 
 Пул ведётся отдельно от Ledger: ASTRA — внутриигровая валюта, её нельзя купить
 или вывести. Правила и запись — `docs/POOL.md`.
+
+`/pay/status.json` — единственный публичный маршрут Astra Pay на этапе 1. Он
+отдаёт `{ ok, service: "astra-pay", version, network, asset: "USDT", decimals: 6,
+contract, flags, schema, tables, now }`, где `flags` — шесть переключателей
+(`payments`, `deposits`, `purchases`, `pool`, `payouts`, `sweep`), а `schema` —
+`"off"` (база не проверялась, деньги выключены), `"ready"` или `"error"`.
+Ключей, адресов игроков и сумм в ответе нет. Пока все флаги `off`, денежных
+маршрутов не существует: запросы к ним вернут `404`.
+
+## Astra Pay (с авторизацией)
+
+| Метод | Путь | Ответ |
+|---|---|---|
+| GET | `/pay/account.json` | баланс USDT, история операций, купленная косметика |
+| POST | `/pay/purchase` | покупка за баланс: `{ productId }` + заголовок `Idempotency-Key` |
+
+`/pay/account.json` отдаёт `{ ok, asset: "USDT", balanceMicro, balance,
+purchasesEnabled, history[], entitlements[] }`. История — только своя: `delta`,
+`reason`, `ref`, `amount` в USDT.
+
+`POST /pay/purchase` списывает цену **серверного** каталога: клиент присылает
+только `productId` и ключ идемпотентности, цену подменить нельзя. Ответы:
+
+| Код | Когда |
+|---|---|
+| 201 | куплено и выдано |
+| 200 | повтор с тем же `Idempotency-Key` — деньги не списаны второй раз |
+| 400 | кривой ключ идемпотентности |
+| 402 | не хватает баланса |
+| 404 | товара нет или он выключен |
+| 503 | `PURCHASES_ENABLED` выключен — покупки в этой сборке нет |
+
+Деньги появляются на балансе только из подтверждённых переводов USDT на личный
+адрес игрока: монитор блокчейна пишет событие, `applyDeposits` превращает его в
+запись журнала. Вручную начислить деньги через API нельзя.
+
+## Astra Pay: выплаты и админка
+
+| Метод | Путь | Доступ | Назначение |
+|---|---|---|---|
+| GET | `/pay/address.json` | игрок | личный постоянный адрес для депозитов USDT |
+| GET | `/pay/withdrawals` | игрок | заявки, баланс, лимиты, флаг «выплаты включены» |
+| POST | `/pay/withdraw` | игрок | заявка на выплату: `{ address, amountMicro }` + `Idempotency-Key` |
+| GET | `/admin/pay` | админ | сверка, стоп-флаг, очередь заявок |
+| POST | `/admin/pay/withdrawal` | админ | `{ id, action }`: `approve`, `reserve`, `broadcast`, `sent`, `confirm`, `fail` |
+| POST | `/admin/pay/stop` | админ | `{ stop: true/false, reason }` — стоп-флаг выплат |
+| POST | `/admin/pay/send` | админ | `{ id }` — собрать, подписать в Signer и отправить заявку в состоянии `reserved` |
+
+Админка пока закрыта заголовком `X-Admin-Token` (срез 5.3 заменит его на
+Cloudflare Access, токен останется вторым замком).
+
+Состояния заявки: `requested → approved → reserved → broadcasting → sent →
+confirmed`, в сторону — только `failed` или `manual`. Резерв списывает деньги с
+баланса, отказ возвращает их компенсирующей записью. Один `txid` не может
+закрыть две заявки. Если ночная сверка нашла расхождение, она сама поднимает
+стоп-флаг, и новые заявки получают `409 payouts_stopped`.
 
 ## С авторизацией
 

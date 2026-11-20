@@ -1,0 +1,147 @@
+/* Витрина Astra Pay. Отдельным файлом, потому что CSP запрещает инлайн-стили. */
+
+.pay-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(240px, 0.9fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.pay-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.pay-flag {
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  font-size: 0.85rem;
+}
+
+.pay-wallet {
+  padding: 20px;
+  border-radius: 18px;
+  background: rgba(12, 18, 38, 0.72);
+  border: 1px solid rgba(120, 170, 255, 0.22);
+}
+
+.pay-wallet h3 {
+  margin: 0 0 8px;
+  font-size: 0.95rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0.75;
+}
+
+.pay-balance {
+  margin: 0 0 6px;
+  font-size: 2rem;
+  font-weight: 700;
+}
+
+.pay-hint {
+  margin: 0 0 14px;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  opacity: 0.8;
+}
+
+.pay-section {
+  margin-top: 40px;
+}
+
+.pay-section h3 {
+  margin: 0 0 16px;
+  font-size: 1.2rem;
+}
+
+.pay-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.pay-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 18px;
+  border-radius: 18px;
+  background: rgba(10, 16, 34, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.pay-art {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 88px;
+  font-size: 2.2rem;
+  border-radius: 14px;
+  background: radial-gradient(circle at 50% 40%, rgba(90, 140, 255, 0.28), transparent 70%);
+}
+
+.pay-art img {
+  width: 84px;
+  height: 84px;
+  object-fit: contain;
+  filter: drop-shadow(0 6px 14px rgba(90, 140, 255, 0.35));
+}
+
+.pay-card h4 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.pay-desc {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  opacity: 0.78;
+}
+
+.pay-card-foot {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pay-price {
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.pay-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.pay-table th,
+.pay-table td {
+  padding: 10px 8px;
+  text-align: left;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.pay-plus { color: #7ef0a8; }
+.pay-minus { color: #ff9b9b; }
+
+.pay-rules ul {
+  margin: 0;
+  padding-left: 20px;
+  line-height: 1.6;
+  font-size: 0.92rem;
+}
+
+.pay-muted { opacity: 0.65; }
+
+@media (max-width: 720px) {
+  .pay-hero { grid-template-columns: 1fr; }
+}

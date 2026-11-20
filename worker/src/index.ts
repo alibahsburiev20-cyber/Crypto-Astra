@@ -1,6 +1,11 @@
 import { syncArchive } from './archive';
 import { cleanupAuthLimits } from './auth/rateLimit';
 import { ensureArchiveSchema } from './db/bootstrap';
+import { payFlags } from './pay/flags';
+import { applyDeposits, scanAll, trongridFetcher } from './pay/monitor';
+import { ensurePaySchema } from './pay/schema';
+import { reconcileAndFlag } from './pay/reconcile';
+import { usdtContracts } from './pay/tron/contracts';
 import { cleanupSessions } from './auth/sessions';
 import type { Env } from './env';
 import { route } from './http/router';
@@ -59,7 +64,7 @@ export default {
     return route(request, env);
   },
   // Часовой cron — страховка, если будильник мира не сработал. Сверка и рейсы живут в alarm мира.
-  async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
+  async scheduled(controller: ScheduledController, env: Env): Promise<void> {
     const ids = await worldIds(env);
     for (const id of ids) {
       try {
@@ -72,6 +77,36 @@ export default {
     // Таблицы создаём сами: деплой идёт из браузера, `wrangler d1 migrations`
     // оттуда не запустить. На мигрированной базе это no-op.
     await ensureArchiveSchema(env.DB);
+    // Astra Pay: схему лечим только когда деньги включены. При выключенных флагах
+    // cron не тратит CPU на 14 DDL-запросов и не трогает денежные таблицы.
+    const pay = payFlags(env);
+    if (pay.payments) await ensurePaySchema(env.DB);
+    // Приём денег: смотрим блокчейн и превращаем найденное в баланс. Только при
+    // включённом флаге и только подтверждённые переводы. Ошибка сети не валит cron.
+    if (pay.deposits) {
+      try {
+        const summary = await scanAll(env.DB, {
+          fetchJson: trongridFetcher(env.TRONGRID_API_KEY),
+          contracts: usdtContracts(env, pay.network),
+        }, Date.now(), 20);
+        const applied = await applyDeposits(env.DB, Date.now(), 100);
+        if (summary.stored || summary.errors.length || applied.credited) {
+          console.log('pay monitor', summary, applied);
+        }
+      } catch (e) {
+        console.error('pay monitor failed', e);
+      }
+    }
+    // Сверка — раз в сутки ночью. Расхождение само поднимает стоп-флаг выплат:
+    // лучше остановиться и разобраться, чем продолжать платить по битым данным.
+    if (pay.payments && String(controller.cron ?? '') === '0 3 * * *') {
+      try {
+        const report = await reconcileAndFlag(env.DB, Date.now());
+        if (!report.ok) console.error('pay reconcile mismatch', report);
+      } catch (e) {
+        console.error('pay reconcile failed', e);
+      }
+    }
     try {
       const archived = await syncArchive(env, ids);
       if (archived.archived || archived.failed) console.log('archive', archived);

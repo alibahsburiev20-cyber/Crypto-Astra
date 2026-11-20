@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Astra Pay — баланс USDT и магазин косметики</title>
+  <meta name="description" content="Магазин косметики Crypto Astra: корпуса, значки и разовые услуги за USDT TRC-20. Только внешний вид — без влияния на игру. Реальные выплаты выключены.">
+  <link rel="icon" type="image/png" href="/icons/currency/astra.png">
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/pay.css">
+</head>
+<body class="pool-page">
+  <div class="stars" aria-hidden="true"></div>
+
+  <header class="brandbar">
+    <a class="brand" href="/">
+      <img src="/icons/currency/astra.png" alt="" width="40" height="40">
+      <div>
+        <h1>Crypto Astra</h1>
+        <p class="tagline">Astra Pay · магазин</p>
+      </div>
+    </a>
+    <nav class="landing-nav" aria-label="Навигация">
+      <a class="link" href="/">В игру</a>
+      <a class="link" href="/pool.html">Пул</a>
+    </nav>
+  </header>
+
+  <main class="landing pay" aria-label="Магазин Astra Pay">
+    <section class="hero pay-hero">
+      <div class="hero-copy">
+        <span class="hero-kicker">Этап 7 · Косметика за USDT</span>
+        <h2>Astra Pay</h2>
+        <p class="hero-lead">Здесь покупается <b>только внешний вид</b>: корпуса кораблей,
+          значки и разовые услуги. Купленное не влияет на баланс игры, не даёт преимуществ
+          и не превращается в деньги. ASTRA по-прежнему нельзя купить или вывести.</p>
+        <div class="pay-flags" aria-live="polite">
+          <span class="pay-flag" data-pay="network">Сеть: проверяем…</span>
+          <span class="pay-flag" data-pay="purchases">Покупки: проверяем…</span>
+        </div>
+      </div>
+
+      <aside class="pay-wallet" aria-live="polite">
+        <h3>Кошелёк</h3>
+        <p class="pay-balance" data-pay="balance">—</p>
+        <p class="pay-hint" data-pay="wallet-hint">Войдите в игру, чтобы увидеть баланс.</p>
+        <a class="cta cta-small" href="/">Войти</a>
+      </aside>
+    </section>
+
+    <section class="pay-section" aria-labelledby="pay-shop-title">
+      <h3 id="pay-shop-title">Витрина</h3>
+      <div class="pay-grid" data-pay="products" aria-live="polite">
+        <p class="pay-muted">Загружаем каталог…</p>
+      </div>
+    </section>
+
+    <section class="pay-section" aria-labelledby="pay-history-title">
+      <h3 id="pay-history-title">Последние операции</h3>
+      <table class="pay-table">
+        <thead>
+          <tr><th>Дата</th><th>Что</th><th>Сумма</th></tr>
+        </thead>
+        <tbody data-pay="history">
+          <tr><td colspan="3" class="pay-muted">Пока операций нет.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="pay-section pay-rules" aria-labelledby="pay-rules-title">
+      <h3 id="pay-rules-title">Честно о деньгах</h3>
+      <ul>
+        <li><b>Это не инвестиция.</b> USDT на балансе — предоплата за косметику, а не вклад и не обещание дохода.</li>
+        <li><b>ASTRA — не деньги.</b> Это внутриигровая валюта: купить её нельзя, вывести тоже.</li>
+        <li><b>Покупки идут только за счёт баланса.</b> Деньги появляются на балансе из подтверждённых переводов USDT на личный адрес игрока.</li>
+        <li><b>Возврата в сеть пока нет.</b> Автоматические выплаты выключены: они включаются после отдельного решения и юридической проверки.</li>
+        <li><b>Повтор не спишет дважды.</b> Каждая покупка несёт ключ идемпотентности: двойной клик и обрыв связи не создают вторую покупку.</li>
+      </ul>
+    </section>
+  </main>
+
+  <script type="module" src="/pay.js"></script>
+</body>
+</html>
