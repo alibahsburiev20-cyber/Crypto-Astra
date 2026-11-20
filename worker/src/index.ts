@@ -4,6 +4,7 @@ import { ensureArchiveSchema } from './db/bootstrap';
 import { payFlags } from './pay/flags';
 import { applyDeposits, scanAll, trongridFetcher } from './pay/monitor';
 import { ensurePaySchema } from './pay/schema';
+import { reconcileAndFlag } from './pay/reconcile';
 import { usdtContracts } from './pay/tron/contracts';
 import { cleanupSessions } from './auth/sessions';
 import type { Env } from './env';
@@ -63,7 +64,7 @@ export default {
     return route(request, env);
   },
   // Часовой cron — страховка, если будильник мира не сработал. Сверка и рейсы живут в alarm мира.
-  async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
+  async scheduled(controller: ScheduledController, env: Env): Promise<void> {
     const ids = await worldIds(env);
     for (const id of ids) {
       try {
@@ -94,6 +95,16 @@ export default {
         }
       } catch (e) {
         console.error('pay monitor failed', e);
+      }
+    }
+    // Сверка — раз в сутки ночью. Расхождение само поднимает стоп-флаг выплат:
+    // лучше остановиться и разобраться, чем продолжать платить по битым данным.
+    if (pay.payments && String(controller.cron ?? '') === '0 3 * * *') {
+      try {
+        const report = await reconcileAndFlag(env.DB, Date.now());
+        if (!report.ok) console.error('pay reconcile mismatch', report);
+      } catch (e) {
+        console.error('pay reconcile failed', e);
       }
     }
     try {

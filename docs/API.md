@@ -64,6 +64,25 @@ purchasesEnabled, history[], entitlements[] }`. История — только 
 адрес игрока: монитор блокчейна пишет событие, `applyDeposits` превращает его в
 запись журнала. Вручную начислить деньги через API нельзя.
 
+## Astra Pay: выплаты и админка
+
+| Метод | Путь | Доступ | Назначение |
+|---|---|---|---|
+| GET | `/pay/withdrawals` | игрок | заявки, баланс, лимиты, флаг «выплаты включены» |
+| POST | `/pay/withdraw` | игрок | заявка на выплату: `{ address, amountMicro }` + `Idempotency-Key` |
+| GET | `/admin/pay` | админ | сверка, стоп-флаг, очередь заявок |
+| POST | `/admin/pay/withdrawal` | админ | `{ id, action }`: `approve`, `reserve`, `broadcast`, `sent`, `confirm`, `fail` |
+| POST | `/admin/pay/stop` | админ | `{ stop: true/false, reason }` — стоп-флаг выплат |
+
+Админка пока закрыта заголовком `X-Admin-Token` (срез 5.3 заменит его на
+Cloudflare Access, токен останется вторым замком).
+
+Состояния заявки: `requested → approved → reserved → broadcasting → sent →
+confirmed`, в сторону — только `failed` или `manual`. Резерв списывает деньги с
+баланса, отказ возвращает их компенсирующей записью. Один `txid` не может
+закрыть две заявки. Если ночная сверка нашла расхождение, она сама поднимает
+стоп-флаг, и новые заявки получают `409 payouts_stopped`.
+
 ## С авторизацией
 
 Заголовок `Authorization: Bearer <access_token>` (JWT HS256, 15 минут).
