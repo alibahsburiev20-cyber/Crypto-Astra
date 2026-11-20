@@ -6,6 +6,7 @@ import {
   guildRename, guildRole, ledger, market, marketBuy, marketCancel, marketLot, me, missionClaim, moduleInstall, passClaim,
   referralApply, repair, season, shipBuy, social, startExpedition,
 } from '../routes/game';
+import { payStatus } from '../routes/pay';
 import { adminPool, adminPoolEntry, poolPublic } from '../routes/pool';
 import { errorResponse, json } from './response';
 
@@ -18,6 +19,8 @@ export async function route(request: Request, env: Env): Promise<Response> {
     if (m === 'GET' && p === '/config') return config(env);
     // Пул: публичный отчёт открыт без авторизации, запись — только с админ-токеном.
     if (m === 'GET' && (p === '/pool.json' || p === '/pool/report')) return await poolPublic(env);
+    // Astra Pay: состояние контура. Денежных маршрутов на этапе 1 нет.
+    if (m === 'GET' && p === '/pay/status.json') return await payStatus(env);
     if (p === '/admin/pool' || p === '/admin/pool/entry') {
       if (m === 'GET' && p === '/admin/pool') return await adminPool(request, env);
       if (m === 'POST' && p === '/admin/pool/entry') return await adminPoolEntry(request, env);

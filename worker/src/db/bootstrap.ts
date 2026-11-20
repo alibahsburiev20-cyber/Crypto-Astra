@@ -1,3 +1,5 @@
+import { resetPaySchemaForTests } from '../pay/schema';
+
 // Само-лечение схемы D1. Миграции в `worker/migrations/d1` остаются каноном, но
 // деплой идёт из браузера (Cloudflare Workers Builds), а `wrangler d1 migrations
 // apply --remote` оттуда недоступен. Поэтому таблицы создаются идемпотентно при
@@ -89,4 +91,5 @@ export function ensureArchiveSchema(db: D1Database): Promise<boolean> {
 export function resetD1BootstrapForTests(): void {
   poolReady = null;
   archiveReady = null;
+  resetPaySchemaForTests();
 }

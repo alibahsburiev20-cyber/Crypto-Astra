@@ -23,9 +23,18 @@ application/json; charset=utf-8`. Ответы не кэшируются (`Cache
 |---|---|---|
 | GET | `/pool.json` | публичный отчёт пула: итоги по валютам, последние операции, флаг выплат |
 | GET | `/pool/report` | алиас `/pool.json` |
+| GET | `/pay/status.json` | состояние Astra Pay: сеть, контракт USDT, флаги, версия схемы |
 
 Пул ведётся отдельно от Ledger: ASTRA — внутриигровая валюта, её нельзя купить
 или вывести. Правила и запись — `docs/POOL.md`.
+
+`/pay/status.json` — единственный публичный маршрут Astra Pay на этапе 1. Он
+отдаёт `{ ok, service: "astra-pay", version, network, asset: "USDT", decimals: 6,
+contract, flags, schema, tables, now }`, где `flags` — шесть переключателей
+(`payments`, `deposits`, `purchases`, `pool`, `payouts`, `sweep`), а `schema` —
+`"off"` (база не проверялась, деньги выключены), `"ready"` или `"error"`.
+Ключей, адресов игроков и сумм в ответе нет. Пока все флаги `off`, денежных
+маршрутов не существует: запросы к ним вернут `404`.
 
 ## С авторизацией
 

@@ -28,4 +28,20 @@ export interface Env {
    * когда появится доход и смысл платить за хранение.
    */
   ARCHIVE?: R2Bucket;
+  /**
+   * Astra Pay (этап 1). Все флаги по умолчанию выключены: включённым считается
+   * только значение `"on"`. Дочерние флаги не работают без `PAYMENTS_ENABLED`.
+   */
+  PAYMENTS_ENABLED?: string;
+  DEPOSITS_ENABLED?: string;
+  PURCHASES_ENABLED?: string;
+  POOL_ENABLED?: string;
+  PAYOUTS_ENABLED?: string;
+  SWEEP_ENABLED?: string;
+  /** Создавать таблицы `pay_*` при выключенных деньгах — для проверки схемы. */
+  PAY_SCHEMA_CHECK?: string;
+  /** `nile` (по умолчанию) или `mainnet`. Mainnet — только этап 12. */
+  PAY_NETWORK?: string;
+  /** Адрес контракта USDT. Пусто — берётся стандартный для сети. */
+  PAY_USDT_CONTRACT?: string;
 }
