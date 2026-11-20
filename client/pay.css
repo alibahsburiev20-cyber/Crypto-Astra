@@ -86,9 +86,10 @@
 }
 
 .pay-art img {
-  width: 72px;
-  height: 72px;
+  width: 84px;
+  height: 84px;
   object-fit: contain;
+  filter: drop-shadow(0 6px 14px rgba(90, 140, 255, 0.35));
 }
 
 .pay-card h4 {

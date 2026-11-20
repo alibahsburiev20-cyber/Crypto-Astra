@@ -393,7 +393,9 @@ worker/src/pay/
 | 1. Фундамент | `pay/flags.ts` (6 флагов, включено только `"on"`), `Env`, `ensurePaySchema`, `/pay/status.json` | `payFlags.test.ts` — 9 |
 | 2. Схема | 14 таблиц `pay_*`, частичные UNIQUE-индексы, append-only триггеры, миграция `0007` | `paySchema.test.ts` — 14 |
 | 3. TRON-примитивы | base58check, hex↔base58, сумма микро-USDT, разбор перевода из TronGrid и из лога контракта, allowlist контракта | `payTron.test.ts` — 23 |
-| 4. Адреса | **готово кодирование** (20 байт → `T…`, проверка контрольной суммы). HD-деривация `m/44'/195'/0'/0/{i}` — в Signer-контуре, этап 9 | входит в `payTron.test.ts` |
+| 4. Адреса | кодирование + деривация `m/44'/195'/0'/0/{i}` (BIP32, HMAC-SHA512 из WebCrypto), выдача постоянного адреса, индекс не повторяется | `payCrypto.test.ts`, `paySigner.test.ts` |
+| 9. Signer | отдельный Worker `signer/`: keccak-256, secp256k1, детерминированная подпись (RFC 6979), проверка `sha256(raw_data)=txID`, получателя и суммы, лимит на транзакцию, токен, `workers_dev = false` | `payCrypto.test.ts`, `paySigner.test.ts`, `payBroadcast.test.ts` |
+| 10. Отправка | `pay/broadcast.ts`: сборка `transfer(address,uint256)`, подпись через Signer, вещание в TronGrid, `fee_limit`, `admin/pay/send` | `payBroadcast.test.ts` |
 | 5. Монитор | `scanAddress`/`scanAll` (подтверждённые переводы, дедуп `(txid, event_index)`, курсор у адреса), `applyDeposits` | `payCore.test.ts` |
 | 6. Депозиты и журнал | `creditDeposit` (депозит + журнал + аудит одной пачкой), хеш-цепочка, `verifyPayLedger`, `payHistory` | `payCore.test.ts` |
 | 7. Магазин | каталог (косметика и услуги, без подписки), `purchase` (списание и выдача одной пачкой, идемпотентность по ключу) | `payCore.test.ts` |
@@ -402,7 +404,8 @@ worker/src/pay/
 | 11. Сверка и админка | `reconcile` (журнал ↔ депозиты ↔ заявки, отрицательные балансы, хеш-цепочка), стоп-флаг выплат при расхождении, `GET /admin/pay`, действия по заявке, `/admin/pay/stop` | `payPayouts.test.ts` |
 | 7. Витрина | `client/pay.html` + `pay.js` + `pay.css`: каталог, баланс, история, покупка с ключом идемпотентности, без инлайн-стилей под CSP | `payPage.test.ts` |
 
-Всего денежных проверок: **54** в четырёх файлах (`payTron`, `payCore`, `payPayouts`, `payPage`).
+Всего денежных проверок: **88** в семи файлах (`payTron`, `payCore`, `payPayouts`,
+`payPage`, `payCrypto`, `paySigner`, `payBroadcast`).
 Схема проверяется настоящим SQLite; `batch` в тестах такой же атомарный, как в D1.
 
 Правила, которые дальше не меняются:
@@ -417,12 +420,11 @@ worker/src/pay/
 - перевод с чужого контракта, неуспешный (`REVERT`) или на не наш адрес в учёт
   не попадает вообще.
 
-Что осталось: **4** (деривация — живёт в Signer), **9** (Signer и отправка в
-сети, тестнет Nile), **12** (Production Gate и включение mainnet).
+Что осталось: **12** (Production Gate: «злой» тест, репетиция аварии, включение
+mainnet) и ручная настройка Signer по `docs/PAY-SIGNER.md`.
 
-Порядок для этапа 9: отдельный Worker-подписант, ключ только в его секрете,
-allowlist контракта и адресов, отказ вне лимита, журнал подписей. Пока это не
-сделано, заявки можно довести только до `reserved` — сети они не касаются.
+Криптография проверена векторами реальных сетей: `keccak256("")`, тема события
+`Transfer`, ключ `1` → точка `G` → адрес `TMVQGm1qAQYVdetCeGRRkTWYYrLXuHK2HC`.
 
 ## 17. Как это делается без денег
 

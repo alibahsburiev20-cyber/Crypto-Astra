@@ -46,4 +46,13 @@ export interface Env {
   PAY_USDT_CONTRACT?: string;
   /** Ключ TronGrid. Необязателен: без него лимит опроса ниже. */
   TRONGRID_API_KEY?: string;
+  /**
+   * Service binding на отдельный Worker-подписант. Пока биндинга нет, адреса
+   * игрокам не выдаются: лучше ошибка, чем адрес от неизвестного источника.
+   */
+  SIGNER?: Fetcher;
+  /** Токен к Signer-контуру. Живёт только в секретах Worker. */
+  SIGNER_TOKEN?: string;
+  /** Адрес горячего кошелька, с которого уходят выплаты. Публичный, не секрет. */
+  PAY_HOT_ADDRESS?: string;
 }

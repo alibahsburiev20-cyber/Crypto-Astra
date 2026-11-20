@@ -1,0 +1,21 @@
+# Astra Pay Signer — отдельный Worker. НЕ публикуется в интернет:
+# `workers_dev = false`, доступ только через service binding из основного Worker.
+#
+# Секреты задаются в дашборде Cloudflare → Workers → astra-pay-signer → Settings →
+# Variables → Encrypt (или `wrangler secret put`, если есть терминал):
+#   SIGNER_TOKEN        — случайная строка ≥ 32 символов, та же, что у основного Worker
+#   SIGNER_SEED         — hex-семя для адресов игроков (≥ 32 байта), генерируется один раз
+#   SIGNER_PRIVATE_KEY  — hex приватного ключа горячего кошелька (только для выплат)
+#
+# Ключи НЕ хранятся в репозитории, в D1, в браузере и в [vars].
+
+name = "astra-pay-signer"
+main = "src/index.ts"
+compatibility_date = "2026-11-01"
+
+# Никакого публичного адреса: попасть можно только из основного Worker.
+workers_dev = false
+
+[vars]
+# Лимит на одну транзакцию: 100 USDT. Меняется осознанно, вместе с лимитами выплат.
+SIGNER_MAX_TX_MICRO = "100000000"

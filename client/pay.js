@@ -53,11 +53,13 @@ const REASON_TEXT = {
   sweep: 'Перенос в казну',
 };
 
+// Свои спрайты для косметики. Если спрайта нет — остаётся emoji из каталога,
+// чтобы витрина не ломалась при добавлении товара.
 function itemIcon(product) {
   const sprite = {
-    skin_nebula: '/sprites/cruiser.svg',
-    skin_ember: '/sprites/scout.svg',
-    badge_pioneer: '/sprites/explorer.svg',
+    skin_nebula: '/sprites/cosmetics/skin_nebula.png',
+    skin_ember: '/sprites/cosmetics/skin_ember.png',
+    badge_pioneer: '/sprites/cosmetics/badge_pioneer.png',
   }[product.id];
   if (!sprite) return null;
   const img = document.createElement('img');

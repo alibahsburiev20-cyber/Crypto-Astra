@@ -68,11 +68,13 @@ purchasesEnabled, history[], entitlements[] }`. История — только 
 
 | Метод | Путь | Доступ | Назначение |
 |---|---|---|---|
+| GET | `/pay/address.json` | игрок | личный постоянный адрес для депозитов USDT |
 | GET | `/pay/withdrawals` | игрок | заявки, баланс, лимиты, флаг «выплаты включены» |
 | POST | `/pay/withdraw` | игрок | заявка на выплату: `{ address, amountMicro }` + `Idempotency-Key` |
 | GET | `/admin/pay` | админ | сверка, стоп-флаг, очередь заявок |
 | POST | `/admin/pay/withdrawal` | админ | `{ id, action }`: `approve`, `reserve`, `broadcast`, `sent`, `confirm`, `fail` |
 | POST | `/admin/pay/stop` | админ | `{ stop: true/false, reason }` — стоп-флаг выплат |
+| POST | `/admin/pay/send` | админ | `{ id }` — собрать, подписать в Signer и отправить заявку в состоянии `reserved` |
 
 Админка пока закрыта заголовком `X-Admin-Token` (срез 5.3 заменит его на
 Cloudflare Access, токен останется вторым замком).

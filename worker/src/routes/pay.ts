@@ -1,6 +1,7 @@
 import type { AuthContext } from '../auth/guards';
 import type { Env } from '../env';
 import { json } from '../http/response';
+import { ensureAddress, findAddress, signerDeriver } from '../pay/addresses';
 import { payFlags, publicFlags } from '../pay/flags';
 import { payBalanceMicro, payHistory } from '../pay/ledger';
 import { ensurePaySchema, PAY_SCHEMA_VERSION, PAY_TABLES } from '../pay/schema';
@@ -14,6 +15,8 @@ import {
   withdrawalQueue,
 } from '../pay/payouts';
 import { isPayoutsStopped, reconcile, setPayoutsStop } from '../pay/reconcile';
+import { BroadcastError, sendUsdt, signerClient, trongridTransport } from '../pay/broadcast';
+import { usdtContract as usdtContractOf } from '../pay/tron/contracts';
 import { ApiError } from '../world/errors';
 
 // Astra Pay: маршруты.
@@ -57,6 +60,41 @@ export async function payProducts(env: Env): Promise<Response> {
     products: catalogForClient(),
     now: Date.now(),
   }, 200, { 'Cache-Control': 'public, max-age=300' });
+}
+
+/**
+ * Личный адрес для депозитов. Адрес выдаётся один раз и не меняется — иначе
+ * игрок отправит деньги на старый адрес и они потеряются.
+ *
+ * Без Signer-контура адрес не выдаётся: `503 signer_not_configured`. Это
+ * осознанно — «временный» адрес из ниоткуда хуже, чем понятная ошибка.
+ */
+export async function payAddress(env: Env, auth: AuthContext): Promise<Response> {
+  const flags = payFlags(env);
+  if (!flags.deposits) throw new ApiError(503, 'deposits_disabled');
+  if (!(await ensurePaySchema(env.DB))) throw new ApiError(503, 'pay_unavailable');
+
+  const existing = await findAddress(env.DB, auth.userId);
+  if (existing) {
+    return json({
+      ok: true, address: existing.address, index: existing.index, created: false,
+      network: flags.network, asset: 'USDT', contract: usdtContract(env, flags.network),
+    });
+  }
+
+  let address;
+  try {
+    address = await ensureAddress(env.DB, auth.userId, signerDeriver(env), Date.now());
+  } catch (e) {
+    const code = e instanceof Error ? e.message : 'signer_error';
+    if (code === 'signer_not_configured') throw new ApiError(503, 'signer_not_configured');
+    throw new ApiError(502, 'signer_unavailable');
+  }
+
+  return json({
+    ok: true, address: address.address, index: address.index, created: address.created,
+    network: flags.network, asset: 'USDT', contract: usdtContract(env, flags.network),
+  }, 201);
 }
 
 /** Баланс, история и купленная косметика — только для владельца. */
@@ -235,4 +273,56 @@ export async function adminPayStop(request: Request, env: Env): Promise<Response
   const now = Date.now();
   await setPayoutsStop(env.DB, stop, String(body.reason ?? 'manual'), now);
   return json({ ok: true, stop, now });
+}
+
+
+// --- Реальная отправка (этап 10, тестнет) -------------------------------------
+
+/**
+ * Собрать, подписать и отправить выплату. Вызывается админом по заявке в
+ * состоянии `reserved`: пока заявка не зарезервирована, деньги с баланса не
+ * списаны, и отправлять нечего.
+ *
+ * Без `SIGNER` и `PAY_HOT_ADDRESS` маршрут отвечает 503: лучше явная ошибка,
+ * чем «будто отправили».
+ */
+export async function adminPaySend(request: Request, env: Env): Promise<Response> {
+  requireAdmin(request, env);
+  if (!(await ensurePaySchema(env.DB))) throw new ApiError(503, 'pay_unavailable');
+
+  const body = await readJsonObject(request);
+  const id = String(body.id ?? '');
+  if (!id) throw new ApiError(400, 'bad_id');
+
+  const row = await env.DB.prepare(
+    'SELECT id, user_id, address, amount_micro, status, txid FROM pay_withdrawals WHERE id = ?',
+  ).bind(id).first<{ id: string; user_id: string; address: string; amount_micro: number; status: string; txid: string | null }>();
+  if (!row) throw new ApiError(404, 'not_found');
+  if (row.status !== 'reserved') throw new ApiError(409, 'not_reserved');
+
+  const flags = payFlags(env);
+  const owner = String(env.PAY_HOT_ADDRESS ?? '');
+  if (!owner) throw new ApiError(503, 'hot_wallet_missing');
+  if (!env.SIGNER) throw new ApiError(503, 'signer_not_configured');
+
+  const attemptRow = await env.DB.prepare('SELECT COUNT(*) AS c FROM pay_payouts WHERE withdrawal_id = ?')
+    .bind(id).first<number>('c');
+  const attempt = Number(attemptRow ?? 0) + 1;
+
+  try {
+    const sent = await sendUsdt(trongridTransport(env), signerClient(env), {
+      owner,
+      to: String(row.address),
+      amountMicro: Number(row.amount_micro),
+      contract: usdtContractOf(env, flags.network),
+    });
+    const updated = await markBroadcast(env.DB, id, { txid: sent.txid, attempt }, Date.now());
+    return json({ ok: true, txid: sent.txid, withdrawal: updated });
+  } catch (e) {
+    if (e instanceof BroadcastError) {
+      await markBroadcast(env.DB, id, { attempt, error: e.message }, Date.now()).catch(() => null);
+      throw new ApiError(502, e.code);
+    }
+    throw e;
+  }
 }
