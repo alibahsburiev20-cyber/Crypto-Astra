@@ -4,6 +4,8 @@ import { json, readJson } from '../http/response';
 import {
   addPoolEntry, parsePoolEntry, poolAll, poolReport, poolTotals,
 } from '../pool/accounting';
+import { payFlags } from '../pay/flags';
+import { usdtPoolBlock } from '../pay/pool';
 import { ApiError } from '../world/errors';
 
 // Пул (этап 5). Публичный отчёт открыт всем — это часть прозрачности и требований
@@ -30,7 +32,18 @@ function requireAdmin(request: Request, env: Env): void {
 
 export async function poolPublic(env: Env): Promise<Response> {
   if (!(await ensurePoolSchema(env.DB))) throw new ApiError(503, 'pool_unavailable');
-  const report = await poolReport(env.DB, Date.now());
+  const now = Date.now();
+  const report = await poolReport(env.DB, now);
+  // USDT — отдельным блоком и только при включённом флаге: фиат и крипта
+  // никогда не складываются в одну цифру.
+  if (payFlags(env).pool) {
+    try {
+      const usdt = await usdtPoolBlock(env.DB, now);
+      return json({ ok: true, ...report, usdt }, 200, PUBLIC_HEADERS);
+    } catch (e) {
+      console.error('usdt pool block failed', e);
+    }
+  }
   return json({ ok: true, ...report }, 200, PUBLIC_HEADERS);
 }
 

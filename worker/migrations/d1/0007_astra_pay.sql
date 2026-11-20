@@ -18,6 +18,8 @@ CREATE TABLE pay_addresses (
   hex              TEXT NOT NULL UNIQUE,
   derivation_index INTEGER NOT NULL UNIQUE,
   active           INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+  -- До какого времени мы уже просмотрели историю этого адреса (курсор монитора).
+  last_scanned_ts  INTEGER NOT NULL DEFAULT 0,
   created_at       INTEGER NOT NULL
 );
 

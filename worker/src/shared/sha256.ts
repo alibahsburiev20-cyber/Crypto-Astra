@@ -13,8 +13,8 @@ const K = new Uint32Array([
 
 const rotr = (x: number, n: number): number => (x >>> n) | (x << (32 - n));
 
-export function sha256Hex(input: string): string {
-  const msg = new TextEncoder().encode(input);
+/** SHA-256 над байтами: нужно для base58check и адресов TRON, где важны байты, а не текст. */
+export function sha256Bytes(msg: Uint8Array): Uint8Array {
   const len = msg.length;
   const padLen = ((len + 9 + 63) >> 6) << 6;
   const buf = new Uint8Array(padLen);
@@ -51,7 +51,15 @@ export function sha256Hex(input: string): string {
     H[4] = (H[4] + e) >>> 0; H[5] = (H[5] + f) >>> 0; H[6] = (H[6] + g) >>> 0; H[7] = (H[7] + h) >>> 0;
   }
 
+  const out = new Uint8Array(32);
+  const ov = new DataView(out.buffer);
+  for (let i = 0; i < 8; i++) ov.setUint32(i * 4, H[i]);
+  return out;
+}
+
+export function sha256Hex(input: string): string {
+  const bytes = sha256Bytes(new TextEncoder().encode(input));
   let out = '';
-  for (let i = 0; i < 8; i++) out += H[i].toString(16).padStart(8, '0');
+  for (const b of bytes) out += b.toString(16).padStart(2, '0');
   return out;
 }

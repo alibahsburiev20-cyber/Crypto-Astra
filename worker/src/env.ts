@@ -44,4 +44,6 @@ export interface Env {
   PAY_NETWORK?: string;
   /** Адрес контракта USDT. Пусто — берётся стандартный для сети. */
   PAY_USDT_CONTRACT?: string;
+  /** Ключ TronGrid. Необязателен: без него лимит опроса ниже. */
+  TRONGRID_API_KEY?: string;
 }

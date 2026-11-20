@@ -46,6 +46,7 @@ export const PAY_STATEMENTS: string[] = [
      hex TEXT NOT NULL UNIQUE,
      derivation_index INTEGER NOT NULL UNIQUE,
      active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+     last_scanned_ts INTEGER NOT NULL DEFAULT 0,
      created_at INTEGER NOT NULL)`,
   'CREATE INDEX IF NOT EXISTS idx_pay_addresses_active ON pay_addresses (active, created_at)',
 
