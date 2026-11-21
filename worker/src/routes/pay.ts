@@ -5,7 +5,7 @@ import { ensureAddress, findAddress, signerDeriver } from '../pay/addresses';
 import { payFlags, publicFlags } from '../pay/flags';
 import { payBalanceMicro, payHistory } from '../pay/ledger';
 import { ensurePaySchema, PAY_SCHEMA_VERSION, PAY_TABLES } from '../pay/schema';
-import { ShopError, catalogForClient, entitlements, purchase } from '../pay/shop';
+import { ShopError, catalogForClient, entitlements, premiumStatus, purchase } from '../pay/shop';
 import { formatMicroUsdt } from '../pay/tron/amount';
 import { usdtContract } from '../pay/tron/contracts';
 import { requireAdmin } from '../http/admin';
@@ -101,10 +101,12 @@ export async function payAddress(env: Env, auth: AuthContext): Promise<Response>
 export async function payAccount(env: Env, auth: AuthContext): Promise<Response> {
   if (!(await ensurePaySchema(env.DB))) throw new ApiError(503, 'pay_unavailable');
   const flags = payFlags(env);
-  const [balanceMicro, history, owned] = await Promise.all([
+  const now = Date.now();
+  const [balanceMicro, history, owned, premium] = await Promise.all([
     payBalanceMicro(env.DB, auth.userId),
     payHistory(env.DB, auth.userId, 50),
     entitlements(env.DB, auth.userId),
+    premiumStatus(env.DB, auth.userId, now),
   ]);
   return json({
     ok: true,
@@ -114,7 +116,8 @@ export async function payAccount(env: Env, auth: AuthContext): Promise<Response>
     purchasesEnabled: flags.purchases,
     history,
     entitlements: owned,
-    now: Date.now(),
+    premium,
+    now,
   });
 }
 

@@ -789,3 +789,82 @@ footer { max-width: 1180px; margin: 0 auto; padding: 0 22px 26px; color: var(--m
 .pool-rule p { margin: 0; font-size: 12px; line-height: 1.55; color: var(--muted); }
 .pool-rule code { font-size: 11px; color: var(--text); }
 a.side-item { text-decoration: none; }
+
+/* --- Шкала уровня и вкладка «Бонусы» -------------------------------------- */
+
+.level-widget {
+  margin: 18px 0 4px;
+  padding: 16px 18px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(40, 70, 140, 0.35), rgba(12, 18, 38, 0.6));
+  border: 1px solid rgba(120, 170, 255, 0.22);
+}
+
+.level-widget.is-compact { margin: 8px 0 0; padding: 12px 14px; }
+
+.level-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.level-bar {
+  height: 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+}
+
+.level-bar-fill {
+  height: 100%;
+  width: 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #6fd3ff, #8f7bff);
+  transition: width 0.4s ease;
+}
+
+.level-foot { margin: 8px 0 0; font-size: 0.82rem; }
+
+.bonus-hero {
+  padding: 24px;
+  border-radius: 20px;
+  background: radial-gradient(circle at 20% 0%, rgba(255, 200, 90, 0.16), transparent 60%), rgba(12, 18, 38, 0.7);
+  border: 1px solid rgba(255, 200, 90, 0.25);
+}
+
+.bonus-hero h2 { margin: 8px 0; }
+
+.bonus-timer {
+  display: inline-block;
+  margin: 10px 0 16px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.bonus-rules {
+  margin: 0;
+  padding-left: 18px;
+  line-height: 1.6;
+  font-size: 0.9rem;
+  opacity: 0.85;
+}
+
+.ship-viewer.is-skinned { position: relative; }
+.skin-tag {
+  position: absolute;
+  right: 10px;
+  bottom: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: rgba(120, 170, 255, 0.25);
+}
+
+.side-shop { font-weight: 600; }

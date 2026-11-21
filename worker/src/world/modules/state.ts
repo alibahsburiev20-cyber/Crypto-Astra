@@ -78,6 +78,9 @@ export function buildState(sql: SqlStorage, playerId: string, now: number) {
     ...base,
     ships,
     xpNext: xpThreshold(base.level + 1),
+    // Шкала уровня: от порога текущего уровня до следующего. Без xpPrev клиент
+    // не может честно нарисовать прогресс — он начинается не с нуля.
+    xpPrev: xpThreshold(base.level),
     resources: sql.exec('SELECT resource, amount FROM resources WHERE player_id = ? AND amount > 0 ORDER BY resource', playerId).toArray()
       .map((r) => ({ id: String(r.resource), name: RESOURCE_NAMES[String(r.resource)] ?? String(r.resource), amount: Number(r.amount) })),
     fuel: { cap, price: FUEL_UNIT_PRICE, boughtToday: daily.fuelBought, dailyMax: FUEL_DAILY_MAX, nextAt: nextFuelAt },

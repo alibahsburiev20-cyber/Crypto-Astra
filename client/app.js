@@ -137,6 +137,8 @@ function assetLabel(asset) {
 const errText = (code) => ERRORS[code] || 'Что-то пошло не так';
 
 let token = null;
+/** Купленное в Astra Pay: премиум и косметика. null — платежи выключены. */
+let account = null;
 let mode = 'register';
 let view = 'bridge';
 let state = null;
@@ -382,7 +384,26 @@ function fmtDur(ms) {
   return m < 120 ? `${m} мин` : `${Math.round(m / 60)} ч`;
 }
 
+// Что даёт скин: внешний вид корпуса. Купленная окраска применяется ко всем
+// кораблям игрока — на бой, скорость и добычу она не влияет.
+const SKIN_SPRITES = {
+  'skin:nebula': '/sprites/cosmetics/skin_nebula.png',
+  'skin:ember': '/sprites/cosmetics/skin_ember.png',
+};
+
+function ownedSkin() {
+  const list = Array.isArray(account?.entitlements) ? account.entitlements : [];
+  const owned = list.find((item) => SKIN_SPRITES[item.cosmetic]);
+  return owned ? SKIN_SPRITES[owned.cosmetic] : null;
+}
+
 function shipArt(type) {
+  const skin = ownedSkin();
+  if (skin) {
+    return el('div', { class: 'ship-viewer is-skinned' },
+      el('img', { src: skin, alt: '', width: '256', height: '128' }),
+      el('span', { class: 'skin-tag' }, 'скин'));
+  }
   return el('div', { class: 'ship-viewer' }, el('img', { src: `/sprites/ships/${type}.png`, alt: '', width: '256', height: '128' }));
 }
 
@@ -391,6 +412,47 @@ function rankText(season) {
   if (!season) return 'Сезон ещё не начался';
   if (!season.rank) return `Место в рейтинге появится после первого рейса · игроков ${season.players}`;
   return `#${season.rank} из ${season.players} · осталось ${season.daysLeft} дн.`;
+}
+
+// Шкала уровня: сколько XP уже есть, сколько нужно до следующего и сколько
+// осталось. Считается из серверных порогов (xpPrev/xpNext), а не «на глаз».
+function levelProgress() {
+  const level = Number(state.level) || 1;
+  const xp = Number(state.xp) || 0;
+  const prev = Number(state.xpPrev) || 0;
+  const next = Number(state.xpNext) || 0;
+  const span = Math.max(1, next - prev);
+  const done = Math.max(0, Math.min(span, xp - prev));
+  return {
+    level,
+    xp,
+    next,
+    left: Math.max(0, next - xp),
+    percent: Math.round((done / span) * 100),
+  };
+}
+
+function levelBar(compact) {
+  const p = levelProgress();
+  return el('div', { class: `level-widget${compact ? ' is-compact' : ''}` },
+    el('div', { class: 'level-head' },
+      el('b', {}, `Уровень ${p.level}`),
+      el('span', { class: 'muted' }, p.left > 0 ? `до ${p.level + 1}: ${p.left} XP` : 'максимум в этом секторе')),
+    el('div', {
+      class: 'level-bar',
+      role: 'progressbar',
+      'aria-valuemin': '0',
+      'aria-valuemax': '100',
+      'aria-valuenow': String(p.percent),
+      'aria-label': `Опыт: ${p.percent}% до следующего уровня`,
+    }, (() => {
+      // Ширину ставим через CSSOM: CSP запрещает инлайновые style-атрибуты.
+      const fill = el('div', { class: 'level-bar-fill' });
+      fill.style.width = `${p.percent}%`;
+      return fill;
+    })()),
+    el('p', { class: 'muted level-foot' }, `${p.xp} XP всего · нужно ${p.next} XP для уровня ${p.level + 1}`),
+  );
 }
 
 function cards() {
@@ -427,9 +489,10 @@ function renderBridge() {
         }, active ? 'Открыть рейс' : 'Начать экспедицию'),
       ),
     ),
+    levelBar(),
     el('div', { class: 'panel-grid' },
       el('div', { class: 'block' },
-        el('h3', {}, 'Ежедневный Claim'),
+        el('h3', {}, 'Бонус каждые 15 минут'),
         el('p', { class: 'muted', 'data-claim-note': '' }, claimLeft > 0
           ? `Следующий Claim через ${fmtLeft(claimLeft)}`
           : 'Claim доступен. +5 ASTRA, не чаще раза в 15 минут.'),
@@ -949,6 +1012,49 @@ function passRow(level) {
       : el('button', { type: 'button', class: 'ghost', disabled: level.ready ? null : 'disabled', onClick: () => doClaimPass(level.level) }, 'Забрать'));
 }
 
+function renderBonus() {
+  const claimLeft = left(state.nextClaimAt);
+  const p = levelProgress();
+  const premium = account?.premium?.active ? account.premium : null;
+  return el('div', { class: 'screen' },
+    el('div', { class: 'bonus-hero' },
+      el('span', { class: 'badge' }, 'Бонусы'),
+      el('h2', {}, claimLeft > 0 ? 'Следующий бонус скоро' : 'Бонус готов'),
+      el('p', { class: 'muted' }, claimLeft > 0
+        ? `Забрать можно через ${fmtLeft(claimLeft)}. Бонус — +5 ASTRA, не чаще раза в 15 минут.`
+        : 'Заберите +5 ASTRA. Следующий бонус — через 15 минут.'),
+      el('div', { class: 'bonus-timer', 'data-bonus-timer': '', 'data-until': String(state.nextClaimAt || 0) },
+        claimLeft > 0 ? fmtLeft(claimLeft) : 'готово'),
+      el('button', {
+        type: 'button', class: 'cta', 'data-claim': '',
+        disabled: claimLeft > 0 || state.frozen ? '' : null,
+        onClick: doClaim,
+      }, 'Забрать бонус'),
+    ),
+    el('div', { class: 'panel-grid' },
+      el('div', { class: 'block' }, el('h3', {}, 'Шкала уровня'), levelBar(true),
+        el('p', { class: 'muted' }, `Сейчас ${p.xp} XP. До уровня ${p.level + 1} осталось ${p.left} XP.`)),
+      el('div', { class: 'block' },
+        el('h3', {}, 'Astra Pass'),
+        el('p', { class: 'muted' }, 'Награды за очки сезона: 10 уровней, косметика и второй слот крафта.'),
+        el('button', { type: 'button', class: 'ghost', onClick: () => setView('season') }, 'Открыть сезон')),
+      el('div', { class: 'block' },
+        el('h3', {}, 'Premium'),
+        premium
+          ? el('p', { class: 'muted' }, `Astra Premium активен до ${new Date(premium.until || 0).toLocaleDateString('ru-RU')}. Значок и эксклюзивный корпус — в профиле.`)
+          : el('p', { class: 'muted' }, 'Значок Premium, эксклюзивный корпус и второй слот Pass. Без влияния на экономику.'),
+        el('a', { class: 'cta cta-small', href: '/pay.html' }, premium ? 'Магазин' : 'Открыть магазин')),
+      el('div', { class: 'block' },
+        el('h3', {}, 'Как это работает'),
+        el('ul', { class: 'bonus-rules' },
+          el('li', {}, 'Бонус можно забрать раз в 15 минут — таймер идёт от сервера.'),
+          el('li', {}, 'Опыт даёт рейсы и миссии, уровень открывает сектора и корабли.'),
+          el('li', {}, 'ASTRA — внутриигровая валюта: купить её нельзя.')),
+      ),
+    ),
+  );
+}
+
 function renderMissions() {
   const data = socialData;
   if (!data) {
@@ -1195,6 +1301,7 @@ function render() {
             : view === 'season' ? renderSeason()
               : view === 'missions' ? renderMissions()
                 : view === 'guild' ? renderGuild()
+                  : view === 'bonus' ? renderBonus()
             : view === 'wallet' ? renderWallet()
             : view === 'ledger' ? renderLedger() : renderBridge();
   panel.append(body);
@@ -1227,6 +1334,18 @@ function mountAds() {
   slot.append(s);
 }
 
+/**
+ * Купленное в магазине: премиум и скины. Спрашиваем только когда платежи
+ * включены — иначе лишний запрос и создание таблиц там, где денег нет.
+ */
+async function loadPayAccount() {
+  const status = await request('/pay/status.json').catch(() => null);
+  if (status?.status !== 200 || !status.data?.flags?.payments) { account = null; return; }
+  const res = await authed('/pay/account.json');
+  account = res.status === 200 ? res.data : null;
+  if (view === 'bonus' || view === 'bridge' || view === 'fleet') render();
+}
+
 async function loadGame() {
   const { status, data } = await authed('/me');
   if (status === 401) { openAuth('login'); return; }
@@ -1245,6 +1364,7 @@ async function loadGame() {
   show('game');
   render();
   mountAds();
+  if (!account) loadPayAccount();
 }
 
 async function act(scope, path, body) {
@@ -1288,6 +1408,7 @@ function doApplyReferral(code) { return act(`ref:${code}`, '/referrals/apply', {
 function setView(v) {
   view = v;
   note = '';
+  if (v === 'bonus') loadPayAccount();
   // Рейтинг в /me не лежит: при входе в раздел подтягиваем полный отчёт.
   if (v === 'season') loadSeason();
   if (v === 'missions') loadSocial();
@@ -1344,6 +1465,8 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !$('#auth-overlay').hidden) closeAuth();
 });
 for (const b of document.querySelectorAll('[data-view]')) b.addEventListener('click', () => setView(b.dataset.view));
+// Кнопки, которые уводят на другую страницу (магазин), а не переключают раздел.
+for (const b of document.querySelectorAll('[data-nav]')) b.addEventListener('click', () => { location.href = b.dataset.nav; });
 for (const b of document.querySelectorAll('[data-soon]')) b.addEventListener('click', () => {
   const toast = document.createElement('div');
   toast.className = 'toast';
