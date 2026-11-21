@@ -158,6 +158,13 @@ async function loadAccount() {
     '[data-pay="wallet-hint"]',
     res.data.purchasesEnabled ? 'USDT зачисляются из подтверждённых переводов на ваш адрес.' : 'Покупки выключены в этой сборке.',
   );
+  const premium = res.data.premium;
+  setText(
+    '[data-pay="premium"]',
+    premium?.active
+      ? `Premium активен${premium.until ? ` до ${new Date(premium.until).toLocaleDateString('ru-RU')}` : ''}.`
+      : 'Premium не активен: 5 USDT за 30 дней — значок, эксклюзивный корпус и второй слот Pass.',
+  );
   renderHistory(res.data.history);
 }
 

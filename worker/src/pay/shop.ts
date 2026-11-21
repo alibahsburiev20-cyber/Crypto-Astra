@@ -18,7 +18,7 @@ import { formatMicroUsdt } from './tron/amount';
 import { payBalanceMicro, payLedgerHead, payCanonical } from './ledger';
 import { sha256Hex } from '../shared/sha256';
 
-export type ProductKind = 'cosmetic' | 'service';
+export type ProductKind = 'cosmetic' | 'service' | 'premium';
 
 export interface PayProduct {
   id: string;
@@ -30,6 +30,10 @@ export interface PayProduct {
   priceMicro: number;
   /** Название косметики, которое попадает в профиль. */
   cosmetic?: string;
+  /** Корпус, к которому применяется скин. Пусто — ко всем. */
+  hull?: string;
+  /** Срок действия в днях. Пусто — навсегда. */
+  durationDays?: number;
   enabled: boolean;
 }
 
@@ -88,13 +92,26 @@ export const PRODUCTS: PayProduct[] = [
     enabled: true,
   },
   {
-    id: 'pass_premium_slot',
-    kind: 'service',
-    title: 'Второй слот Astra Pass',
-    description: 'Открывает второй слот наград текущего сезона.',
-    icon: '🎫',
+    id: 'premium_30',
+    kind: 'premium',
+    title: 'Astra Premium · 30 дней',
+    description: 'Значок Premium у позывного, эксклюзивный корпус и второй слот Astra Pass. Без влияния на экономику и рейтинг.',
+    icon: '💎',
+    cosmetic: 'premium',
+    durationDays: 30,
     priceMicro: 5_000_000,
-    enabled: false, // включаем после юридического заключения
+    enabled: true,
+  },
+  {
+    id: 'skin_nebula_premium',
+    kind: 'cosmetic',
+    title: 'Корпус «Гиперион» (Premium)',
+    description: 'Эксклюзивная окраска для владельцев Premium.',
+    icon: '🌟',
+    cosmetic: 'skin:hyperion',
+    hull: 'flagship',
+    priceMicro: 1,
+    enabled: false, // выдаётся вместе с Premium, отдельно не продаётся
   },
 ];
 
@@ -106,6 +123,7 @@ export function findProduct(id: string): PayProduct | null {
 export function catalogForClient(): {
   id: string; kind: ProductKind; title: string; description: string; icon: string;
   priceMicro: number; price: string; enabled: boolean;
+  durationDays: number | null; hull: string | null;
 }[] {
   return PRODUCTS.filter((p) => p.enabled).map((p) => ({
     id: p.id,
@@ -115,6 +133,8 @@ export function catalogForClient(): {
     icon: p.icon,
     priceMicro: p.priceMicro,
     price: formatMicroUsdt(p.priceMicro),
+    durationDays: p.durationDays ?? null,
+    hull: p.hull ?? null,
     enabled: p.enabled,
   }));
 }
@@ -182,11 +202,12 @@ export async function purchase(
         input.userId, product.priceMicro,
       ),
       db.prepare(
-        `INSERT INTO pay_entitlements (id, user_id, product_id, purchase_id, granted_at, payload)
-         SELECT ?, ?, ?, ?, ?, ?
+        `INSERT INTO pay_entitlements (id, user_id, product_id, purchase_id, granted_at, expires_at, payload)
+         SELECT ?, ?, ?, ?, ?, ?, ?
           WHERE EXISTS (SELECT 1 FROM pay_ledger WHERE idem_key = ?)`,
       ).bind(
         `et_${hashId(idemKey)}`, input.userId, product.id, purchaseId, now,
+        product.durationDays ? now + product.durationDays * 86_400_000 : null,
         JSON.stringify({ cosmetic: product.cosmetic ?? null, title: product.title }), idemKey,
       ),
       db.prepare(
@@ -221,13 +242,14 @@ export interface Entitlement {
   productId: string;
   purchaseId: string;
   grantedAt: number;
+  expiresAt: number | null;
   cosmetic: string | null;
 }
 
 export async function entitlements(db: D1Database, userId: string): Promise<Entitlement[]> {
   const { results } = await db.prepare(
-    'SELECT product_id, purchase_id, granted_at, payload FROM pay_entitlements WHERE user_id = ? ORDER BY granted_at DESC',
-  ).bind(userId).all<{ product_id: string; purchase_id: string; granted_at: number; payload: string }>();
+    'SELECT product_id, purchase_id, granted_at, expires_at, payload FROM pay_entitlements WHERE user_id = ? ORDER BY granted_at DESC',
+  ).bind(userId).all<{ product_id: string; purchase_id: string; granted_at: number; expires_at: number | null; payload: string }>();
   return (results ?? []).map((row) => {
     let cosmetic: string | null = null;
     try {
@@ -239,6 +261,7 @@ export async function entitlements(db: D1Database, userId: string): Promise<Enti
       productId: String(row.product_id),
       purchaseId: String(row.purchase_id),
       grantedAt: Number(row.granted_at),
+      expiresAt: row.expires_at === null || row.expires_at === undefined ? null : Number(row.expires_at),
       cosmetic,
     };
   });
@@ -246,4 +269,19 @@ export async function entitlements(db: D1Database, userId: string): Promise<Enti
 
 function hashId(text: string): string {
   return sha256Hex(text).slice(0, 24);
+}
+
+/** Активен ли Premium прямо сейчас. */
+export async function premiumStatus(
+  db: D1Database,
+  userId: string,
+  now: number,
+): Promise<{ active: boolean; until: number | null }> {
+  const row = await db.prepare(
+    `SELECT MAX(expires_at) AS until FROM pay_entitlements
+      WHERE user_id = ? AND product_id = 'premium_30' AND expires_at IS NOT NULL AND expires_at > ?`,
+  ).bind(userId, now).first<number>('until');
+  // Пустой результат — это «нет Premium», а не «Premium бессрочный».
+  const until = row === null || row === undefined ? null : Number(row);
+  return { active: until !== null && until > now, until };
 }
