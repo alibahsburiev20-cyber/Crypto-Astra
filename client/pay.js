@@ -71,7 +71,7 @@ function itemIcon(product) {
   return img;
 }
 
-function renderProducts(catalog, purchasesEnabled) {
+function renderProducts(catalog, purchasesEnabled, walletsReady = true) {
   const host = $('[data-pay="products"]');
   if (!host) return;
   host.innerHTML = '';
@@ -109,8 +109,13 @@ function renderProducts(catalog, purchasesEnabled) {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'cta cta-small';
-    button.textContent = purchasesEnabled ? 'Купить' : 'Скоро';
-    button.disabled = !purchasesEnabled || !token;
+    // Оплата может быть включена, а кошельки — ещё нет (не настроен Signer).
+    // Честнее показать «Нужен кошелёк», чем дать нажать и получить отказ.
+    button.textContent = !purchasesEnabled ? 'Скоро' : walletsReady ? 'Купить' : 'Нужен кошелёк';
+    button.disabled = !purchasesEnabled || !walletsReady || !token;
+    if (purchasesEnabled && !walletsReady) {
+      button.title = 'Кошельки выдаются после настройки Signer — шаги в docs/PAY-SIGNER.md';
+    }
     button.addEventListener('click', () => buy(product, button));
 
     foot.append(price, button);
@@ -202,15 +207,20 @@ async function boot() {
   if (catalog.ok) {
     const network = location.pathname.includes('nile') ? 'nile' : 'по данным сервера';
     setText('[data-pay="network"]', `Сеть: ${network}`);
+    const walletsReady = catalog.data.wallets === 'ready';
     setText(
       '[data-pay="purchases"]',
-      catalog.data.purchasesEnabled ? 'Покупки: включены' : 'Покупки: выключены',
+      !catalog.data.purchasesEnabled
+        ? 'Покупки: выключены'
+        : walletsReady
+          ? 'Покупки: включены'
+          : 'Покупки: включены · кошельки: нужен Signer',
     );
-    renderProducts(catalog.data, Boolean(catalog.data.purchasesEnabled));
+    renderProducts(catalog.data, Boolean(catalog.data.purchasesEnabled), walletsReady);
   } else {
     setText('[data-pay="network"]', 'Сервис недоступен');
     setText('[data-pay="purchases"]', 'Покупки: выключены');
-    renderProducts({ products: [] }, false);
+    renderProducts({ products: [] }, false, false);
   }
 
   if (session) await loadAccount();

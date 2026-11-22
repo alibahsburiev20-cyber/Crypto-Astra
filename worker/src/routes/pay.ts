@@ -2,7 +2,7 @@ import type { AuthContext } from '../auth/guards';
 import type { Env } from '../env';
 import { json } from '../http/response';
 import { ensureAddress, findAddress, signerDeriver } from '../pay/addresses';
-import { payFlags, publicFlags } from '../pay/flags';
+import { payFlags, publicFlags, walletState } from '../pay/flags';
 import { payBalanceMicro, payHistory } from '../pay/ledger';
 import { ensurePaySchema, PAY_SCHEMA_VERSION, PAY_TABLES } from '../pay/schema';
 import { ShopError, catalogForClient, entitlements, premiumStatus, purchase } from '../pay/shop';
@@ -43,6 +43,9 @@ export async function payStatus(env: Env): Promise<Response> {
     decimals: 6,
     contract: usdtContract(env, flags.network),
     flags: publicFlags(flags),
+    // off — деньги выключены; signer_required — включены, но кошельки ещё не
+    // выдаются (не настроен Signer); ready — можно покупать и принимать USDT.
+    wallets: walletState(env, flags),
     // null — база не проверялась (деньги выключены), 'ready' — таблицы на месте.
     schema: ready === null ? 'off' : ready ? 'ready' : 'error',
     tables: PAY_TABLES.length,
@@ -56,6 +59,7 @@ export async function payProducts(env: Env): Promise<Response> {
   return json({
     ok: true,
     purchasesEnabled: flags.purchases,
+    wallets: walletState(env, flags),
     asset: 'USDT',
     products: catalogForClient(),
     now: Date.now(),

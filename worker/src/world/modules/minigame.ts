@@ -1,6 +1,6 @@
 import { DAY_MS, utcDay } from '../../shared/constants';
 import {
-  RUN_MS, WIN_TIERS, evaluate, makeField, rewardFor, type RunResult, type TracePoint,
+  RUN_MS, WIN_TIERS, evaluate, makeField, rewardFor, sanitizeTrace, type RunResult, type TracePoint,
 } from '../../shared/minigame';
 import { applyDelta, getBalance } from '../balances';
 import { ApiError } from '../errors';
@@ -161,7 +161,9 @@ export function finishRun(
       return { value: { ok: false, error: 'run_expired', attempts }, store: true };
     }
 
-    const result = evaluate(Number(run.seed), input.trace);
+    // Трассу чиним, а не отбиваем: подтормозивший телефон не должен стоить
+    // игроку попытки. Зажим скорости при этом сохраняет защиту от телепорта.
+    const result = evaluate(Number(run.seed), sanitizeTrace(input.trace));
     if (!result.ok) {
       // Кривая трасса — попытка сгорает, награды нет. Иначе можно бесконечно
       // подбирать трассу, отправляя мусор.

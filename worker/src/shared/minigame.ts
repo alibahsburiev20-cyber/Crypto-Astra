@@ -165,6 +165,66 @@ export function expandTrace(xs: unknown[], stepMs: number): TracePoint[] {
 }
 
 /**
+ * Приведение трассы к «физически возможной».
+ *
+ * Браузер не идеален: кадр может подвиснуть, вкладка — уйти в фон, палец —
+ * дёрнуться. Отбивать такой забег значит терять попытку игрока из-за его
+ * телефона. Поэтому вместо отказа мы чиним трассу: время выравниваем,
+ * координаты зажимаем в поле, а скорость — в предел корабля, хвост продлеваем
+ * до конца забега. Подделать это нельзя: зажим только замедляет движение.
+ */
+export function sanitizeTrace(points: TracePoint[]): TracePoint[] {
+  const clean: TracePoint[] = [];
+  for (const p of Array.isArray(points) ? points : []) {
+    if (!p || !Number.isFinite(p.t) || !Number.isFinite(p.x)) continue;
+    clean.push({ t: Math.max(0, p.t), x: Math.min(FIELD_W, Math.max(0, p.x)) });
+  }
+  if (clean.length < 2) return clean;
+  clean.sort((a, b) => a.t - b.t);
+
+  const out: TracePoint[] = [];
+  let prev: TracePoint | null = null;
+  for (const p of clean) {
+    if (prev && p.t - prev.t < 1) {
+      // Два отсчёта в одну миллисекунду: оставляем последний, иначе появляется
+      // «нулевой» интервал, в котором формально можно телепортироваться.
+      out[out.length - 1] = { t: prev.t, x: p.x };
+      prev = out[out.length - 1];
+      continue;
+    }
+    if (prev) {
+      const dt = p.t - prev.t;
+      const allowed = (MAX_SPEED * dt) / 1000;
+      const dx = p.x - prev.x;
+      if (Math.abs(dx) > allowed) {
+        const fixed: TracePoint = { t: p.t, x: prev.x + Math.sign(dx) * allowed };
+        out.push(fixed);
+        prev = fixed;
+        continue;
+      }
+    }
+    out.push(p);
+    prev = p;
+  }
+  // Сдвигаем старт к нулю: клиент мог начать отсчёт не с первого кадра.
+  const shift = out[0].t;
+  if (shift > 0) {
+    for (const p of out) p.t -= shift;
+  }
+  // Пересэмплируем на ровную сетку 40 мс. Так принимающая сторона получает
+  // одинаковый формат независимо от того, как часто браузер успевал слать
+  // отсчёты, а обрыв записи (вкладка ушла в фон) означает «корабль стоит».
+  const first = out[0];
+  const grid: TracePoint[] = [];
+  for (let t = 0; t <= RUN_MS; t += 40) {
+    const x = shipXAt(out, t);
+    grid.push({ t, x: x === null ? first.x : x });
+  }
+  if (grid[grid.length - 1].t < RUN_MS) grid.push({ t: RUN_MS, x: grid[grid.length - 1].x });
+  return grid;
+}
+
+/**
  * Пересчёт забега. Одинаково вызывается на сервере (для награды) и в браузере
  * (для подсказки «сколько уже набрал»), поэтому результат должен быть побитово
  * одинаковым при одинаковом входе.

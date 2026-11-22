@@ -1185,6 +1185,13 @@ function arenaResultCard(r) {
     el('p', { class: 'muted' }, `Побед всего: ${r.wins}. Попыток осталось: ${r.attempts.left}.`));
 }
 
+/** Поле из зерна + устойчивый вариант спрайта на каждый астероид. */
+function arenaRunFields(sim, seed) {
+  const field = sim.makeField(seed);
+  field.asteroids.forEach((a, i) => { a.variant = i % 3; });
+  return field;
+}
+
 async function arenaStart() {
   if (arenaRun) return;
   arenaResult = null;
@@ -1202,10 +1209,12 @@ async function arenaStart() {
     return;
   }
   const sim = await arenaSim();
+  await arenaAssets();
+  arenaRunFields(sim, res.data.seed);
   arenaRun = {
     runId: res.data.runId,
     seed: res.data.seed,
-    field: sim.makeField(res.data.seed),
+    field: arenaRunFields(sim, res.data.seed),
     x: 500,
     targetX: null,
     startedAt: performance.now(),
@@ -1217,9 +1226,34 @@ async function arenaStart() {
     hits: 0,
     nextAsteroid: 0,
     nextCrystal: 0,
+    booms: [],
     finished: false,
   };
   render();
+}
+
+// Спрайты арены — PNG, как и весь интерфейс. Грузим один раз и держим в памяти.
+let arenaArt = null;
+let arenaArtPromise = null;
+function arenaAssets() {
+  if (!arenaArtPromise) {
+    const load = (src) => new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => resolve(null);
+      img.src = src;
+    });
+    const files = [
+      '/sprites/bg/arena.png', '/sprites/arena/ship.png', '/sprites/arena/crystal.png',
+      '/sprites/arena/boom.png', '/sprites/arena/asteroid_1.png',
+      '/sprites/arena/asteroid_2.png', '/sprites/arena/asteroid_3.png',
+    ];
+    arenaArtPromise = Promise.all(files.map(load)).then(([bg, ship, crystal, boom, a1, a2, a3]) => {
+      arenaArt = { bg, ship, crystal, boom, asteroids: [a1, a2, a3].filter(Boolean) };
+      return arenaArt;
+    });
+  }
+  return arenaArtPromise;
 }
 
 let arenaSimPromise = null;
@@ -1265,9 +1299,14 @@ function arenaStars(seed) {
 function arenaDrawStatic(canvas) {
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
+  if (arenaArt?.bg) {
+    ctx.drawImage(arenaArt.bg, 0, 0, 1000, 620);
+    return;
+  }
+  // Пока PNG не загрузился — тот же космос, но градиентом.
   const g = ctx.createLinearGradient(0, 0, 0, 620);
-  g.addColorStop(0, '#060b1c');
-  g.addColorStop(1, '#0d1a38');
+  g.addColorStop(0, '#081026');
+  g.addColorStop(1, '#050a15');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, 1000, 620);
   ctx.fillStyle = 'rgba(160,200,255,0.5)';
@@ -1298,7 +1337,10 @@ function arenaFrame(canvas) {
   // Пройденные события считаем локально только для HUD; итог всё равно серверный.
   while (run.nextAsteroid < run.field.asteroids.length && run.field.asteroids[run.nextAsteroid].t <= t) {
     const a = run.field.asteroids[run.nextAsteroid];
-    if (Math.abs(run.x - a.x) < a.r + 30) run.hits += 1;
+    if (Math.abs(run.x - a.x) < a.r + 30) {
+      run.hits += 1;
+      run.booms.push({ x: a.x, y: ARENA_Y, at: t });
+    }
     run.nextAsteroid += 1;
   }
   while (run.nextCrystal < run.field.crystals.length && run.field.crystals[run.nextCrystal].t <= t) {
@@ -1314,44 +1356,74 @@ function arenaFrame(canvas) {
   }
 
   arenaDrawStatic(canvas);
-  // Астероиды.
+  // Астероиды — PNG-спрайты, слегка вращаются, чтобы поток не выглядел статикой.
   for (const a of run.field.asteroids) {
     const y = ARENA_Y - (a.t - t) * (a.speed || 0.4);
     if (y < -80 || y > 700) continue;
-    const grad = ctx.createRadialGradient(a.x - 8, y - 8, 4, a.x, y, a.r);
-    grad.addColorStop(0, '#b9c4df');
-    grad.addColorStop(1, '#4a5674');
-    ctx.fillStyle = grad;
-    ctx.beginPath();
-    ctx.arc(a.x, y, a.r, 0, Math.PI * 2);
-    ctx.fill();
+    const size = a.r * 2.6;
+    const art = arenaArt?.asteroids?.length ? arenaArt.asteroids[(a.variant || 0) % arenaArt.asteroids.length] : null;
+    if (art) {
+      ctx.save();
+      ctx.translate(a.x, y);
+      ctx.rotate((t / 900 + (a.variant || 0)) % (Math.PI * 2));
+      ctx.drawImage(art, -size / 2, -size / 2, size, size);
+      ctx.restore();
+    } else {
+      const grad = ctx.createRadialGradient(a.x - 8, y - 8, 4, a.x, y, a.r);
+      grad.addColorStop(0, '#b9c4df');
+      grad.addColorStop(1, '#4a5674');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(a.x, y, a.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
   // Кристаллы.
   for (const c of run.field.crystals) {
     const y = ARENA_Y - (c.t - t) * 0.42;
     if (y < -60 || y > 700) continue;
+    if (arenaArt?.crystal) {
+      const pulse = 1 + Math.sin((t + c.t) / 180) * 0.08;
+      const size = c.r * 2.4 * pulse;
+      ctx.save();
+      ctx.translate(c.x, y);
+      ctx.rotate(Math.sin(t / 700) * 0.25);
+      ctx.drawImage(arenaArt.crystal, -size / 2, -size / 2, size, size);
+      ctx.restore();
+    } else {
+      ctx.save();
+      ctx.translate(c.x, y);
+      ctx.rotate(Math.PI / 4);
+      ctx.fillStyle = '#66e6ff';
+      ctx.fillRect(-c.r / 2, -c.r / 2, c.r, c.r);
+      ctx.restore();
+    }
+  }
+  // Вспышки от пробоин: короткий PNG-взрыв на месте столкновения.
+  for (const boom of run.booms) {
+    const age = t - boom.at;
+    if (age > 320 || !arenaArt?.boom) continue;
+    const size = 90 + age * 0.25;
     ctx.save();
-    ctx.translate(c.x, y);
-    ctx.rotate(Math.PI / 4);
-    ctx.fillStyle = '#66e6ff';
-    ctx.shadowColor = '#66e6ff';
-    ctx.shadowBlur = 14;
-    ctx.fillRect(-c.r / 2, -c.r / 2, c.r, c.r);
+    ctx.globalAlpha = Math.max(0, 1 - age / 320);
+    ctx.drawImage(arenaArt.boom, boom.x - size / 2, ARENA_Y - size / 2, size, size);
     ctx.restore();
   }
   // Корабль.
   ctx.save();
-  ctx.translate(run.x, ARENA_Y + 20);
-  ctx.shadowColor = '#7bb2ff';
-  ctx.shadowBlur = 18;
-  ctx.fillStyle = '#cfe1ff';
-  ctx.beginPath();
-  ctx.moveTo(0, -26);
-  ctx.lineTo(22, 22);
-  ctx.lineTo(0, 12);
-  ctx.lineTo(-22, 22);
-  ctx.closePath();
-  ctx.fill();
+  ctx.translate(run.x, ARENA_Y + 10);
+  if (arenaArt?.ship) {
+    ctx.drawImage(arenaArt.ship, -38, -46, 76, 95);
+  } else {
+    ctx.fillStyle = '#cfe1ff';
+    ctx.beginPath();
+    ctx.moveTo(0, -26);
+    ctx.lineTo(22, 22);
+    ctx.lineTo(0, 12);
+    ctx.lineTo(-22, 22);
+    ctx.closePath();
+    ctx.fill();
+  }
   ctx.restore();
 
   const timeEl = document.querySelector('[data-arena-time]');

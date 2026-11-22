@@ -44,7 +44,7 @@ describe('интерфейс: шкала уровня и бонусы', () => {
 
   it('вкладка «Бонусы» есть в меню и в доке', () => {
     expect(html).toContain('data-view="bonus"');
-    expect(html).toContain('/icons/nav/bonus.svg');
+    expect(html).toContain('/icons/nav/bonus.png');
     expect(app).toContain('function renderBonus');
     expect(app).toContain("view === 'bonus' ? renderBonus()");
     expect(app).toContain('data-bonus-timer');
@@ -60,7 +60,7 @@ describe('интерфейс: магазин и скины', () => {
     expect(html).toContain('data-nav="/pay.html"');
     expect(html).toContain('Магазин');
     expect(app).toContain("querySelectorAll('[data-nav]')");
-    expect(read('client/icons/nav/pay.svg')).toContain('<svg');
+    expect(readFileSync(new URL('client/icons/nav/pay.png', root)).subarray(1, 4).toString()).toBe('PNG');
   });
 
   it('скины применяются к корпусу и не влияют на игру', () => {

@@ -9,18 +9,24 @@ compatibility_date = "2026-11-01"
 # так работают локальная разработка и тесты.
 [vars]
 TURNSTILE_SITE_KEY = "0x4AAAAAAGGq5Lt25F34cDiq"
-# Astra Pay (этап 1). Включённым считается ТОЛЬКО значение "on": опечатка,
-# пустая строка или "true" означают «выключено». Дочерние флаги не работают без
-# PAYMENTS_ENABLED. Пока здесь всё "off", денег в системе нет: таблицы pay_*
-# создаются, но ни один платёжный маршрут не открыт.
-PAYMENTS_ENABLED = "off"
-DEPOSITS_ENABLED = "off"
-PURCHASES_ENABLED = "off"
+# Astra Pay. Включённым считается ТОЛЬКО значение "on": опечатка, пустая строка
+# или "true" означают «выключено». Дочерние флаги не работают без
+# PAYMENTS_ENABLED.
+#
+# Включено владельцем 17 ноября 2026: приём USDT и покупки. Выплаты, пул и
+# консолидация по-прежнему выключены — это отдельное решение.
+#
+# Важно: флаг открывает маршруты, но кошелёк игроку выдаёт Signer. Пока Signer не
+# задеплоен с секретом, `/pay/status.json` отвечает `wallets: "signer_required"`,
+# а витрина пишет «Нужен кошелёк» вместо кнопки покупки. Шаги — docs/PAY-SIGNER.md.
+PAYMENTS_ENABLED = "on"
+DEPOSITS_ENABLED = "on"
+PURCHASES_ENABLED = "on"
 POOL_ENABLED = "off"
 PAYOUTS_ENABLED = "off"
 SWEEP_ENABLED = "off"
-# nile — тестнет. mainnet включается только на этапе 12 и только вручную.
-PAY_NETWORK = "nile"
+# mainnet — настоящий USDT TRC-20. Тестнет остаётся для превью-сборок.
+PAY_NETWORK = "mainnet"
 
 # Клиент отдаётся тем же Worker (бесплатно). Один адрес для сайта и API: не нужны CORS, кука refresh работает.
 # Запросы, для которых нет файла в client/ (/auth/*, /me, /claim), идут в Worker.

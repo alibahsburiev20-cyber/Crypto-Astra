@@ -94,6 +94,53 @@ export function expandTrace(xs, stepMs) {
     const step = Math.min(200, Math.max(20, Math.floor(Number(stepMs) || 40)));
     return xs.slice(0, 2000).map((value, i) => ({ t: i * step, x: Number(value) / 10 }));
 }
+export function sanitizeTrace(points) {
+    const clean = [];
+    for (const p of Array.isArray(points) ? points : []) {
+        if (!p || !Number.isFinite(p.t) || !Number.isFinite(p.x))
+            continue;
+        clean.push({ t: Math.max(0, p.t), x: Math.min(FIELD_W, Math.max(0, p.x)) });
+    }
+    if (clean.length < 2)
+        return clean;
+    clean.sort((a, b) => a.t - b.t);
+    const out = [];
+    let prev = null;
+    for (const p of clean) {
+        if (prev && p.t - prev.t < 1) {
+            out[out.length - 1] = { t: prev.t, x: p.x };
+            prev = out[out.length - 1];
+            continue;
+        }
+        if (prev) {
+            const dt = p.t - prev.t;
+            const allowed = (MAX_SPEED * dt) / 1000;
+            const dx = p.x - prev.x;
+            if (Math.abs(dx) > allowed) {
+                const fixed = { t: p.t, x: prev.x + Math.sign(dx) * allowed };
+                out.push(fixed);
+                prev = fixed;
+                continue;
+            }
+        }
+        out.push(p);
+        prev = p;
+    }
+    const shift = out[0].t;
+    if (shift > 0) {
+        for (const p of out)
+            p.t -= shift;
+    }
+    const first = out[0];
+    const grid = [];
+    for (let t = 0; t <= RUN_MS; t += 40) {
+        const x = shipXAt(out, t);
+        grid.push({ t, x: x === null ? first.x : x });
+    }
+    if (grid[grid.length - 1].t < RUN_MS)
+        grid.push({ t: RUN_MS, x: grid[grid.length - 1].x });
+    return grid;
+}
 export function evaluate(seed, points) {
     const empty = { ok: false, score: 0, hits: 0, picks: 0, win: false, ticks: 0 };
     const error = validateTrace(points);

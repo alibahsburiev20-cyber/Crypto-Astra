@@ -16,8 +16,8 @@ const css = read('client/styles.css');
 describe('арена: экран и навигация', () => {
   it('пункт «Арена» есть в сайдбаре и в доке', () => {
     expect(html).toContain('data-view="arena"');
-    expect(html).toContain('/icons/ui/arena.svg');
-    expect(has('client/icons/ui/arena.svg')).toBe(true);
+    expect(html).toContain('/icons/ui/arena.png');
+    expect(has('client/icons/ui/arena.png')).toBe(true);
   });
 
   it('вьюха подключена к роутеру и загрузке данных', () => {
@@ -63,19 +63,17 @@ describe('спрайты кнопок', () => {
 
   it('у входа, регистрации и выхода есть иконки', () => {
     for (const icon of ['login', 'register', 'logout']) {
-      expect(has(`client/icons/ui/${icon}.svg`)).toBe(true);
-      expect(html).toContain(`/icons/ui/${icon}.svg`);
+      expect(has(`client/icons/ui/${icon}.png`)).toBe(true);
+      expect(html).toContain(`/icons/ui/${icon}.png`);
     }
     expect(css).toContain('.btn-ico');
     expect(css).toContain('.dock-ico');
   });
 
-  it('все иконки — настоящие SVG, а не пустые файлы', () => {
+  it('все иконки — настоящие PNG, а не пустые файлы', () => {
     for (const name of ['arena', 'login', 'register', 'logout', 'play', 'claim', 'refresh', 'buy']) {
-      const svg = read(`client/icons/ui/${name}.svg`);
-      expect(svg.startsWith('<svg')).toBe(true);
-      expect(svg).toContain('viewBox="0 0 24 24"');
-      expect(svg.length).toBeGreaterThan(120);
+      const bytes = readFileSync(new URL(`client/icons/ui/${name}.png`, root)).subarray(0, 4);
+      expect([...bytes]).toEqual([0x89, 0x50, 0x4e, 0x47]);
     }
   });
 });
