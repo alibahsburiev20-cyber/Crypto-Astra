@@ -14,8 +14,9 @@ import { playerPayload } from '../scheduler';
 import { marketView } from './market';
 import { getPlayerState } from './players';
 import { seasonBrief } from './season';
+import { minigameBrief } from './minigame';
 
-export function buildState(sql: SqlStorage, playerId: string, now: number) {
+export function buildState(sql: SqlStorage, playerId: string, now: number, premium = false) {
   const base = getPlayerState(sql, playerId);
   const day = utcDay(now);
   const daily = dailyOf(sql, playerId, day);
@@ -109,6 +110,8 @@ export function buildState(sql: SqlStorage, playerId: string, now: number) {
     // Сезон: номер, рамки, дни до конца и место в рейтинге. Полный рейтинг —
     // в отдельном /season, чтобы /me не раздувался на сто игроков.
     season: seasonBrief(sql, playerId, now),
+    // Мини-игра короткой строкой: сколько попыток, побед и что дальше по ступеням.
+    minigame: minigameBrief(sql, playerId, now, premium),
     // Гильдия короткой строкой для мостика: полный экран — отдельным /guild.
     guild: (() => {
       const g = guildOf(sql, playerId);

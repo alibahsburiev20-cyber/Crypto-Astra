@@ -17,6 +17,13 @@ const ERRORS = {
   world_full: 'Нет свободных мест, попробуйте позже',
   internal: 'Ошибка сервера, попробуйте позже',
   server_misconfigured: 'Сервер не настроен',
+  bad_run: 'Забег не найден, начните новый',
+  run_not_found: 'Забег не найден, начните новый',
+  run_expired: 'Забег просрочен: попытка сгорела',
+  bad_trace: 'Трасса не прошла проверку: попытка сгорела',
+  too_fast: 'Слишком резкое движение: попытка сгорела',
+  short: 'Забег не дотянут до конца: попытка сгорела',
+  daily_limit: 'Попытки на сегодня кончились',
   registration_incomplete: 'Регистрация не завершилась, попробуйте войти или обратитесь в поддержку',
   turnstile_required: 'Подтвердите, что вы не робот',
   too_many_attempts: 'Слишком много попыток. Подождите и попробуйте снова',
@@ -150,6 +157,13 @@ let socialData = null;
 let guildData = null;
 let note = '';
 let clock = 0;
+// Арена: данные экрана и текущий забег. Расчёт поля приходит из общего модуля
+// /minigame-sim.js — того же, что считает сервер.
+let arenaData = null;
+let arenaRun = null;
+let arenaResult = null;
+let arenaRaf = 0;
+const arenaKeys = { left: false, right: false };
 // Разница «серверное время − часы устройства». Все таймеры считаются по серверу,
 // иначе при сбитых часах Claim и рейс выглядят недоступными.
 let serverOffset = 0;
@@ -1055,6 +1069,349 @@ function renderBonus() {
   );
 }
 
+// ── Арена: мини-игра «Астероидный залп» ─────────────────────────────────────
+// 45 секунд, корабль внизу, падают астероиды, между ними кристаллы. Сервер
+// присылает зерно, клиент рисует поле из него и отправляет обратно трассу —
+// пары «время → x». Награду считает сервер, поэтому подделать счёт нельзя.
+
+const ARENA_Y = 560;
+const ARENA_MAX_SPEED = 900;
+
+async function loadArena() {
+  const res = await authed('/minigame');
+  if (res.status === 200) arenaData = res.data;
+  else note = ERRORS[res.data?.error] || 'Не удалось загрузить арену';
+  if (view === 'arena') render();
+}
+
+function arenaTier(tier) {
+  const pct = Math.min(100, Math.round((tier.progress / tier.wins) * 100));
+  const fill = el('div', { class: 'level-bar-fill' });
+  fill.style.width = `${pct}%`;
+  return el('div', { class: `arena-tier${tier.awarded ? ' is-done' : ''}` },
+    el('div', { class: 'arena-tier-head' },
+      el('b', {}, `${tier.wins} побед`),
+      el('span', { class: 'muted' }, tier.awarded ? 'медаль получена' : `${tier.progress}/${tier.wins}`)),
+    el('div', { class: 'level-bar' }, fill),
+    el('p', { class: 'muted' }, `${tier.title} · +${tier.astra} ASTRA`));
+}
+
+function arenaHud() {
+  return el('div', { class: 'arena-hud' },
+    el('span', {}, el('b', { 'data-arena-time': '' }, '0:45')),
+    el('span', {}, 'очки: ', el('b', { 'data-arena-score': '' }, '0')),
+    el('span', {}, 'кристаллы: ', el('b', { 'data-arena-picks': '' }, '0')),
+    el('span', {}, 'пробоины: ', el('b', { 'data-arena-hits': '' }, '0')));
+}
+
+function renderArena() {
+  if (!arenaData) {
+    loadArena();
+    return el('div', { class: 'screen' }, el('p', { class: 'muted' }, 'Загружаем арену…'));
+  }
+  const a = arenaData;
+  const running = !!arenaRun;
+  return el('div', { class: 'screen' },
+    el('div', { class: 'arena-hero' },
+      el('span', { class: 'badge' }, 'Арена'),
+      el('h2', {}, 'Астероидный залп'),
+      el('p', { class: 'muted' },
+        `45 секунд, ${a.attempts.limit} попыток в сутки${a.attempts.premium ? ' (Premium +2)' : ''}. `
+        + 'Собирайте кристаллы, уходите от камней. Счёт считает сервер.'),
+      el('div', { class: 'arena-stats' },
+        el('span', {}, 'осталось попыток: ', el('b', {}, String(a.attempts.left))),
+        el('span', {}, 'побед: ', el('b', {}, String(a.wins))),
+        el('span', {}, 'лучший счёт: ', el('b', {}, String(a.best))),
+        el('span', {}, 'сегодня: ', el('b', {}, `${a.today.astra}/${a.today.astraCap} ASTRA`)))),
+
+    arenaResult ? arenaResultCard(arenaResult) : null,
+
+    el('div', { class: 'arena-stage' },
+      running ? arenaHud() : null,
+      el('canvas', {
+        class: 'arena-canvas', id: 'arena-canvas', width: '1000', height: '620',
+        'aria-label': 'Поле мини-игры: корабль уклоняется от астероидов',
+      }),
+      running
+        ? null
+        : el('div', { class: 'arena-overlay' },
+          el('button', {
+            type: 'button', class: 'cta', 'data-arena-start': '', disabled: a.attempts.left <= 0 ? '' : null,
+            onClick: arenaStart,
+          }, a.attempts.left > 0 ? 'В бой' : 'Попытки на сегодня кончились'),
+          el('p', { class: 'muted' }, a.attempts.left > 0
+            ? 'Стрелки или A/D — движение. Можно тянуть пальцем по полю.'
+            : 'Новые попытки появятся после полуночи UTC. Premium даёт +2 каждый день.')),
+      running ? el('p', { class: 'muted arena-hint' }, 'Ушли из забега — попытка сгорает. Держитесь до конца.') : null),
+
+    el('div', { class: 'panel-grid' },
+      el('div', { class: 'block' },
+        el('h3', {}, 'Задания арены'),
+        el('p', { class: 'muted' }, 'Победа — 100 очков за забег. Медали выдаются один раз, ASTRA за них не входит в суточный потолок.'),
+        ...a.tiers.map(arenaTier)),
+      el('div', { class: 'block' },
+        el('h3', {}, 'Последние забеги'),
+        a.recent.length
+          ? el('table', { class: 'arena-table' },
+            el('thead', {}, el('tr', {}, el('th', {}, 'Когда'), el('th', {}, 'Счёт'), el('th', {}, 'Итог'), el('th', {}, 'ASTRA'))),
+            el('tbody', {}, ...a.recent.map((r) => el('tr', {},
+              el('td', {}, fmtAgo(Date.now() + serverOffset - r.at)),
+              el('td', {}, String(r.score)),
+              el('td', {}, r.win ? 'победа' : `${r.picks} крист. / ${r.hits} пробоин`),
+              el('td', {}, `+${r.astra}`)))))
+          : el('p', { class: 'muted' }, 'Ещё ни одного забега. Первый — самый важный.')),
+      el('div', { class: 'block' },
+        el('h3', {}, 'Правила'),
+        el('ul', { class: 'bonus-rules' },
+          el('li', {}, 'Попытки: 5 в сутки, Premium +2.'),
+          el('li', {}, `Награда за забег: до 45 ASTRA и очки, потолок ${a.caps.astra} ASTRA в день.`),
+          el('li', {}, 'Кривая трасса (рваная скорость) — попытка сгорает без награды.'),
+          el('li', {}, 'Победы 25 / 50 / 100 дают медали и разовую награду.')))));
+}
+
+function arenaResultCard(r) {
+  if (r.error) {
+    const text = r.error === 'daily_limit' ? 'Попытки на сегодня кончились.'
+      : r.error === 'run_expired' ? 'Забег просрочен: попытка сгорела.'
+        : 'Трасса не прошла проверку: попытка сгорела.';
+    return el('div', { class: 'arena-result is-bad' }, el('b', {}, 'Не засчитано'), el('p', { class: 'muted' }, text));
+  }
+  return el('div', { class: `arena-result${r.result.win ? ' is-win' : ''}` },
+    el('b', {}, r.result.win ? 'Победа!' : 'Забег закрыт'),
+    el('p', {}, `Очки ${r.result.score} · кристаллы ${r.result.picks} · пробоины ${r.result.hits}`),
+    el('p', { class: 'muted' }, `Награда: +${r.rewards.astra} ASTRA, +${r.rewards.points} очков`
+      + (r.rewards.capped ? ' (сработал суточный потолок)' : '')),
+    ...r.awards.map((aw) => el('p', { class: 'arena-award' }, `Медаль «${aw.title}»: ${aw.wins} побед, +${aw.astra} ASTRA`)),
+    el('p', { class: 'muted' }, `Побед всего: ${r.wins}. Попыток осталось: ${r.attempts.left}.`));
+}
+
+async function arenaStart() {
+  if (arenaRun) return;
+  arenaResult = null;
+  note = '';
+  const res = await authed('/minigame/start', {
+    method: 'POST',
+    // Каждый старт — новое действие: ключ одноразовый.
+    headers: { 'Idempotency-Key': crypto.randomUUID() },
+    body: {},
+  });
+  if (res.status !== 200) {
+    if (res.status === 429) arenaResult = { error: 'daily_limit' };
+    else note = ERRORS[res.data?.error] || 'Не удалось начать забег';
+    render();
+    return;
+  }
+  const sim = await arenaSim();
+  arenaRun = {
+    runId: res.data.runId,
+    seed: res.data.seed,
+    field: sim.makeField(res.data.seed),
+    x: 500,
+    targetX: null,
+    startedAt: performance.now(),
+    // Компактная трасса: x в десятых долях пикселя, шаг 40 мс. Сервер сам
+    // восстановит время — так тело запроса влезает в лимит.
+    xs: [5000],
+    nextSampleAt: 40,
+    picks: 0,
+    hits: 0,
+    nextAsteroid: 0,
+    nextCrystal: 0,
+    finished: false,
+  };
+  render();
+}
+
+let arenaSimPromise = null;
+function arenaSim() {
+  // Тот же модуль, что и на сервере; грузим один раз.
+  if (!arenaSimPromise) arenaSimPromise = import('/minigame-sim.js');
+  return arenaSimPromise;
+}
+
+function arenaStopLoop() {
+  if (arenaRaf) cancelAnimationFrame(arenaRaf);
+  arenaRaf = 0;
+}
+
+function arenaMount() {
+  const canvas = document.getElementById('arena-canvas');
+  if (!canvas) return;
+  arenaDrawStatic(canvas);
+  if (!arenaRun || arenaRun.finished) return;
+  arenaStopLoop();
+  const step = () => {
+    if (!arenaRun || arenaRun.finished) return;
+    arenaFrame(canvas);
+    arenaRaf = requestAnimationFrame(step);
+  };
+  arenaRaf = requestAnimationFrame(step);
+}
+
+function arenaStars(seed) {
+  // Звёзды тоже из зерна: поле не «прыгает» между кадрами и перерисовками.
+  const out = [];
+  let v = (seed || 1) >>> 0;
+  for (let i = 0; i < 90; i += 1) {
+    v = (Math.imul(v, 1664525) + 1013904223) >>> 0;
+    const x = v % 1000;
+    v = (Math.imul(v, 1664525) + 1013904223) >>> 0;
+    const y = v % 620;
+    out.push({ x, y, r: ((v >>> 8) % 3) / 2 + 0.4 });
+  }
+  return out;
+}
+
+function arenaDrawStatic(canvas) {
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  const g = ctx.createLinearGradient(0, 0, 0, 620);
+  g.addColorStop(0, '#060b1c');
+  g.addColorStop(1, '#0d1a38');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 1000, 620);
+  ctx.fillStyle = 'rgba(160,200,255,0.5)';
+  for (const star of arenaStars(arenaRun ? arenaRun.seed : 7)) {
+    ctx.beginPath();
+    ctx.arc(star.x, star.y, star.r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function arenaFrame(canvas) {
+  const run = arenaRun;
+  const ctx = canvas.getContext('2d');
+  if (!ctx || !run) return;
+  const now = performance.now();
+  const t = Math.min(45_000, now - run.startedAt);
+
+  // Движение: клавиши и «тяни пальцем» уважают один и тот же предел скорости.
+  if (arenaKeys.left) run.x -= (ARENA_MAX_SPEED * 16) / 1000;
+  if (arenaKeys.right) run.x += (ARENA_MAX_SPEED * 16) / 1000;
+  if (!arenaKeys.left && !arenaKeys.right && run.targetX !== null) {
+    const diff = run.targetX - run.x;
+    const step = (ARENA_MAX_SPEED * 16) / 1000;
+    run.x += Math.max(-step, Math.min(step, diff));
+  }
+  run.x = Math.max(0, Math.min(1000, run.x));
+
+  // Пройденные события считаем локально только для HUD; итог всё равно серверный.
+  while (run.nextAsteroid < run.field.asteroids.length && run.field.asteroids[run.nextAsteroid].t <= t) {
+    const a = run.field.asteroids[run.nextAsteroid];
+    if (Math.abs(run.x - a.x) < a.r + 30) run.hits += 1;
+    run.nextAsteroid += 1;
+  }
+  while (run.nextCrystal < run.field.crystals.length && run.field.crystals[run.nextCrystal].t <= t) {
+    const c = run.field.crystals[run.nextCrystal];
+    if (Math.abs(run.x - c.x) < c.r + 30) run.picks += 1;
+    run.nextCrystal += 1;
+  }
+
+  // Ровная сетка отсчётов: сервер считает время как i * 40 мс.
+  while (run.nextSampleAt <= t) {
+    run.xs.push(Math.round(run.x * 10));
+    run.nextSampleAt += 40;
+  }
+
+  arenaDrawStatic(canvas);
+  // Астероиды.
+  for (const a of run.field.asteroids) {
+    const y = ARENA_Y - (a.t - t) * (a.speed || 0.4);
+    if (y < -80 || y > 700) continue;
+    const grad = ctx.createRadialGradient(a.x - 8, y - 8, 4, a.x, y, a.r);
+    grad.addColorStop(0, '#b9c4df');
+    grad.addColorStop(1, '#4a5674');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(a.x, y, a.r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // Кристаллы.
+  for (const c of run.field.crystals) {
+    const y = ARENA_Y - (c.t - t) * 0.42;
+    if (y < -60 || y > 700) continue;
+    ctx.save();
+    ctx.translate(c.x, y);
+    ctx.rotate(Math.PI / 4);
+    ctx.fillStyle = '#66e6ff';
+    ctx.shadowColor = '#66e6ff';
+    ctx.shadowBlur = 14;
+    ctx.fillRect(-c.r / 2, -c.r / 2, c.r, c.r);
+    ctx.restore();
+  }
+  // Корабль.
+  ctx.save();
+  ctx.translate(run.x, ARENA_Y + 20);
+  ctx.shadowColor = '#7bb2ff';
+  ctx.shadowBlur = 18;
+  ctx.fillStyle = '#cfe1ff';
+  ctx.beginPath();
+  ctx.moveTo(0, -26);
+  ctx.lineTo(22, 22);
+  ctx.lineTo(0, 12);
+  ctx.lineTo(-22, 22);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+
+  const timeEl = document.querySelector('[data-arena-time]');
+  if (timeEl) timeEl.textContent = fmtLeft(Math.max(0, 45_000 - t));
+  const score = Math.max(0, run.picks * 10 - run.hits * 20);
+  const scoreEl = document.querySelector('[data-arena-score]');
+  if (scoreEl) scoreEl.textContent = String(score);
+  const picksEl = document.querySelector('[data-arena-picks]');
+  if (picksEl) picksEl.textContent = String(run.picks);
+  const hitsEl = document.querySelector('[data-arena-hits]');
+  if (hitsEl) hitsEl.textContent = String(run.hits);
+
+  if (t >= 45_000) arenaFinish();
+}
+
+async function arenaFinish() {
+  const run = arenaRun;
+  if (!run || run.finished) return;
+  run.finished = true;
+  arenaStopLoop();
+  // Добиваем сетку до конца, чтобы последний отсчёт был на 45-й секунде.
+  while (run.xs.length <= 1125) run.xs.push(Math.round(run.x * 10));
+  const scope = `arena-run:${run.runId}`;
+  const res = await authed('/minigame/finish', {
+    method: 'POST',
+    headers: { 'Idempotency-Key': idemKey(scope) },
+    body: { runId: run.runId, stepMs: 40, xs: run.xs },
+  });
+  // Ключ нужен только для повтора при обрыве связи — после ответа он не нужен.
+  if (res.status === 200) idemDone(scope);
+  arenaResult = res.status === 200 ? res.data : { error: res.data?.error || 'bad_trace' };
+  arenaRun = null;
+  arenaData = null;
+  if (state) state = { ...state, minigame: res.data?.attempts ? { attempts: res.data.attempts, wins: res.data.wins } : state.minigame };
+  render();
+  await loadArena();
+  await loadGame();
+}
+
+// Клавиши и палец. Слушатели ставим один раз, иначе после каждого render их
+// становится всё больше и корабль едет втрое быстрее.
+window.addEventListener('keydown', (e) => {
+  if (view !== 'arena' || !arenaRun) return;
+  if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A' || e.key === 'ф' || e.key === 'Ф') { arenaKeys.left = true; e.preventDefault(); }
+  if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D' || e.key === 'в' || e.key === 'В') { arenaKeys.right = true; e.preventDefault(); }
+});
+window.addEventListener('keyup', (e) => {
+  if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A' || e.key === 'ф' || e.key === 'Ф') arenaKeys.left = false;
+  if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D' || e.key === 'в' || e.key === 'В') arenaKeys.right = false;
+});
+document.addEventListener('pointermove', (e) => {
+  if (!arenaRun) return;
+  const canvas = document.getElementById('arena-canvas');
+  if (!canvas) return;
+  const rect = canvas.getBoundingClientRect();
+  if (!rect.width) return;
+  const x = ((e.clientX - rect.left) / rect.width) * 1000;
+  if (x >= 0 && x <= 1000) arenaRun.targetX = x;
+});
+
 function renderMissions() {
   const data = socialData;
   if (!data) {
@@ -1302,9 +1659,12 @@ function render() {
               : view === 'missions' ? renderMissions()
                 : view === 'guild' ? renderGuild()
                   : view === 'bonus' ? renderBonus()
+                    : view === 'arena' ? renderArena()
             : view === 'wallet' ? renderWallet()
             : view === 'ledger' ? renderLedger() : renderBridge();
   panel.append(body);
+  // Арена живёт на canvas: цикл перевешиваем на свежий элемент после перерисовки.
+  if (view === 'arena') arenaMount();
   for (const btn of document.querySelectorAll('[data-view]')) btn.classList.toggle('active', btn.dataset.view === view);
 }
 
@@ -1409,6 +1769,7 @@ function setView(v) {
   view = v;
   note = '';
   if (v === 'bonus') loadPayAccount();
+  if (v === 'arena') { arenaResult = null; if (!arenaData) loadArena(); }
   // Рейтинг в /me не лежит: при входе в раздел подтягиваем полный отчёт.
   if (v === 'season') loadSeason();
   if (v === 'missions') loadSocial();

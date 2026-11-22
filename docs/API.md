@@ -274,3 +274,17 @@ curl -s -X POST https://<worker>/claim \
 ```
 
 `POST /market/buy` отвечает `{ lotId, resource, amount, unitPrice, gross, tax, astra }`.
+
+## Мини-игра (этап 13)
+
+| Метод | Путь | Тело | Ответ |
+| --- | --- | --- | --- |
+| GET | `/minigame` | — | `attempts`, `wins`, `best`, `tiers`, `today`, `caps`, `recent` |
+| POST | `/minigame/start` | `{}` + `Idempotency-Key` | `runId`, `seed`, `endsAt`, `runMs`, `attempts` |
+| POST | `/minigame/finish` | `{ runId, trace: [{ t, x }] }` + `Idempotency-Key` | `result`, `rewards`, `awards`, `attempts`, `wins`, `best` |
+
+`trace` — пары «время от старта, мс» и «x корабля, 0…1000», 40–4000 точек.
+Сервер проверяет монотонность времени, границы поля и предел скорости 900 px/с,
+затем сам считает попадания и сборы. Ошибки: `daily_limit` (429), `run_not_found`
+(404), `run_expired`, `bad_trace`, `too_fast`, `short` (409). Кривая трасса
+сжигает попытку. Подробности и числа — `docs/MINIGAME.md`.

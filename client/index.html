@@ -24,8 +24,8 @@
       </div>
     </div>
     <nav class="landing-nav" aria-label="Вход в игру">
-      <button type="button" class="link" data-open-auth="login">Войти</button>
-      <button type="button" class="cta cta-small" data-open-auth="register">Регистрация</button>
+      <button type="button" class="link" data-open-auth="login"><img class="btn-ico" src="/icons/ui/login.svg" alt="" width="18" height="18">Войти</button>
+      <button type="button" class="cta cta-small" data-open-auth="register"><img class="btn-ico" src="/icons/ui/register.svg" alt="" width="18" height="18">Регистрация</button>
     </nav>
   </header>
 
@@ -43,11 +43,11 @@
           платите за топливо и ремонт, крафтите компоненты, ставите модули и торгуете излишками
           с другими пилотами.</p>
         <div class="hero-actions">
-          <button type="button" class="cta" data-open-auth="register">
+          <button type="button" class="cta" data-open-auth="register"><img class="btn-ico" src="/icons/ui/register.svg" alt="" width="18" height="18">
             <img src="/icons/currency/astra.png" alt="" width="18" height="18">
             Зарегистрироваться бесплатно
           </button>
-          <button type="button" class="ghost" data-open-auth="login">У меня есть аккаунт</button>
+          <button type="button" class="ghost" data-open-auth="login"><img class="btn-ico" src="/icons/ui/login.svg" alt="" width="18" height="18">У меня есть аккаунт</button>
         </div>
         <ul class="hero-facts">
           <li>Бесплатно, без установки</li>
@@ -324,6 +324,9 @@
         <button type="button" data-view="bonus" class="side-item">
           <img src="/icons/nav/bonus.svg" alt="" width="20" height="20">Бонусы
         </button>
+        <button type="button" data-view="arena" class="side-item">
+          <img src="/icons/ui/arena.svg" alt="" width="20" height="20">Арена
+        </button>
         <button type="button" data-view="guild" class="side-item">
           <img src="/icons/nav/guild.png" alt="" width="20" height="20">Команда
         </button>
@@ -358,7 +361,7 @@
         </div>
         <div class="top-actions">
           <span id="world" class="world-pill"></span>
-          <button type="button" id="logout" class="link">Выйти</button>
+          <button type="button" id="logout" class="link"><img class="btn-ico" src="/icons/ui/logout.svg" alt="" width="18" height="18">Выйти</button>
         </div>
       </header>
       <div id="ad-slot" class="ad-slot" hidden aria-label="Реклама"></div>
@@ -367,19 +370,20 @@
            «мир заморожен» на живой странице. -->
       <div id="panel"></div>
       <nav class="dock" aria-label="Разделы">
-        <button type="button" data-view="bridge" class="active">Обзор</button>
-        <button type="button" data-view="flight">Рейс</button>
-        <button type="button" data-view="fleet">Флот</button>
-        <button type="button" data-view="craft">Крафт</button>
-        <button type="button" data-view="modules">Модули</button>
-        <button type="button" data-view="market">Рынок</button>
-        <button type="button" data-view="season">Сезон</button>
-        <button type="button" data-view="missions">Задания</button>
-        <button type="button" data-view="bonus">Бонусы</button>
-        <button type="button" data-nav="/pay.html">Магазин</button>
-        <button type="button" data-view="guild">Команда</button>
-        <button type="button" data-view="wallet">Кошелёк</button>
-        <button type="button" data-view="ledger">Журнал</button>
+        <button type="button" data-view="bridge" class="active"><img class="dock-ico" src="/icons/nav/overview.png" alt="" width="18" height="18">Обзор</button>
+        <button type="button" data-view="flight"><img class="dock-ico" src="/icons/nav/expeditions.png" alt="" width="18" height="18">Рейс</button>
+        <button type="button" data-view="fleet"><img class="dock-ico" src="/icons/nav/fleet.png" alt="" width="18" height="18">Флот</button>
+        <button type="button" data-view="craft"><img class="dock-ico" src="/icons/nav/craft.png" alt="" width="18" height="18">Крафт</button>
+        <button type="button" data-view="modules"><img class="dock-ico" src="/icons/nav/modules.png" alt="" width="18" height="18">Модули</button>
+        <button type="button" data-view="market"><img class="dock-ico" src="/icons/nav/market.png" alt="" width="18" height="18">Рынок</button>
+        <button type="button" data-view="season"><img class="dock-ico" src="/icons/nav/season.png" alt="" width="18" height="18">Сезон</button>
+        <button type="button" data-view="missions"><img class="dock-ico" src="/icons/nav/missions.png" alt="" width="18" height="18">Задания</button>
+        <button type="button" data-view="bonus"><img class="dock-ico" src="/icons/nav/bonus.svg" alt="" width="18" height="18">Бонусы</button>
+        <button type="button" data-view="arena"><img class="dock-ico" src="/icons/ui/arena.svg" alt="" width="18" height="18">Арена</button>
+        <button type="button" data-nav="/pay.html"><img class="dock-ico" src="/icons/nav/pay.svg" alt="" width="18" height="18">Магазин</button>
+        <button type="button" data-view="guild"><img class="dock-ico" src="/icons/nav/guild.png" alt="" width="18" height="18">Команда</button>
+        <button type="button" data-view="wallet"><img class="dock-ico" src="/icons/nav/wallet.png" alt="" width="18" height="18">Кошелёк</button>
+        <button type="button" data-view="ledger"><img class="dock-ico" src="/icons/nav/ledger.png" alt="" width="18" height="18">Журнал</button>
       </nav>
     </div>
   </section>

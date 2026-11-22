@@ -19,6 +19,9 @@ import { installModule } from './modules/shipModules';
 import { buyShip } from './modules/ships';
 import { buyLot, cancelLot, createLot, marketView, type CreateLotInput } from './modules/market';
 import { buyFuel, repairShip } from './modules/upkeep';
+import {
+  finishRun, minigameBrief, minigameView, startRun, type FinishResult, type StartResult,
+} from './modules/minigame';
 import { verifyLedger, type LedgerReport } from './ledger';
 import { backfillProgressLedger, backfillResourceLedger, migrateLegacyExpeditions, migratePassClaimsSeason } from './migrate';
 import { nextAlarmAt } from './scheduler';
@@ -55,9 +58,9 @@ export class World extends DurableObject<Env> {
     return this.ctx.storage.transactionSync(() => claim(this.sql, playerId, idemKey, Date.now()));
   }
 
-  async getState(playerId: string) {
+  async getState(playerId: string, premium = false) {
     const now = Date.now();
-    const state = this.ctx.storage.transactionSync(() => buildState(this.sql, playerId, now));
+    const state = this.ctx.storage.transactionSync(() => buildState(this.sql, playerId, now, premium));
     await this.arm();
     return state;
   }
@@ -106,6 +109,34 @@ export class World extends DurableObject<Env> {
     const result = this.ctx.storage.transactionSync(() => cancelLot(this.sql, playerId, idemKey, lotId, now));
     await this.arm();
     return result;
+  }
+
+  // ── Мини-игра (этап 13) ────────────────────────────────────────────────────
+  // Попытки и награды считает мир; Premium приходит флагом из маршрута, потому
+  // что подписка живёт в D1 платёжной части, а не в мире.
+  getMinigame(playerId: string, premium: boolean) {
+    const now = Date.now();
+    return this.ctx.storage.transactionSync(() => minigameView(this.sql, playerId, now, premium));
+  }
+
+  async startMinigame(playerId: string, idemKey: string, premium: boolean): Promise<StartResult> {
+    const now = Date.now();
+    const result = this.ctx.storage.transactionSync(() => startRun(this.sql, playerId, idemKey, now, premium));
+    await this.arm();
+    return result;
+  }
+
+  async finishMinigame(
+    playerId: string, idemKey: string, body: { runId: string; trace: { t: number; x: number }[] }, premium: boolean,
+  ): Promise<FinishResult> {
+    const now = Date.now();
+    const result = this.ctx.storage.transactionSync(() => finishRun(this.sql, playerId, idemKey, body, now, premium));
+    await this.arm();
+    return result;
+  }
+
+  minigameSummary(playerId: string, now: number, premium: boolean) {
+    return minigameBrief(this.sql, playerId, now, premium);
   }
 
   // ── Социальное (этап 4) ────────────────────────────────────────────────────

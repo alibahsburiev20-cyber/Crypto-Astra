@@ -95,7 +95,7 @@ export const PRODUCTS: PayProduct[] = [
     id: 'premium_30',
     kind: 'premium',
     title: 'Astra Premium · 30 дней',
-    description: 'Значок Premium у позывного, эксклюзивный корпус и второй слот Astra Pass. Без влияния на экономику и рейтинг.',
+    description: 'Значок Premium у позывного, эксклюзивный корпус, второй слот Astra Pass и +2 попытки на арене каждый день. Без влияния на экономику и рейтинг пула.',
     icon: '💎',
     cosmetic: 'premium',
     durationDays: 30,
