@@ -2,6 +2,8 @@ import type { AuthContext } from '../auth/guards';
 import type { Env } from '../env';
 import { json, readJson } from '../http/response';
 import { ApiError } from '../world/errors';
+import { premiumStatus } from '../pay/shop';
+import { RUN_MS, expandTrace } from '../shared/minigame';
 
 function world(env: Env, a: AuthContext) {
   return env.WORLD.get(env.WORLD.idFromName(a.worldId));
@@ -13,9 +15,60 @@ function idemKey(request: Request): string {
   return key;
 }
 
+/**
+ * Premium живёт в D1 платёжной части, а мир — отдельный объект. Спрашиваем здесь
+ * и передаём флагом: если платежи не настроены, игрок просто получает базовые
+ * попытки, а не 500.
+ */
+export async function isPremium(env: Env, a: AuthContext): Promise<boolean> {
+  try {
+    return (await premiumStatus(env.DB, a.userId, Date.now())).active;
+  } catch {
+    return false;
+  }
+}
+
 export async function me(env: Env, a: AuthContext): Promise<Response> {
   // server_time нужен клиенту, чтобы таймеры не зависели от часов устройства.
-  return json({ world_id: a.worldId, server_time: Date.now(), ...(await world(env, a).getState(a.userId)) });
+  const premium = await isPremium(env, a);
+  return json({ world_id: a.worldId, server_time: Date.now(), premium, ...(await world(env, a).getState(a.userId, premium)) });
+}
+
+// ── Мини-игра (этап 13) ──────────────────────────────────────────────────────
+export async function minigame(env: Env, a: AuthContext): Promise<Response> {
+  return json(await world(env, a).getMinigame(a.userId, await isPremium(env, a)));
+}
+
+export async function minigameStart(request: Request, env: Env, a: AuthContext): Promise<Response> {
+  const key = idemKey(request);
+  const r = await world(env, a).startMinigame(a.userId, key, await isPremium(env, a));
+  if (!r.runId) return json({ error: 'daily_limit', attempts: r.attempts }, 429);
+  return json({ ...r, runMs: RUN_MS });
+}
+
+// Трассу проверяет мир: маршрут только отсекает мусор до транзакции.
+export async function minigameFinish(request: Request, env: Env, a: AuthContext): Promise<Response> {
+  const body = await readJson(request);
+  const runId = typeof body.runId === 'string' ? body.runId : '';
+  if (!runId) throw new ApiError(400, 'bad_run');
+  // Два формата: полная трасса (тесты, отладка) и компактная `xs` + шаг, которую
+  // шлёт браузер. Полная — тысяча объектов, она не влезает в лимит тела 16 КБ.
+  let trace: { t: number; x: number }[] = [];
+  if (Array.isArray(body.trace) && body.trace.length) {
+    trace = body.trace.slice(0, 4000).map((p) => ({
+      t: Number((p as { t?: unknown })?.t),
+      x: Number((p as { x?: unknown })?.x),
+    }));
+  } else if (Array.isArray(body.xs) && body.xs.length) {
+    trace = expandTrace(body.xs, Number(body.stepMs));
+  }
+  if (!trace.length) throw new ApiError(400, 'bad_run');
+  const result = await world(env, a).finishMinigame(a.userId, idemKey(request), { runId, trace }, await isPremium(env, a));
+  if (!result.ok) {
+    const status = result.error === 'run_not_found' ? 404 : 409;
+    return json(result, status);
+  }
+  return json(result);
 }
 
 // limit приходит строкой. Битое значение раньше уходило в SQL как NaN и на D1 давало 500.

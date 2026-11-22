@@ -77,6 +77,25 @@ export const WORLD_SCHEMA: string[] = [
      id TEXT PRIMARY KEY, lot_id TEXT NOT NULL, seller_id TEXT NOT NULL, buyer_id TEXT NOT NULL,
      resource TEXT NOT NULL, amount INTEGER NOT NULL, unit_price INTEGER NOT NULL,
      gross INTEGER NOT NULL, tax INTEGER NOT NULL, at INTEGER NOT NULL)`,
+  // Мини-игра (этап 13). Забег живёт от старта до приёма трассы; если его не
+  // прислали вовремя — статус expired, попытка не возвращается.
+  `CREATE TABLE IF NOT EXISTS minigame_runs (
+     id TEXT PRIMARY KEY, player_id TEXT NOT NULL REFERENCES players (id),
+     seed INTEGER NOT NULL, started_at INTEGER NOT NULL, ends_at INTEGER NOT NULL,
+     status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'finished', 'expired')),
+     score INTEGER NOT NULL DEFAULT 0, hits INTEGER NOT NULL DEFAULT 0,
+     picks INTEGER NOT NULL DEFAULT 0, win INTEGER NOT NULL DEFAULT 0,
+     astra INTEGER NOT NULL DEFAULT 0)`,
+  `CREATE INDEX IF NOT EXISTS idx_minigame_runs_player ON minigame_runs (player_id, status, started_at)`,
+  `CREATE TABLE IF NOT EXISTS minigame_daily (
+     player_id TEXT NOT NULL, day INTEGER NOT NULL,
+     runs INTEGER NOT NULL DEFAULT 0, wins INTEGER NOT NULL DEFAULT 0,
+     astra INTEGER NOT NULL DEFAULT 0, points INTEGER NOT NULL DEFAULT 0,
+     PRIMARY KEY (player_id, day))`,
+  // Медали «победи 25/50/100 раз» — раз на игрока, награда выдаётся один раз.
+  `CREATE TABLE IF NOT EXISTS minigame_awards (
+     player_id TEXT NOT NULL, award TEXT NOT NULL, wins INTEGER NOT NULL, at INTEGER NOT NULL,
+     PRIMARY KEY (player_id, award))`,
   `CREATE INDEX IF NOT EXISTS idx_market_sales ON market_sales (resource, at)`,
   `CREATE TABLE IF NOT EXISTS market_flags (
      id TEXT PRIMARY KEY, kind TEXT NOT NULL, seller_id TEXT NOT NULL, buyer_id TEXT NOT NULL,
