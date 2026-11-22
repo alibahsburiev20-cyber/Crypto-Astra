@@ -972,3 +972,31 @@ a.side-item { text-decoration: none; }
 
 .arena-table { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
 .arena-table th, .arena-table td { padding: 6px 8px; text-align: left; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
+
+/* --- Арт: всё PNG, без SVG ------------------------------------------------ */
+/* Правило проекта: игрок видит только PNG-спрайты. Фоны — файлы, а не градиенты
+   в CSS: их можно пересобрать (bash scripts/build-sprites.sh) и закешировать. */
+
+body {
+  background-image: url('/sprites/bg/space.png');
+  background-size: cover;
+  background-position: center;
+  background-attachment: fixed;
+}
+
+.hero-art {
+  background-image: url('/sprites/bg/hero.png');
+  background-size: cover;
+  background-position: center;
+}
+
+.sidebar {
+  background-image: linear-gradient(180deg, rgba(8, 14, 28, 0.92), rgba(6, 11, 22, 0.96)), url('/sprites/bg/arena.png');
+  background-size: cover;
+  background-position: center;
+}
+
+.arena-canvas {
+  background-image: url('/sprites/bg/arena.png');
+  background-size: cover;
+}

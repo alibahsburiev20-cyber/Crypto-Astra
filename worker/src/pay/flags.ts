@@ -60,6 +60,21 @@ export function payFlags(env: Env): PayFlags {
 }
 
 /**
+ * Готов ли контур к выдаче кошельков. Адрес игрока выводит Signer: без его
+ * биндинга и токена оплата включается, но купить нечего — деньги просто некуда
+ * прислать. Флаг публичный: клиент честно говорит «кошелёк ещё не выдан».
+ */
+export function signerReady(env: Env): boolean {
+  return Boolean(env.SIGNER) && String(env.SIGNER_TOKEN ?? '').trim().length > 0;
+}
+
+/** Готовность денежного контура словами — для клиента и статуса. */
+export function walletState(env: Env, flags: PayFlags): 'off' | 'signer_required' | 'ready' {
+  if (!flags.payments) return 'off';
+  return signerReady(env) ? 'ready' : 'signer_required';
+}
+
+/**
  * Публичное представление флагов для `/pay/status.json`. Ничего секретного:
  * адреса, ключи и суммы сюда не попадают.
  */

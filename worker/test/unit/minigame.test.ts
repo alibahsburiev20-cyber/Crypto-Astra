@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DAY_MS } from '../../src/shared/constants';
 import {
-  MAX_SPEED, RUN_MS, WIN_SCORE, evaluate, makeField, rewardFor, validateTrace, type TracePoint,
+  MAX_SPEED, RUN_MS, WIN_SCORE, evaluate, makeField, rewardFor, sanitizeTrace, validateTrace, type TracePoint,
 } from '../../src/shared/minigame';
 import { applyDelta, getBalance } from '../../src/world/balances';
 import { createPlayer } from '../../src/world/modules/players';
@@ -151,11 +151,12 @@ describe('мини-игра: попытки и награды в мире', () =
     if (!late.ok) expect(late.error).toBe('run_expired');
   });
 
-  it('кривая трасса сжигает попытку и не платит', () => {
+  it('мусорная трасса не платит, но попытку не возвращает', () => {
     const { sql, tx } = world();
     const start = tx(() => startRun(sql, 'p1', 'run-3', T0, false));
     const before = getBalance(sql, 'p1', 'astra');
-    const res = tx(() => finishRun(sql, 'p1', 'fin-3', { runId: start.runId, trace: [{ t: 0, x: 0 }, { t: 10, x: 900 }] }, T0 + 1000, false));
+    const junk = [{ t: Number.NaN, x: 0 }, { t: 10, x: Number.POSITIVE_INFINITY }] as unknown as TracePoint[];
+    const res = tx(() => finishRun(sql, 'p1', 'fin-3', { runId: start.runId, trace: junk }, T0 + 1000, false));
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.error).toBe('bad_trace');
     expect(getBalance(sql, 'p1', 'astra')).toBe(before);
@@ -222,5 +223,64 @@ describe('мини-игра: попытки и награды в мире', () =
     tx(() => finishRun(sql, 'p1', 'fin-8', { runId: start.runId, trace: steady() }, T0 + RUN_MS, false));
     const flow = sql.exec(`SELECT COALESCE(SUM(delta), 0) AS s FROM ledger WHERE asset = 'astra'`).toArray()[0];
     expect(Number(flow.s)).toBe(getBalance(sql, 'p1', 'astra'));
+  });
+});
+
+describe('мини-игра: сервер принимает «живую», а не идеальную трассу', () => {
+  it('рывок на 700 px чинится зажимом скорости, а не отказом', () => {
+    const jitter: TracePoint[] = [];
+    for (let t = 0; t <= RUN_MS; t += 40) jitter.push({ t, x: 500 });
+    jitter[300] = { t: jitter[300].t, x: 1200 };
+    const fixed = sanitizeTrace(jitter);
+    expect(validateTrace(fixed)).toBe(null);
+    expect(evaluate(42, fixed).ok).toBe(true);
+
+    // Порванная запись (вкладка ушла в фон) продлевается до конца забега.
+    const cut = jitter.slice(0, 200);
+    const padded = sanitizeTrace(cut);
+    expect(padded[padded.length - 1].t).toBe(RUN_MS);
+    expect(evaluate(42, padded).ok).toBe(true);
+  });
+
+  it('старт не с нуля сдвигается, координаты зажимаются в поле', () => {
+    const late = steady(500).map((p) => ({ t: p.t + 1800, x: p.x }));
+    const fixed = sanitizeTrace(late);
+    expect(fixed[0].t).toBe(0);
+    const wild = sanitizeTrace([{ t: 0, x: -50 }, { t: 100, x: 5000 }, { t: 45_000, x: 400 }]);
+    expect(wild.every((p) => p.x >= 0 && p.x <= 1000)).toBe(true);
+    expect(validateTrace(wild)).toBe(null);
+  });
+
+  it('забег «как у живого игрока» (60 fps + джиттер) засчитывается', () => {
+    const seed = 5;
+    const field = makeField(seed);
+    const points: TracePoint[] = [];
+    let t = 0;
+    let x = 500;
+    let ci = 0;
+    // Кадры по 12–34 мс, отсчёт каждые ~40 мс: ровно то, что делает браузер.
+    let frame = 0;
+    while (t <= RUN_MS) {
+      const dt = 12 + ((frame * 7919) % 23);
+      frame += 1;
+      t += dt;
+      while (ci < field.crystals.length && field.crystals[ci].t <= t) ci += 1;
+      const target = ci < field.crystals.length ? field.crystals[ci].x : x;
+      const stepMax = (MAX_SPEED * dt) / 1000;
+      x += Math.max(-stepMax, Math.min(stepMax, target - x));
+      if (frame % 2 === 0) points.push({ t: Math.round(t), x: Math.round(x * 10) / 10 });
+    }
+    const result = evaluate(seed, sanitizeTrace(points));
+    expect(result.ok).toBe(true);
+    expect(result.picks).toBeGreaterThan(10);
+  });
+
+  it('забег с рывком всё равно закрывается в мире и не теряет попытку зря', () => {
+    const { sql, tx } = world();
+    const start = tx(() => startRun(sql, 'p1', 'run-9', T0, false));
+    const trace = steady(500);
+    trace[100] = { t: trace[100].t, x: 1000 };
+    const res = tx(() => finishRun(sql, 'p1', 'fin-9', { runId: start.runId, trace }, T0 + RUN_MS, false));
+    expect(res.ok).toBe(true);
   });
 });
