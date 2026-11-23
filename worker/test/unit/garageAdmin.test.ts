@@ -1,4 +1,6 @@
 import { readFileSync } from 'node:fs';
+import type { Env } from '../../src/env';
+import { requireAdmin } from '../../src/http/admin';
 import { describe, expect, it } from 'vitest';
 import { DAY_MS } from '../../src/shared/constants';
 import { RUN_MS, makeField, MAX_SPEED } from '../../src/shared/minigame';
@@ -183,6 +185,35 @@ describe('арена: лидерборд и недельная цель', () => 
   });
 });
 
+describe('админка: доступ по токену и почте', () => {
+  const req = (headers: Record<string, string> = {}) =>
+    new Request('https://example.test/admin/world?world=w1', { headers });
+  const env = (vars: Record<string, string>) => vars as unknown as Env;
+
+  it('без ADMIN_TOKEN админка выключена', () => {
+    expect(() => requireAdmin(req({ 'X-Admin-Token': 'x' }), env({}))).toThrow(/admin_disabled/);
+  });
+
+  it('пустой и неверный токен отбиваются', () => {
+    expect(() => requireAdmin(req(), env({ ADMIN_TOKEN: 'secret-token' }))).toThrow(/admin_token_required/);
+    expect(() => requireAdmin(req({ 'X-Admin-Token': 'wrong' }), env({ ADMIN_TOKEN: 'secret-token' }))).toThrow(/admin_forbidden/);
+    expect(() => requireAdmin(req({ 'X-Admin-Token': 'secret-token' }), env({ ADMIN_TOKEN: 'secret-token' }))).not.toThrow();
+  });
+
+  it('если задан ADMIN_EMAIL, почта обязательна и сверяется без учёта регистра', () => {
+    const e = env({ ADMIN_TOKEN: 'secret-token', ADMIN_EMAIL: 'alibahsburiev20@gmail.com' });
+    expect(() => requireAdmin(req({ 'X-Admin-Token': 'secret-token' }), e)).toThrow(/admin_email_forbidden/);
+    expect(() => requireAdmin(req({ 'X-Admin-Token': 'secret-token', 'X-Admin-Email': 'other@example.com' }), e)).toThrow(/admin_email_forbidden/);
+    expect(() => requireAdmin(
+      req({ 'X-Admin-Token': 'secret-token', 'X-Admin-Email': 'Alibahsburiev20@Gmail.com' }), e,
+    )).not.toThrow();
+  });
+
+  it('без ADMIN_EMAIL почта не требуется', () => {
+    expect(() => requireAdmin(req({ 'X-Admin-Token': 'secret-token' }), env({ ADMIN_TOKEN: 'secret-token' }))).not.toThrow();
+  });
+});
+
 describe('админка: страница отдаётся клиентом', () => {
   const root = new URL('../../../', import.meta.url);
   const read = (path: string) => readFileSync(new URL(path, root), 'utf8');
@@ -192,10 +223,13 @@ describe('админка: страница отдаётся клиентом', (
     const js = read('client/admin.js');
     expect(html).toContain('src="/admin.js"');
     expect(html).toContain('X-Admin-Token');
+    expect(html).toContain('X-Admin-Email');
+    expect(html).toContain('id="email"');
     expect(html.includes('.svg')).toBe(false);
     expect(html).toContain('noindex');
     expect(js).toContain('/admin/world/freeze');
     expect(js).toContain('/admin/world/grant');
     expect(js).toContain('sessionStorage');
+    expect(js).toContain("'X-Admin-Email': email()");
   });
 });
