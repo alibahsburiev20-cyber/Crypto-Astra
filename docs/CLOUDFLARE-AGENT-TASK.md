@@ -100,6 +100,46 @@ npx wrangler whoami               # должно показать аккаунт
 
 ---
 
+## 1a. Если нет wrangler или компьютера
+
+Не у всех исполнителей есть терминал с `wrangler login`: колбэк входа уходит на
+`localhost`, а токен в окружении есть не всегда. Это не повод останавливаться —
+есть три равноправных пути, и все три заканчиваются одинаковым результатом.
+
+**Путь A. Дашборд + Git (нужен только телефон).** Подходит владельцу без
+компьютера:
+
+1. Workers & Pages → Create → *Import a repository* → репозиторий Crypto-Astra,
+   имя проекта `astra-pay-signer`, **корень репозитория** (не `signer/`: воркер
+   импортирует код из `worker/src`), build command `npm ci`,
+   deploy command `npx wrangler deploy --config signer/wrangler.toml`.
+2. Settings → Variables and Secrets: `SIGNER_TOKEN`, `SIGNER_SEED`,
+   `SIGNER_PRIVATE_KEY` — как Secret (Encrypt).
+3. Основной Worker `crypto-astra` → Settings → Variables and Secrets: добавить
+   `SIGNER_TOKEN` (тот же) и `PAY_HOT_ADDRESS`.
+4. Сказать разработчику, что Signer создан: он включает `[[services]]` в
+   `wrangler.toml`, и Workers Builds пересобирает основной Worker.
+
+**Путь B. API вместо wrangler.** Разрешён и не считается обходом: wrangler —
+это обёртка над теми же вызовами. Эквиваленты:
+
+| Шаг | wrangler | API |
+|---|---|---|
+| задеплоить воркер | `wrangler deploy` | `PUT /accounts/{id}/workers/scripts/{name}` (multipart: metadata + модуль) |
+| секрет | `wrangler secret put X` | `PUT /accounts/{id}/workers/scripts/{name}/secrets` |
+| запрос к D1 | `wrangler d1 execute` | `POST /accounts/{id}/d1/database/{db}/query` |
+| миграции | `wrangler d1 migrations apply` | выполнить SQL файла, затем вставить строку с **точным** именем файла (`0006_pool.sql`, `0007_astra_pay.sql`) в `d1_migrations` |
+
+Ограничения пути B: нет готового бандла — собери его заранее
+(`npx wrangler deploy --dry-run --outdir dist`); `d1_migrations` заполняется
+только точными именами существующих файлов, без «своих» версий; удалять,
+пересоздавать таблицы и править данные вместо миграций нельзя.
+
+**Путь C. Любая машина с терминалом**: `npx wrangler login`, дальше как в T1–T10.
+
+Если ни один путь недоступен — остановиться и сказать об этом прямо, а не
+изобретать четвёртый.
+
 ## 2. Префлайт (10 минут, ничего не меняет)
 
 ```bash

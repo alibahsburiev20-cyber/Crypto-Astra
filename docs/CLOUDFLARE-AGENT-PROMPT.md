@@ -52,8 +52,13 @@ D1: astra-global (прод), astra-preview (превью). Сеть: mainnet, US
                                     # D1:Edit, Observability:Read, Account Settings:Read
   export CLOUDFLARE_ACCOUNT_ID=...
   npx wrangler whoami
-Если у тебя нет терминала или wrangler не ставится — СРАЗУ скажи об этом и
-остановись: шаги 1, 3, 9 требуют wrangler, имитировать их через API запрещено.
+Если wrangler не залогинен (нет CLOUDFLARE_API_TOKEN, `wrangler login` не
+проходит из-за localhost-колбэка) — это ожидаемо, не тупик. Работай по пути B
+из docs/CLOUDFLARE-AGENT-TASK.md, раздел «1a. Если нет wrangler»: API даёт те же
+операции (деплой воркера, секреты, запросы к D1). Запрещено не API, а обход
+процедуры: руками пересоздавать таблицы и писать в d1_migrations что-то кроме
+точных имён существующих файлов. Если доступен только дашборд без git — скажи,
+владелец поднимет Signer из дашборда (путь A), а ты продолжишь с шага 4.
 
 ШАГ 1. Миграции D1
   npx wrangler d1 execute DB --remote --command "SELECT COUNT(*) AS tables FROM sqlite_master WHERE type='table'"
