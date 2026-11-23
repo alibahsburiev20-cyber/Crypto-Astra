@@ -225,6 +225,7 @@ async function load() {
       : data.error === 'admin_forbidden' ? 'Токен не совпал с ADMIN_TOKEN.'
         : data.error === 'admin_email_forbidden' ? 'Эта почта не привязана: нужен email из секрета ADMIN_EMAIL.'
           : data.error === 'admin_token_required' ? 'Введите токен.'
+            : data.error === 'too_many_attempts' ? 'Слишком много неверных попыток с этого адреса. Подождите 15 минут — блокировка снимется сама.'
             : data.error === 'bad_world' ? 'Мир пишется латиницей: w1.'
               : `Отказ: ${data.error || status}.`;
     setText('#status', reason);

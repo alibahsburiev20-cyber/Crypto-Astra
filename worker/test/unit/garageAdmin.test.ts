@@ -191,31 +191,33 @@ describe('арена: лидерборд и недельная цель', () => 
 });
 
 describe('админка: доступ по токену и почте', () => {
+  // Базы здесь нет намеренно: проверка токена обязана работать и без D1.
+  // Счётчик блокировок живёт отдельно (worker/test/unit/adminGuard.test.ts).
   const req = (headers: Record<string, string> = {}) =>
     new Request('https://example.test/admin/world?world=w1', { headers });
   const env = (vars: Record<string, string>) => vars as unknown as Env;
 
-  it('без ADMIN_TOKEN админка выключена', () => {
-    expect(() => requireAdmin(req({ 'X-Admin-Token': 'x' }), env({}))).toThrow(/admin_disabled/);
+  it('без ADMIN_TOKEN админка выключена', async () => {
+    await expect(requireAdmin(req({ 'X-Admin-Token': 'x' }), env({}))).rejects.toThrow(/admin_disabled/);
   });
 
-  it('пустой и неверный токен отбиваются', () => {
-    expect(() => requireAdmin(req(), env({ ADMIN_TOKEN: 'secret-token' }))).toThrow(/admin_token_required/);
-    expect(() => requireAdmin(req({ 'X-Admin-Token': 'wrong' }), env({ ADMIN_TOKEN: 'secret-token' }))).toThrow(/admin_forbidden/);
-    expect(() => requireAdmin(req({ 'X-Admin-Token': 'secret-token' }), env({ ADMIN_TOKEN: 'secret-token' }))).not.toThrow();
+  it('пустой и неверный токен отбиваются', async () => {
+    await expect(requireAdmin(req(), env({ ADMIN_TOKEN: 'secret-token' }))).rejects.toThrow(/admin_token_required/);
+    await expect(requireAdmin(req({ 'X-Admin-Token': 'wrong' }), env({ ADMIN_TOKEN: 'secret-token' }))).rejects.toThrow(/admin_forbidden/);
+    await expect(requireAdmin(req({ 'X-Admin-Token': 'secret-token' }), env({ ADMIN_TOKEN: 'secret-token' }))).resolves.toBeUndefined();
   });
 
-  it('если задан ADMIN_EMAIL, почта обязательна и сверяется без учёта регистра', () => {
+  it('если задан ADMIN_EMAIL, почта обязательна и сверяется без учёта регистра', async () => {
     const e = env({ ADMIN_TOKEN: 'secret-token', ADMIN_EMAIL: 'alibahsburiev20@gmail.com' });
-    expect(() => requireAdmin(req({ 'X-Admin-Token': 'secret-token' }), e)).toThrow(/admin_email_forbidden/);
-    expect(() => requireAdmin(req({ 'X-Admin-Token': 'secret-token', 'X-Admin-Email': 'other@example.com' }), e)).toThrow(/admin_email_forbidden/);
-    expect(() => requireAdmin(
+    await expect(requireAdmin(req({ 'X-Admin-Token': 'secret-token' }), e)).rejects.toThrow(/admin_email_forbidden/);
+    await expect(requireAdmin(req({ 'X-Admin-Token': 'secret-token', 'X-Admin-Email': 'other@example.com' }), e)).rejects.toThrow(/admin_email_forbidden/);
+    await expect(requireAdmin(
       req({ 'X-Admin-Token': 'secret-token', 'X-Admin-Email': 'Alibahsburiev20@Gmail.com' }), e,
-    )).not.toThrow();
+    )).resolves.toBeUndefined();
   });
 
-  it('без ADMIN_EMAIL почта не требуется', () => {
-    expect(() => requireAdmin(req({ 'X-Admin-Token': 'secret-token' }), env({ ADMIN_TOKEN: 'secret-token' }))).not.toThrow();
+  it('без ADMIN_EMAIL почта не требуется', async () => {
+    await expect(requireAdmin(req({ 'X-Admin-Token': 'secret-token' }), env({ ADMIN_TOKEN: 'secret-token' }))).resolves.toBeUndefined();
   });
 });
 

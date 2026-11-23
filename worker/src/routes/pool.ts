@@ -33,14 +33,14 @@ export async function poolPublic(env: Env): Promise<Response> {
 }
 
 export async function adminPool(request: Request, env: Env): Promise<Response> {
-  requireAdmin(request, env);
+  await requireAdmin(request, env);
   if (!(await ensurePoolSchema(env.DB))) throw new ApiError(503, 'pool_unavailable');
   const [entries, totals] = await Promise.all([poolAll(env.DB, 100), poolTotals(env.DB)]);
   return json({ ok: true, updatedAt: Date.now(), totals, entries });
 }
 
 export async function adminPoolEntry(request: Request, env: Env): Promise<Response> {
-  requireAdmin(request, env);
+  await requireAdmin(request, env);
   if (!(await ensurePoolSchema(env.DB))) throw new ApiError(503, 'pool_unavailable');
   const input = parsePoolEntry(await readJson(request));
   const now = Date.now();
