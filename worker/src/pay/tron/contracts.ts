@@ -12,6 +12,14 @@ export const USDT_MAINNET = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
 /** Тестовый USDT в сети Nile. */
 export const USDT_NILE = 'TXLAQ63Xg1NAzckPwKHvzw7CSEmLMEqcdj';
 
+/** TronGrid по сетям. Без этого монитор на nile стучался бы в mainnet и не видел ничего. */
+export const TRON_API_MAINNET = 'https://api.trongrid.io';
+export const TRON_API_NILE = 'https://nile.trongrid.io';
+
+export function tronApiBase(network: PayNetwork): string {
+  return network === 'mainnet' ? TRON_API_MAINNET : TRON_API_NILE;
+}
+
 export function defaultContract(network: PayNetwork): string {
   return network === 'mainnet' ? USDT_MAINNET : USDT_NILE;
 }
