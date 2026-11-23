@@ -24,7 +24,8 @@
     "ads-forecast": "tsx scripts/ads-forecast.ts",
     "pay:loadtest": "tsx scripts/pay-loadtest.ts",
     "health": "tsx scripts/health-check.ts",
-    "restore:drill": "bash scripts/restore-drill.sh"
+    "restore:drill": "bash scripts/restore-drill.sh",
+    "pay:hot-address": "tsx scripts/hot-address.ts"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261110.1",
