@@ -53,6 +53,8 @@
 | Документы | черновики Impressum / Datenschutz / AGB / Widerruf на немецком | `client/legal.html` — нужна подпись юриста |
 | Доступность | фокус, reduced-motion, мобильные таблицы, переключатель языка на витрине | `client/styles.css`, `client/i18n.js` |
 
+| Передача дел | пошаговое задание для агента/подрядчика с доступом к Cloudflare | `docs/CLOUDFLARE-AGENT-TASK.md` |
+
 | Блокер | Что нужно | Кто может |
 | --- | --- | --- |
 | Покупки USDT | Worker `astra-pay-signer`, 3 секрета, `[[services]]` | владелец Cloudflare-аккаунта, см. `docs/PAY-SIGNER.md` |
