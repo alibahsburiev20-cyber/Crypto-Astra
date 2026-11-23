@@ -245,7 +245,7 @@ function payoutStatus(code: string): number {
 // --- Админка платежей (этап 11) ----------------------------------------------
 
 export async function adminPay(request: Request, env: Env): Promise<Response> {
-  requireAdmin(request, env);
+  await requireAdmin(request, env);
   if (!(await ensurePaySchema(env.DB))) throw new ApiError(503, 'pay_unavailable');
   const now = Date.now();
   const [report, queue] = await Promise.all([reconcile(env.DB, now), withdrawalQueue(env.DB, 50)]);
@@ -272,7 +272,7 @@ const ACTIONS: Record<string, (db: D1Database, id: string, body: Record<string, 
 };
 
 export async function adminPayWithdrawal(request: Request, env: Env): Promise<Response> {
-  requireAdmin(request, env);
+  await requireAdmin(request, env);
   if (!(await ensurePaySchema(env.DB))) throw new ApiError(503, 'pay_unavailable');
   const body = await readJsonObject(request);
   const id = String(body.id ?? '');
@@ -289,7 +289,7 @@ export async function adminPayWithdrawal(request: Request, env: Env): Promise<Re
 }
 
 export async function adminPayStop(request: Request, env: Env): Promise<Response> {
-  requireAdmin(request, env);
+  await requireAdmin(request, env);
   if (!(await ensurePaySchema(env.DB))) throw new ApiError(503, 'pay_unavailable');
   const body = await readJsonObject(request);
   const stop = body.stop !== false;
@@ -310,7 +310,7 @@ export async function adminPayStop(request: Request, env: Env): Promise<Response
  * чем «будто отправили».
  */
 export async function adminPaySend(request: Request, env: Env): Promise<Response> {
-  requireAdmin(request, env);
+  await requireAdmin(request, env);
   if (!(await ensurePaySchema(env.DB))) throw new ApiError(503, 'pay_unavailable');
 
   const body = await readJsonObject(request);

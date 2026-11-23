@@ -18,13 +18,13 @@ function worldOf(env: Env, url: URL) {
 }
 
 export async function adminWorld(request: Request, env: Env): Promise<Response> {
-  requireAdmin(request, env);
+  await requireAdmin(request, env);
   const url = new URL(request.url);
   return json({ ok: true, world: worldId(url), ...(await worldOf(env, url).adminWorld()) });
 }
 
 export async function adminFreeze(request: Request, env: Env): Promise<Response> {
-  requireAdmin(request, env);
+  await requireAdmin(request, env);
   const url = new URL(request.url);
   const body = await readJson(request);
   if (typeof body.frozen !== 'boolean') throw new ApiError(400, 'bad_request');
@@ -33,7 +33,7 @@ export async function adminFreeze(request: Request, env: Env): Promise<Response>
 }
 
 export async function adminGrant(request: Request, env: Env): Promise<Response> {
-  requireAdmin(request, env);
+  await requireAdmin(request, env);
   const url = new URL(request.url);
   const body = await readJson(request);
   const playerId = typeof body.playerId === 'string' ? body.playerId : '';

@@ -9,8 +9,14 @@
 **База:** `main`, коммит `89d701b` (или новее). Все команды — из корня репозитория.
 **Что уже работает в проде:** игра, этап 17 (позывные/косметика), Astra Pay
 (флаги приёма и покупок `on`), админка (мир, пул, деньги), мониторинг и health.
-**Чего не хватает:** Signer и его секреты, домен, Cloudflare Access перед
-`/admin`, тестовая покупка 1 USDT, продовый замер нагрузки, 7 дней сверки.
+**Чего не хватает:** Signer и его секреты, тестовая покупка 1 USDT, продовый
+замер нагрузки, 7 дней сверки.
+
+**Что НЕ нужно покупать:** домен. Работаем на бесплатном
+`https://crypto-astra.cryptoastra.workers.dev`. Cloudflare Access на этом адресе
+недоступен — админку защищают `ADMIN_TOKEN`, проверка `ADMIN_EMAIL` и блокировка
+подбора по IP (10 ошибок → 15 минут). Домен и Access — необязательный апгрейд
+на будущее, отдельной задачей и только с деньгами владельца.
 
 ---
 
@@ -31,7 +37,9 @@ T1–T10 по порядку. Это продовая система, в кот�
 
 Жёсткие правила:
 1) Не включай PAYOUTS_ENABLED, SWEEP_ENABLED, POOL_ENABLED — это решение владельца.
-2) Никаких трат (домен, TRX/USDT, платные тарифы) без моего письменного «да».
+2) Никаких трат: домен не покупаем, платные тарифы не подключаем. Денег нет.
+   Работаем на бесплатном *.workers.dev. Единственное исключение — переводы
+   TRX/USDT на горячий кошелёк, и только после моего «да».
 3) Секреты не попадают в git, чат, логи и скриншоты.
 4) SIGNER_SEED создаётся один раз и навсегда: сначала две бумажные копии, потом деплой.
 5) После каждого шага выполняй проверку из документа. Если проверка не прошла —
@@ -46,8 +54,9 @@ T1–T10 по порядку. Это продовая система, в кот�
 1. **Не включать выплаты, консолидацию и пул.** `PAYOUTS_ENABLED`,
    `SWEEP_ENABLED`, `POOL_ENABLED` остаются `"off"`. Это решение владельца, а не
    техническая настройка. Включение = прямая финансовая ошибка.
-2. **Никаких трат без письменного «да» владельца.** Покупка домена, пополнение
-   горячего кошелька TRX/USDT, платные тарифы Cloudflare — только после согласия.
+2. **Никаких трат без письменного «да» владельца.** Домен не покупать, платные
+   тарифы не включать: работаем на бесплатном `*.workers.dev`. Пополнение
+   горячего кошелька TRX/USDT — только после согласия.
 3. **Секреты не попадают в git, чат, логи, скриншоты и issue.** Только
    `wrangler secret put` или Dashboard → Encrypt. Не печатать значения в выводе
    команд (см. `npm run pay:hot-address`: он выводит адрес, а не ключ).
@@ -71,9 +80,12 @@ T1–T10 по порядку. Это продовая система, в кот�
 | Account → Workers Scripts: Edit | деплой `crypto-astra` и `astra-pay-signer` |
 | Account → D1: Edit | миграции и экспорт дампа |
 | Account → Workers Tail / Observability: Read | логи при разборе |
-| Zone → DNS: Edit, Zone: Edit | домен и SSL |
-| Account → Access: Apps and Policies: Edit | защита `/admin` |
+| Zone → DNS: Edit, Zone: Edit | **необязательно**: только если владелец решит купить домен |
+| Account → Access: Apps and Policies: Edit | **необязательно**: только вместе с доменом |
 | Account → Account Settings: Read | `wrangler whoami` |
+
+Обязательный минимум — первые три строки и Account Settings. Без домена всё
+работает: админку защищают токен, почта и блокировка подбора.
 
 **Аккаунт:** ID аккаунта Cloudflare (правый верхний угол дашборда).
 **GitHub:** доступ к репозиторию на чтение (правки не нужны, кроме отчёта).
@@ -96,6 +108,13 @@ npm ci
 npm run check                     # 49 файлов, 437 тестов, tsc — должно быть чисто
 node scripts/embed-client.mjs && git diff --exit-code -- worker/src/static/site.ts
 npm run health -- --base https://crypto-astra.cryptoastra.workers.dev
+```
+
+Дальше в командах используются переменные (экспортируйте их один раз):
+
+```bash
+BASE=https://crypto-astra.cryptoastra.workers.dev
+ADMIN_TOKEN=<значение секрета>
 ```
 
 Ожидаемо от `health`: `build=2026-11-17.2`, `schema=ready`, `tables=14`,
@@ -218,38 +237,49 @@ curl -s -H "Authorization: Bearer $TOKEN" https://<адрес>/pay/address.json
 **Откат:** убрать `[[services]]`, `npx wrangler deploy` — основной Worker снова
 отвечает `signer_required`, деньги не двигаются.
 
-### T4. Домен и HTTPS
+### T4. Админка на бесплатном домене (без Access)
 
-1. Купить/подключить домен (после согласия владельца), добавить зону в Cloudflare,
-   делегировать NS у регистратора.
-2. Worker → Settings → Domains & Routes → Add → Custom domain
-   (`astra.example.com`), дождаться статуса Active.
-3. SSL/TLS → Overview → **Full (strict)**; Always Use HTTPS — on; HSTS — по желанию.
-4. Проверить: `https://<домен>/health`, `https://<домен>/` и
-   `https://<домен>/legal.html` отвечают 200; `http://` редиректит на `https://`.
-5. Записать домен в GitHub → Settings → Variables → `SITE_URL`, чтобы workflow
-   `health` проверял именно прод. Обновить упоминания адреса в `docs/` (по желанию
-   владельца, отдельным PR).
+Доменов и Access здесь нет — всё держится на трёх вещах, которые уже в коде:
 
-**Успех:** `/health` на новом домене отдаёт `build` из `wrangler.toml`, а
-`http://` → 301/308 на `https://`.
+1. `ADMIN_TOKEN` (≥ 32 случайных символа, он же из T2) — без него `/admin/*`
+   отвечает 401, с неверным — 403;
+2. `ADMIN_EMAIL` — второй замок: без совпадающей почты в `X-Admin-Email` будет 403;
+3. **блокировка подбора по IP**: 10 неверных токенов с одного адреса → 429 на
+   15 минут (таблица `auth_limits`, сбрасывается после успешного входа).
 
-### T5. Cloudflare Access перед `/admin`
+**Проверки:**
 
-Access работает только на своём домене (на `*.workers.dev` — нет), поэтому после T4.
+```bash
+BASE=https://crypto-astra.cryptoastra.workers.dev
 
-1. Zero Trust → Access → Applications → Add an application → Self-hosted.
-2. Application domain: `<домен>`, path: `admin` (покрывает `/admin` и `/admin/*`).
-3. Policy: `Allow`, include → Emails → `alibahsburiev20@gmail.com`. Второй policy
-   можно не делать: остальным — deny по умолчанию.
-4. Session duration — 8–24 часа, MFA — по возможности.
+curl -s -o /dev/null -w '%{http_code}\n' $BASE/admin/pool            # 401
+curl -s -o /dev/null -w '%{http_code}\n' -H 'X-Admin-Token: wrong'  $BASE/admin/pool   # 403
+curl -s -o /dev/null -w '%{http_code}\n' -H "X-Admin-Token: $ADMIN_TOKEN" $BASE/admin/pool  # 200
+```
 
-**Проверка:** в приватном окне `https://<домен>/admin` показывает страницу входа
-Cloudflare Access, а не форму с токеном. После входа — обычная админка.
-API-проверка: `curl -s -o /dev/null -w '%{http_code}\n' https://<домен>/admin/pool`
-без cookie Access → 302/403 (не 401 от нашего кода).
+**Успех:** коды ровно 401 / 403 / 200; после 10 ошибок подряд приходит 429 с
+`Retry-After`, а через 15 минут снова 200.
 
-**Важно:** Access — дополнение к `ADMIN_TOKEN`, а не замена. Оба слоя остаются.
+**Важно:** токен вводится только в форме `/admin` (лежит в `sessionStorage`
+вкладки), в URL и логи он не попадает. Не публиковать его в чатах и скриншотах.
+
+**Откат:** `npx wrangler secret put ADMIN_TOKEN` с новым значением — старый сразу
+перестаёт работать.
+
+### T5. (Необязательно, только если появятся деньги) Домен и Access
+
+Пропустить, если владелец не выделил деньги. Нужно только для того, чтобы
+`/admin` прикрывался ещё и Cloudflare Access (он не работает на `*.workers.dev`).
+
+1. Домен → зона в Cloudflare → NS у регистратора (TLS: Full strict).
+2. Worker → Settings → Domains & Routes → Custom domain.
+3. Zero Trust → Access → Self-hosted: path `admin`, policy `Allow` по e-mail
+   владельца.
+4. GitHub → Variables → `SITE_URL` = новый домен.
+
+**Успех:** `$BASE/admin` в приватном окне показывает вход Cloudflare
+Access; `curl` без cookie даёт 302/403, а не 401 от нашего кода. `ADMIN_TOKEN`
+при этом остаётся.
 
 ### T6. Тестовая покупка 1 USDT (только с владельцем)
 
@@ -263,7 +293,7 @@ API-проверка: `curl -s -o /dev/null -w '%{http_code}\n' https://<дом�
 4. Агент проверяет:
 
    ```bash
-   curl -s https://<домен>/admin/pay -H "X-Admin-Token: $ADMIN_TOKEN" | python3 -m json.tool
+   curl -s $BASE/admin/pay -H "X-Admin-Token: $ADMIN_TOKEN" | python3 -m json.tool
    ```
 
    В `reconcile.totals.creditedDepositsMicro` появляется `1000000`,
@@ -280,9 +310,9 @@ API-проверка: `curl -s -o /dev/null -w '%{http_code}\n' https://<дом�
 ### T7. Продовый замер нагрузки (только чтение)
 
 ```bash
-npm run pay:loadtest -- --base https://<домен> --requests 500 --concurrency 25
+npm run pay:loadtest -- --base $BASE --requests 500 --concurrency 25
 # с токеном игрока добавляется чтение D1:
-npm run pay:loadtest -- --base https://<домен> --requests 500 --concurrency 25 --token "$TOKEN"
+npm run pay:loadtest -- --base $BASE --requests 500 --concurrency 25 --token "$TOKEN"
 ```
 
 **Порог:** ошибок ≤ 1 %, p95 ≤ 500 мс. Цифры внести в `docs/MONITORING.md`
@@ -290,7 +320,7 @@ npm run pay:loadtest -- --base https://<домен> --requests 500 --concurrency
 
 ### T8. Мониторинг и алерты
 
-1. UptimeRobot/BetterStack: HTTP-монитор на `https://<домен>/health`, 1 минута,
+1. UptimeRobot/BetterStack: HTTP-монитор на `$BASE/health`, 1 минута,
    keyword `"ok":true`; второй — `/pay/status.json`, keyword `"schema":"ready"`.
 2. Алерты: e-mail владельца + Telegram-бот.
 3. Cloudflare → Notifications: включить уведомления об ошибках Worker и о лимитах.
@@ -316,8 +346,9 @@ DUMP=astra-$(date +%F).sql bash scripts/restore-drill.sh
 Каждый день (5 минут):
 
 ```bash
-npm run health -- --base https://<домен>
-curl -s https://<домен>/admin/pay -H "X-Admin-Token: $ADMIN_TOKEN" \
+BASE=https://crypto-astra.cryptoastra.workers.dev
+npm run health -- --base $BASE
+curl -s $BASE/admin/pay -H "X-Admin-Token: $ADMIN_TOKEN" \
   | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['reconcile']['ok'], d['reconcile']['issues'], d['queue'])"
 ```
 
@@ -337,7 +368,7 @@ curl -s https://<домен>/admin/pay -H "X-Admin-Token: $ADMIN_TOKEN" \
 | Включили `[[services]]` | убрать блок, `npm run config:sync`, `npx wrangler deploy` |
 | Секрет задан неверно | `npx wrangler secret put <ИМЯ>` заново; для `SIGNER_TOKEN` — в обоих Worker'ах |
 | Access закрыл лишних | Access → Application → Policy: поправить include |
-| Домен не тот | Domains & Routes → Remove; DNS вернуть как было |
+| Домен не тот (если он вообще был) | Domains & Routes → Remove; DNS вернуть как было |
 | Деньги повели себя странно | **сначала** `POST /admin/pay/stop`, потом разбор |
 
 `SIGNER_SEED` откатить нельзя. Если он потерян — это инцидент: старые адреса
@@ -351,11 +382,11 @@ curl -s https://<домен>/admin/pay -H "X-Admin-Token: $ADMIN_TOKEN" \
 Прислать владельцу ровно это, без секретов в тексте:
 
 ```
-1. Домен: <...>, HTTPS: ok, /health build: <...>
+1. Адрес: https://crypto-astra.cryptoastra.workers.dev, HTTPS: ok, /health build: <...>
 2. D1: миграции применены, schema=ready, tables=14
 3. Signer: задеплоен, wallets=ready, адрес игрока выдан и повторяется
 4. PAY_HOT_ADDRESS совпадает с ключом (pay:hot-address --check): да
-5. Access на /admin: включён, политика: 1 e-mail, проверено в приватном окне
+5. Админка: без токена 401, с неверным 403, 10 ошибок → 429, верный токен → 200 (Access не используется)
 6. Тестовая покупка 1 USDT: депозит зачислен один раз, покупка одна, reconcile.ok
 7. Нагрузка прод: rps <...>, p95 <...> мс, ошибок <...>%
 8. Мониторинг: 2 внешних монитора, алерт проверен письмом
@@ -371,12 +402,13 @@ curl -s https://<домен>/admin/pay -H "X-Admin-Token: $ADMIN_TOKEN" \
 - Включать `PAYOUTS_ENABLED`, `SWEEP_ENABLED`, `POOL_ENABLED`.
 - Менять `SIGNER_SEED` после первого деплоя.
 - Печатать или пересылать секреты, класть их в git/issue/чат.
-- Тратить деньги владельца без явного согласия (домен, TRX, USDT, тарифы).
+- Покупать домен или включать платные тарифы: денег нет, работаем на бесплатном
+  `*.workers.dev`. Траты только на TRX/USDT и только с явного согласия.
 - Править цены, лимиты выплат и схему БД «по ходу дела».
 - Делать `wrangler d1 delete`, `DELETE FROM` в прод-базе, `--force` миграции.
 - Отключать Turnstile «чтобы проверить вход».
-- Закрывать `/admin` только паролем без Access (и наоборот — только Access без
-  `ADMIN_TOKEN`).
+- Ослаблять админку: пустой `ADMIN_TOKEN`, токен короче 32 символов, отключение
+  блокировки подбора или `ADMIN_EMAIL` «чтобы было проще».
 - Проверять нагрузку записями: нагрузочный тест только читает.
 
 ---
@@ -404,8 +436,8 @@ npx wrangler d1 export DB --remote --output astra.sql
 npx wrangler d1 execute DB --remote --command "SELECT COUNT(*) FROM users"
 
 # проверки
-npm run health -- --base https://<домен>
-npm run pay:loadtest -- --base https://<домен> --requests 500 --concurrency 25
+npm run health -- --base $BASE
+npm run pay:loadtest -- --base $BASE --requests 500 --concurrency 25
 DUMP=astra.sql bash scripts/restore-drill.sh
 
 # адрес горячего кошелька (ключ не печатается)
