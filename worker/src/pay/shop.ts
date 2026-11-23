@@ -76,7 +76,7 @@ export const PRODUCTS: PayProduct[] = [
     id: 'badge_pioneer',
     kind: 'cosmetic',
     title: 'Значок «Первопроходец»',
-    description: 'Значок в профиле и в списке гильдии.',
+    description: 'Значок в профиле пилота.',
     icon: '🧭',
     cosmetic: 'badge:pioneer',
     priceMicro: 1_000_000,
