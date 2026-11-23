@@ -16,6 +16,7 @@ import { getPlayerState } from './players';
 import { seasonBrief } from './season';
 import { minigameBrief } from './minigame';
 import { garageView } from './garage';
+import { ownIdentity } from './identity';
 
 export function buildState(sql: SqlStorage, playerId: string, now: number, premium = false) {
   const base = getPlayerState(sql, playerId);
@@ -98,6 +99,8 @@ export function buildState(sql: SqlStorage, playerId: string, now: number, premi
     modules: moduleStateFor(sql, playerId),
     // Гараж: сколько ячеек, сколько занято и почём следующая.
     garage: garageView(sql, playerId, premium),
+    // Своя карточка: позывной, рамка, след, значок и срок Premium.
+    profile: ownIdentity(sql, playerId, now),
     catalog: SHIP_ORDER.map((type) => {
       const def = SHIPS[type];
       return {

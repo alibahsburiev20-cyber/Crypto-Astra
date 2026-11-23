@@ -79,6 +79,11 @@ const ERRORS = {
   admin_disabled: 'Админка выключена: не задан ADMIN_TOKEN',
   admin_forbidden: 'Токен админки не подошёл',
   admin_email_forbidden: 'Почта не привязана к админке',
+  callsign_taken: 'Этот позывной уже занят',
+  callsign_cooldown: 'Позывной можно менять раз в сутки',
+  style_not_owned: 'Эта косметика не куплена',
+  too_many_requests: 'Слишком часто: подождите минуту',
+  account_deleted: 'Аккаунт закрыт',
   bad_resource: 'Этот ресурс не торгуется',
   bad_amount: 'Количество от 1 до 1000',
   bad_price: 'Цена должна быть больше нуля',
@@ -187,7 +192,16 @@ function setText(selector, value) {
   if (n) n.textContent = String(value);
 }
 
+/** Класс цвета позывного по серверной рамке. Нет рамки — обычный цвет. */
+function frameClass(frame) {
+  const map = { nebula: 'cs-nebula', ember: 'cs-ember', premium: 'cs-premium' };
+  return map[frame] || '';
+}
+
 function callsign() {
+  // Сервер — источник истины: позывной видят другие игроки. localStorage остался
+  // только как подсказка до первого ответа /me.
+  if (state?.profile?.callsign) return state.profile.callsign;
   try { return localStorage.getItem('astra:callsign') || 'Пилот'; } catch { return 'Пилот'; }
 }
 
@@ -418,8 +432,10 @@ function cosmeticsOwned() {
   return new Set(list.map((item) => String(item.cosmetic || '')));
 }
 
-/** Что надето сейчас: последний купленный скин, иначе Premium, иначе ничего. */
+/** Что надето сейчас: выбор игрока на сервере, иначе последний купленный скин. */
 function activeStyle() {
+  const serverFrame = state?.profile?.frame;
+  if (serverFrame && SKIN_STYLE[serverFrame]) return SKIN_STYLE[serverFrame];
   const owned = cosmeticsOwned();
   if (owned.has('skin:ember')) return SKIN_STYLE.ember;
   if (owned.has('skin:nebula')) return SKIN_STYLE.nebula;
@@ -498,27 +514,95 @@ function levelBar(compact) {
   );
 }
 
-// Карточка командира: рамка профиля и цвет позывного — то, что видно другим.
+// Карточка командира: рамка, цвет позывного, значок и выбор стиля.
+// Всё это хранится на сервере — поэтому видно другим, а не только себе.
 function profileCard() {
   const style = activeStyle();
   const owned = cosmeticsOwned();
+  const profile = state.profile || {};
+  const frames = ['nebula', 'ember', 'premium'].filter((id) => owned.has(`skin:${id}`) || (id === 'premium' && owned.has('premium')));
+  const cooldownLeft = profile.nextCallsignAt ? Math.max(0, profile.nextCallsignAt - (Date.now() + serverOffset)) : 0;
+
+  const nameInput = el('input', {
+    type: 'text', maxlength: '16', value: profile.callsign || '', placeholder: 'Позывной',
+    'aria-label': 'Позывной', autocomplete: 'off',
+  });
+
   return el('div', { class: 'profile-card' },
     el('div', { class: 'profile-avatar' },
       el('img', { src: '/avatars/commander.png', alt: '', width: '64', height: '64', class: 'avatar' }),
       style ? el('img', { src: style.frame, alt: '', width: '96', height: '96', class: 'profile-frame' }) : null),
     el('div', { class: 'profile-info' },
-      el('b', { class: `profile-name ${style ? style.cls : ''}` }, callsign()),
+      el('b', { class: `profile-name ${style ? style.cls : ''}` }, callsign(),
+        profile.premium ? el('span', { class: 'badge' }, 'Premium') : null),
       el('p', { class: 'muted' },
-        style === SKIN_STYLE.premium ? 'Astra Premium: рамка, след и значок.'
-          : style ? 'Купленный скин: цвет позывного, рамка и след двигателя.'
-            : 'Косметики нет — купите скин или Premium в магазине.'),
+        profile.callsign ? `Позывной видят другие игроки: лидерборд, гильдия, рейтинг.`
+          : 'Позывной пока автоматический — придумайте свой, его увидят другие.'),
       el('div', { class: 'profile-medals' },
-        owned.has('badge:pioneer') ? el('img', { src: '/sprites/cosmetics/badge_pioneer.png', alt: 'Значок первопроходца', width: '28', height: '28' }) : null,
+        profile.badge === 'pioneer' ? el('img', { src: '/sprites/cosmetics/badge_pioneer.png', alt: 'Значок первопроходца', width: '28', height: '28' }) : null,
         ...(state.minigame?.wins >= 25 ? [el('img', { src: '/sprites/profile/medal_25.png', alt: '25 побед на арене', width: '32', height: '32' })] : []),
         ...(state.minigame?.wins >= 50 ? [el('img', { src: '/sprites/profile/medal_50.png', alt: '50 побед на арене', width: '32', height: '32' })] : []),
         ...(state.minigame?.wins >= 100 ? [el('img', { src: '/sprites/profile/medal_100.png', alt: '100 побед на арене', width: '32', height: '32' })] : [])),
-      el('a', { class: 'cta cta-small', href: '/pay.html' }, 'Магазин')),
+      el('div', { class: 'form profile-form' }, nameInput,
+        el('button', {
+          type: 'button',
+          disabled: cooldownLeft > 0 || state.frozen ? '' : null,
+          onClick: () => doSetCallsign(nameInput.value),
+        }, cooldownLeft > 0 ? `Сменить через ${Math.ceil(cooldownLeft / 3600000)} ч` : 'Сменить позывной')),
+      frames.length
+        ? el('div', { class: 'style-row' },
+          el('button', { type: 'button', class: 'ghost', onClick: () => doSetStyle({ frame: null, trail: null }) }, 'Без рамки'),
+          ...frames.map((id) => el('button', {
+            type: 'button',
+            class: profile.frame === id ? '' : 'ghost',
+            onClick: () => doSetStyle({ frame: id, trail: id === 'premium' ? 'premium' : id }),
+          }, `Рамка «${STYLE_NAME[id]}»`)))
+        : null,
+      el('div', { class: 'btn-row' },
+        el('a', { class: 'cta cta-small', href: '/pay.html' }, 'Магазин'),
+        el('button', { type: 'button', class: 'ghost', onClick: () => doExportData() }, 'Скачать мои данные')),
+    ),
   );
+}
+
+const STYLE_NAME = { nebula: 'Небула', ember: 'Уголь', premium: 'Гиперион' };
+
+function doSetCallsign(value) {
+  return act('callsign', '/profile/callsign', { callsign: value })
+    .then(() => telCallsign(value));
+}
+
+function telCallsign(value) {
+  try { localStorage.setItem('astra:callsign', value); } catch { /* приватный режим */ }
+}
+
+function doSetStyle(patch) {
+  return act(`style:${patch.frame ?? 'none'}:${patch.trail ?? 'none'}`, '/profile/style', patch);
+}
+
+async function doExportData() {
+  const res = await authed('/account/export');
+  if (res.status !== 200) { note = `Ошибка: ${errText(res.data?.error)}`; render(); return; }
+  const blob = new Blob([JSON.stringify(res.data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'crypto-astra-export.json';
+  a.click();
+  URL.revokeObjectURL(url);
+  note = 'Файл с данными скачан';
+  render();
+}
+
+async function doDeleteAccount() {
+  const typed = window.prompt('Удаление аккаунта необратимо: почта и пароль стираются, позывной удаляется. Напишите DELETE, чтобы подтвердить.');
+  if (typed !== 'DELETE') return;
+  const res = await authed('/account', { method: 'DELETE', body: { confirm: 'DELETE' } });
+  if (res.status !== 200) { note = `Ошибка: ${errText(res.data?.error)}`; render(); return; }
+  try { localStorage.clear(); } catch { /* приватный режим */ }
+  token = null;
+  state = null;
+  show('landing');
 }
 
 function cards() {
@@ -531,6 +615,29 @@ function cards() {
     el('div', { class: 'card' }, label('points', 'Очки'), el('span', { class: 'value' }, b.points)),
     el('div', { class: 'card' }, el('span', { class: 'label' }, 'Уровень'), el('span', { class: 'value' }, `${state.level}`)),
   );
+}
+
+/**
+ * Первые шаги. Показываются один раз и только новичку: подсказка не должна
+ * занимать экран у того, кто уже играет.
+ */
+function tutorialCard() {
+  let seen = true;
+  try { seen = localStorage.getItem('astra:tutorial') === 'done'; } catch { seen = true; }
+  if (seen) return null;
+  const finish = () => {
+    try { localStorage.setItem('astra:tutorial', 'done'); } catch { /* приватный режим */ }
+    render();
+  };
+  return el('div', { class: 'block tutorial' },
+    el('h3', {}, 'С чего начать'),
+    el('ol', { class: 'plain tutorial-steps' },
+      el('li', {}, 'Заберите бонус кнопкой «Claim» — он копится по часам.'),
+      el('li', {}, 'Отправьте корабль в рейс: «Куда летим» → планета → тип рейса.'),
+      el('li', {}, 'Почините корабль, если прочность упала ниже 70 %.'),
+      el('li', {}, 'Мини-игра «Арена» даёт ASTRA и медали: 5 попыток в день.'),
+      el('li', {}, 'Придумайте позывной на карточке пилота — его увидят другие.')),
+    el('button', { type: 'button', class: 'primary', onClick: finish }, 'Понятно, поехали'));
 }
 
 function renderBridge() {
@@ -1344,7 +1451,9 @@ function renderArena() {
             el('thead', {}, el('tr', {}, el('th', {}, '#'), el('th', {}, 'Пилот'), el('th', {}, 'Побед'), el('th', {}, 'Лучший'))),
             el('tbody', {}, ...a.leaderboard.map((row) => el('tr', { class: row.isMe ? 'is-me' : '' },
               el('td', {}, String(row.rank)),
-              el('td', {}, row.label),
+              el('td', { class: frameClass(row.frame) }, row.label,
+                row.premium ? el('span', { class: 'badge' }, 'Premium') : null,
+                row.badge === 'pioneer' ? el('img', { src: '/sprites/cosmetics/badge_pioneer.png', alt: '', width: '18', height: '18', class: 'icon-sm' }) : null),
               el('td', {}, String(row.wins)),
               el('td', {}, String(row.best))))))
           : el('p', { class: 'muted' }, 'Пока никто не побеждал. Первое место свободно.')),
@@ -1806,7 +1915,11 @@ function renderGuild() {
     ? el('div', { class: 'block' },
       el('h3', {}, 'Участники'),
       el('ul', { class: 'members' }, ...guild.members.map((m) => el('li', { class: 'member' },
-        el('span', { class: 'member-name' }, m.label, m.isMe ? el('span', { class: 'rating-me' }, ' вы') : null,
+        el('span', { class: 'member-name' },
+          el('span', { class: frameClass(m.frame) }, m.label),
+          m.premium ? el('span', { class: 'badge' }, 'Premium') : null,
+          m.badge === 'pioneer' ? el('img', { src: '/sprites/cosmetics/badge_pioneer.png', alt: 'Значок первопроходца', width: '18', height: '18', class: 'icon-sm' }) : null,
+          m.isMe ? el('span', { class: 'rating-me' }, ' вы') : null,
           el('span', { class: 'rating-sub' }, `${roleName(m.role)} · уровень ${m.level}`)),
         el('span', { class: 'rating-points' }, `${m.points}`),
         guild.role === 'leader' && !m.isMe && m.role !== 'leader'
@@ -1879,6 +1992,12 @@ function renderWallet() {
       el('button', { type: 'button', class: 'ghost', onClick: () => setView('market') },
         el('img', { src: '/icons/nav/market.png', alt: '', width: '18', height: '18', class: 'icon-sm' }), 'Открыть рынок'),
     ),
+    el('div', { class: 'block' },
+      el('h3', {}, 'Мои данные'),
+      el('p', { class: 'muted' }, 'Экспорт — файл со всем, что мы знаем об аккаунте. Удаление стирает почту, пароль и позывной; записи журналов остаются обезличенными для учёта.'),
+      el('div', { class: 'btn-row' },
+        el('button', { type: 'button', class: 'ghost', onClick: () => doExportData() }, 'Скачать данные'),
+        el('button', { type: 'button', class: 'ghost danger', onClick: () => doDeleteAccount() }, 'Удалить аккаунт'))),
     el('div', { class: 'block' },
       el('h3', {}, 'Крафт'),
       el('p', { class: 'muted' }, 'Энергоячейка, схема и сплавная пластина — в отдельном разделе.'),
@@ -2027,6 +2146,8 @@ async function act(scope, path, body) {
   idemDone(scope);
   if (status >= 400) note = `Ошибка: ${errText(data.error)}`;
   else note = 'Готово';
+  // Короткий сигнал: без него действие в другой вкладке выглядит «зависшим».
+  if (view !== 'arena') sfx(status >= 400 ? 'lose' : 'pick');
   await loadGame();
 }
 

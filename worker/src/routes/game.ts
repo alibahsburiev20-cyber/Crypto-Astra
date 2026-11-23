@@ -3,6 +3,8 @@ import type { Env } from '../env';
 import { json, readJson } from '../http/response';
 import { ApiError } from '../world/errors';
 import { premiumStatus } from '../pay/shop';
+import { ownedCosmetics } from '../pay/cosmetics';
+import type { StyleValue } from '../world/modules/identity';
 import { RUN_MS, expandTrace } from '../shared/minigame';
 
 function world(env: Env, a: AuthContext) {
@@ -31,7 +33,49 @@ export async function isPremium(env: Env, a: AuthContext): Promise<boolean> {
 export async function me(env: Env, a: AuthContext): Promise<Response> {
   // server_time нужен клиенту, чтобы таймеры не зависели от часов устройства.
   const premium = await isPremium(env, a);
+  // Срок Premium дублируется в мир: по нему сортируется гильдия и рисуется значок.
+  if (premium) {
+    try {
+      const owned = await ownedCosmetics(env.DB, a.userId, Date.now());
+      await world(env, a).syncPremium(a.userId, owned.premiumUntil);
+    } catch { /* платежи выключены или D1 недоступна — игра идёт без значка */ }
+  }
   return json({ world_id: a.worldId, server_time: Date.now(), premium, ...(await world(env, a).getState(a.userId, premium)) });
+}
+
+// ── Профиль: позывной и косметика (этап 17) ─────────────────────────────────
+// Список купленного живёт в D1, мир его не выдумывает: он только проверяет
+// выбор по готовым спискам. Поэтому «надеть» некупленную рамку нельзя.
+export async function profile(env: Env, a: AuthContext): Promise<Response> {
+  const own = await world(env, a).getProfile(a.userId);
+  let owned: { frames: StyleValue[]; trails: StyleValue[]; badges: string[] } = { frames: [], trails: [], badges: [] };
+  try {
+    const list = await ownedCosmetics(env.DB, a.userId, Date.now());
+    owned = { frames: list.frames, trails: list.trails, badges: list.badges };
+  } catch { /* платежи выключены — косметики нет */ }
+  return json({ profile: own, owned });
+}
+
+export async function profileCallsign(request: Request, env: Env, a: AuthContext): Promise<Response> {
+  const body = await readJson(request);
+  const raw = typeof body.callsign === 'string' ? body.callsign : '';
+  return json(await world(env, a).setCallsign(a.userId, raw));
+}
+
+export async function profileStyle(request: Request, env: Env, a: AuthContext): Promise<Response> {
+  const body = await readJson(request);
+  const patch: { frame?: string | null; trail?: string | null; badge?: string | null } = {};
+  if ('frame' in body) patch.frame = body.frame == null ? null : String(body.frame);
+  if ('trail' in body) patch.trail = body.trail == null ? null : String(body.trail);
+  if ('badge' in body) patch.badge = body.badge == null ? null : String(body.badge);
+  if (!Object.keys(patch).length) throw new ApiError(400, 'bad_request');
+
+  const owned = await ownedCosmetics(env.DB, a.userId, Date.now());
+  return json({
+    profile: await world(env, a).setStyle(a.userId, patch, {
+      frames: owned.frames, trails: owned.trails, badges: owned.badges,
+    }),
+  });
 }
 
 // ── Мини-игра (этап 13) ──────────────────────────────────────────────────────

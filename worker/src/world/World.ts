@@ -1,7 +1,7 @@
 import { DurableObject } from 'cloudflare:workers';
 import type { Env } from '../env';
 import { runDueJobs } from './jobs';
-import { claim, type ClaimResult } from './modules/claim';
+import { autoClaim, claim, type ClaimResult } from './modules/claim';
 import { startCraft } from './modules/crafting';
 import { cancelExpedition, chooseExpeditionEvent, startExpedition } from './modules/expeditions';
 import { createPlayer } from './modules/players';
@@ -18,6 +18,9 @@ import { applyReferral, referralView } from './modules/referrals';
 import { installModule } from './modules/shipModules';
 import { buyShip } from './modules/ships';
 import { buySlot, garageView } from './modules/garage';
+import {
+  clearIdentity, ownIdentity, setCallsign, setStyle, syncPremium, type StyleAllowance, type StyleValue,
+} from './modules/identity';
 import { adminSummary, grantAstra, setFrozen } from './modules/adminWorld';
 import { buyLot, cancelLot, createLot, marketView, type CreateLotInput } from './modules/market';
 import { buyFuel, repairShip } from './modules/upkeep';
@@ -62,7 +65,14 @@ export class World extends DurableObject<Env> {
 
   async getState(playerId: string, premium = false) {
     const now = Date.now();
-    const state = this.ctx.storage.transactionSync(() => buildState(this.sql, playerId, now, premium));
+    const state = this.ctx.storage.transactionSync(() => {
+      // Premium забирает готовый бонус сам: игрок не должен помнить про кнопку.
+      const claimed = premium ? autoClaim(this.sql, playerId, now) : null;
+      const built = buildState(this.sql, playerId, now, premium);
+      return claimed?.ok
+        ? { ...built, autoClaimed: { astra: claimed.reward, nextClaimAt: claimed.nextClaimAt } }
+        : { ...built, autoClaimed: null };
+    });
     await this.arm();
     return state;
   }
@@ -198,9 +208,52 @@ export class World extends DurableObject<Env> {
   getGuild(playerId: string) {
     const now = Date.now();
     return this.ctx.storage.transactionSync(() => ({
-      guild: guildView(this.sql, playerId),
+      guild: guildView(this.sql, playerId, now),
       referrals: referralView(this.sql, playerId, now),
     }));
+  }
+
+  /** Своя карточка: позывной и выбранная косметика. */
+  getProfile(playerId: string) {
+    const now = Date.now();
+    return this.ctx.storage.transactionSync(() => ownIdentity(this.sql, playerId, now));
+  }
+
+  setCallsign(playerId: string, raw: string) {
+    const now = Date.now();
+    return this.ctx.storage.transactionSync(() => {
+      const res = setCallsign(this.sql, playerId, raw, now);
+      return { ...res, profile: ownIdentity(this.sql, playerId, now) };
+    });
+  }
+
+  setStyle(playerId: string, patch: { frame?: string | null; trail?: string | null; badge?: string | null }, allowance: StyleAllowance) {
+    const now = Date.now();
+    return this.ctx.storage.transactionSync(() => setStyle(this.sql, playerId, patch, allowance, now));
+  }
+
+  /** Косметика и срок Premium приезжают из D1 после покупки или проверки подписки. */
+  syncPremium(playerId: string, until: number | null, style?: StyleAllowance & { frame?: StyleValue | null; trail?: StyleValue | null; badge?: string | null }) {
+    const now = Date.now();
+    return this.ctx.storage.transactionSync(() => {
+      syncPremium(this.sql, playerId, until);
+      if (style) {
+        setStyle(this.sql, playerId, {
+          ...(style.frame !== undefined ? { frame: style.frame } : {}),
+          ...(style.trail !== undefined ? { trail: style.trail } : {}),
+          ...(style.badge !== undefined ? { badge: style.badge } : {}),
+        }, { frames: [...(style.frames ?? [])], trails: [...(style.trails ?? [])], badges: [...(style.badges ?? [])] }, now);
+      }
+      return ownIdentity(this.sql, playerId, now);
+    });
+  }
+
+  /** Удаление аккаунта: подпись и косметика стираются. Журнал остаётся (учёт). */
+  clearIdentity(playerId: string) {
+    return this.ctx.storage.transactionSync(() => {
+      clearIdentity(this.sql, playerId);
+      return { ok: true };
+    });
   }
 
   async createGuild(playerId: string, idemKey: string, body: { name: string; tag: string }) {

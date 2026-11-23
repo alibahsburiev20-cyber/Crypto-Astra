@@ -3,7 +3,7 @@ import { ApiError } from '../errors';
 import { verifyLedger } from '../ledger';
 import { isFrozen, verifyStatus } from './maintenance';
 import { playerExists } from './players';
-import { ratingLabel } from './season';
+import { publicIdentity } from './identity';
 
 // Админка мира (этап 15). Три операции, без которых оператор беспомощен:
 //   • увидеть состояние мира (игроки, баланс, сверка, заморозка);
@@ -24,7 +24,7 @@ export interface AdminSummary {
   }[];
 }
 
-export function adminSummary(sql: SqlStorage, limit = 50): AdminSummary {
+export function adminSummary(sql: SqlStorage, limit = 50, now = Date.now()): AdminSummary {
   const players = sql.exec(
     `SELECT p.id AS id, p.level AS level, p.xp AS xp, p.created_at AS created_at,
             COALESCE((SELECT amount FROM balances WHERE player_id = p.id AND asset = 'astra'), 0) AS astra,
@@ -34,7 +34,7 @@ export function adminSummary(sql: SqlStorage, limit = 50): AdminSummary {
     limit,
   ).toArray().map((r) => ({
     id: String(r.id),
-    label: ratingLabel(String(r.id)),
+    label: publicIdentity(sql, String(r.id), now).label,
     level: Number(r.level),
     xp: Number(r.xp),
     astra: Number(r.astra),

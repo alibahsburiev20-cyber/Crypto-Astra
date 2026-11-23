@@ -3,7 +3,7 @@ import type { Env } from '../env';
 import { config, login, logout, refresh, register } from '../routes/auth';
 import {
   buyFuel, cancelExpedition, chooseEvent, claim, craftStart, guild, guildCreate, guildJoin, guildKick, guildLeave,
-  garage, garageBuy, minigame, minigameFinish, minigameStart,
+  garage, garageBuy, minigame, minigameFinish, minigameStart, profile, profileCallsign, profileStyle,
   guildRename, guildRole, ledger, market, marketBuy, marketCancel, marketLot, me, missionClaim, moduleInstall, passClaim,
   referralApply, repair, season, shipBuy, social, startExpedition,
 } from '../routes/game';
@@ -13,6 +13,8 @@ import {
 } from '../routes/pay';
 import { adminPool, adminPoolEntry, poolPublic } from '../routes/pool';
 import { adminFreeze, adminGrant, adminWorld } from '../routes/admin';
+import { accountDelete, accountExport } from '../routes/account';
+import { enforceUserLimit } from './userLimit';
 import { errorResponse, json } from './response';
 
 export async function route(request: Request, env: Env): Promise<Response> {
@@ -61,9 +63,24 @@ export async function route(request: Request, env: Env): Promise<Response> {
     if (m === 'POST' && p === '/auth/refresh') return await refresh(request, env);
     if (m === 'POST' && p === '/auth/logout') return await logout(request, env);
 
-    if (p === '/me' || p === '/garage' || p === '/garage/buy' || p === '/minigame' || p === '/minigame/start' || p === '/minigame/finish' || p === '/season' || p === '/claim' || p === '/ledger' || p === '/expeditions/start' || p === '/expeditions/cancel' || p === '/expeditions/choose' || p === '/expeditions/choose-event' || p === '/ships/repair' || p === '/fuel/buy' || p === '/craft/start' || p === '/modules/install' || p === '/ships/buy' || p === '/market' || p === '/market/lot' || p === '/market/buy' || p === '/market/cancel' || p === '/social' || p === '/missions/claim' || p === '/pass/claim' || p === '/guild' || p === '/guild/create' || p === '/guild/join' || p === '/guild/leave' || p === '/guild/kick' || p === '/guild/role' || p === '/guild/rename' || p === '/referrals/apply') {
+    // Личные данные: экспорт и удаление аккаунта (GDPR).
+    if (p === '/account' && m === 'DELETE') {
       const a = await requireAuth(request, env);
+      return await accountDelete(request, env, a);
+    }
+    if (p === '/account/export' && m === 'GET') {
+      const a = await requireAuth(request, env);
+      return await accountExport(env, a);
+    }
+
+    if (p === '/profile' || p === '/profile/callsign' || p === '/profile/style' || p === '/me' || p === '/garage' || p === '/garage/buy' || p === '/minigame' || p === '/minigame/start' || p === '/minigame/finish' || p === '/season' || p === '/claim' || p === '/ledger' || p === '/expeditions/start' || p === '/expeditions/cancel' || p === '/expeditions/choose' || p === '/expeditions/choose-event' || p === '/ships/repair' || p === '/fuel/buy' || p === '/craft/start' || p === '/modules/install' || p === '/ships/buy' || p === '/market' || p === '/market/lot' || p === '/market/buy' || p === '/market/cancel' || p === '/social' || p === '/missions/claim' || p === '/pass/claim' || p === '/guild' || p === '/guild/create' || p === '/guild/join' || p === '/guild/leave' || p === '/guild/kick' || p === '/guild/role' || p === '/guild/rename' || p === '/referrals/apply') {
+      const a = await requireAuth(request, env);
+      // Частотный лимит: чтение и запись считаются отдельно.
+      await enforceUserLimit(env, a.userId, m !== 'GET');
       if (m === 'GET' && p === '/me') return await me(env, a);
+      if (m === 'GET' && p === '/profile') return await profile(env, a);
+      if (m === 'POST' && p === '/profile/callsign') return await profileCallsign(request, env, a);
+      if (m === 'POST' && p === '/profile/style') return await profileStyle(request, env, a);
       if (m === 'GET' && p === '/ledger') return await ledger(url, env, a);
       if (m === 'GET' && p === '/season') return await season(env, a);
       if (m === 'GET' && p === '/garage') return await garage(env, a);
