@@ -105,3 +105,10 @@ JWT_SECRET = "preview-only-not-a-secret-3f9b1c27a4e85d60"
 # [[r2_buckets]]
 # binding = "ARCHIVE"
 # bucket_name = "astra-archive"
+
+# Связка с Signer-воркером: ключи живут там, основной Worker видит только
+# `env.SIGNER.fetch(...)`. Пока сервис не задеплоен, блок должен быть закомментирован:
+# деплой со ссылкой на несуществующий сервис падает целиком.
+[[services]]
+binding = "SIGNER"
+service = "astra-pay-signer"
