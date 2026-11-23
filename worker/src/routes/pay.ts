@@ -4,6 +4,7 @@ import { json } from '../http/response';
 import { ensureAddress, findAddress, signerDeriver } from '../pay/addresses';
 import { payFlags, publicFlags, walletState } from '../pay/flags';
 import { payBalanceMicro, payHistory } from '../pay/ledger';
+import { prizeSharePercent, usdtPoolBlock } from '../pay/pool';
 import { ensurePaySchema, PAY_SCHEMA_VERSION, PAY_TABLES } from '../pay/schema';
 import { ShopError, catalogForClient, entitlements, premiumStatus, purchase } from '../pay/shop';
 import { formatMicroUsdt } from '../pay/tron/amount';
@@ -137,7 +138,10 @@ export async function payPurchase(request: Request, env: Env, auth: AuthContext)
   const productId = String(body.productId ?? '');
 
   try {
-    const result = await purchase(env.DB, { userId: auth.userId, productId, idemKey }, Date.now());
+    const result = await purchase(
+      env.DB, { userId: auth.userId, productId, idemKey }, Date.now(),
+      prizeSharePercent(env.POOL_PRIZE_SHARE),
+    );
     // Купленное сразу видно другим: мир получает срок Premium и выбранный стиль.
     try {
       const owned = await ownedCosmetics(env.DB, auth.userId, Date.now());
@@ -248,12 +252,16 @@ export async function adminPay(request: Request, env: Env): Promise<Response> {
   await requireAdmin(request, env);
   if (!(await ensurePaySchema(env.DB))) throw new ApiError(503, 'pay_unavailable');
   const now = Date.now();
-  const [report, queue] = await Promise.all([reconcile(env.DB, now), withdrawalQueue(env.DB, 50)]);
+  const [report, queue, poolBlock] = await Promise.all([
+    reconcile(env.DB, now), withdrawalQueue(env.DB, 50), usdtPoolBlock(env.DB, now),
+  ]);
   return json({
     ok: true,
     flags: publicFlags(payFlags(env)),
     reconcile: report,
     queue,
+    // Призовой фонд сезона: доля выручки магазина (POOL_PRIZE_SHARE), не взносы.
+    pool: poolBlock,
     now,
   }, 200, { 'Cache-Control': 'no-store' });
 }

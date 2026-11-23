@@ -48,6 +48,8 @@ export interface Env {
   PAY_NETWORK?: string;
   /** Адрес контракта USDT. Пусто — берётся стандартный для сети. */
   PAY_USDT_CONTRACT?: string;
+  /** Доля выручки магазина в призовой фонд сезона, % (по умолчанию 40). */
+  POOL_PRIZE_SHARE?: string;
   /** Ключ TronGrid. Необязателен: без него лимит опроса ниже. */
   TRONGRID_API_KEY?: string;
   /**

@@ -33,6 +33,44 @@ export interface PoolCycleRow {
 }
 
 export const CYCLE_DAYS = 30;
+
+/**
+ * Доля выручки магазина, которая уходит в призовой фонд сезона.
+ *
+ * Важно, откуда деньги: это доля **нашей** выручки от продажи косметики, а не
+ * взносы игроков. Взносов в пул нет и не будет — пул, куда люди вкладывают
+ * деньги в расчёте на выплаты, это инвестиционная схема, а не механика игры.
+ * Поэтому призовой фонд считается только из покупок и не может превысить их.
+ */
+export const PRIZE_SHARE_DEFAULT = 40;
+
+/** Доля из `POOL_PRIZE_SHARE` (0–100, по умолчанию 40). Кривое значение — 40. */
+export function prizeSharePercent(value: string | undefined | null): number {
+  const raw = String(value ?? '').trim();
+  if (!raw) return PRIZE_SHARE_DEFAULT;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0 || n > 100) return PRIZE_SHARE_DEFAULT;
+  return Math.round(n);
+}
+
+/** Сколько из цены товара попадёт в призовой фонд. Округление — вниз, до микро. */
+export function prizeFromPrice(priceMicro: number, percent = PRIZE_SHARE_DEFAULT): number {
+  if (!Number.isSafeInteger(priceMicro) || priceMicro <= 0) return 0;
+  if (!Number.isFinite(percent) || percent <= 0) return 0;
+  const share = Math.min(100, percent);
+  return Math.floor((priceMicro * share) / 100);
+}
+
+/** Начислить призовой фонд. Возвращает новое значение или ноль, если цикла нет. */
+export async function addPrizeBudget(db: D1Database, micro: number, now: number): Promise<number> {
+  if (!Number.isSafeInteger(micro) || micro <= 0) return 0;
+  const cycle = await ensureOpenCycle(db, now);
+  await db.prepare('UPDATE pay_pool_cycles SET prize_budget = prize_budget + ? WHERE id = ?')
+    .bind(micro, cycle.id).run();
+  const row = await db.prepare('SELECT prize_budget FROM pay_pool_cycles WHERE id = ?')
+    .bind(cycle.id).first<number>('prize_budget');
+  return Number(row ?? 0);
+}
 const DAY = 86_400_000;
 
 export function availableMicro(cycle: Pick<PoolCycleRow, 'confirmed_in' | 'reserved' | 'paid' | 'locked'>): number {
@@ -110,6 +148,9 @@ export async function reservePayout(db: D1Database, micro: number): Promise<bool
 
 export interface UsdtPoolBlock {
   open: boolean;
+  /** Призовой фонд из выручки магазина (не взносы игроков). */
+  prizeBudget: number;
+  prizeBudgetText: string;
   confirmedIn: number;
   reserved: number;
   paid: number;
@@ -126,13 +167,16 @@ export async function usdtPoolBlock(db: D1Database, now = Date.now()): Promise<U
   const cycle = await openCycle(db);
   if (!cycle) {
     return {
-      open: false, confirmedIn: 0, reserved: 0, paid: 0, locked: 0, available: 0,
+      open: false, prizeBudget: 0, prizeBudgetText: '0.00',
+      confirmedIn: 0, reserved: 0, paid: 0, locked: 0, available: 0,
       confirmed: '0.00', availableText: '0.00', status: 'no_cycle', updatedAt: now,
     };
   }
   const available = availableMicro(cycle);
   return {
     open: true,
+    prizeBudget: Number(cycle.prize_budget),
+    prizeBudgetText: formatMicroUsdt(Number(cycle.prize_budget)),
     confirmedIn: Number(cycle.confirmed_in),
     reserved: Number(cycle.reserved),
     paid: Number(cycle.paid),
