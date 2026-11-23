@@ -22,7 +22,10 @@ export async function route(request: Request, env: Env): Promise<Response> {
   const p = url.pathname;
   const m = request.method;
   try {
-    if (p === '/health') return json({ ok: true, service: 'crypto-astra-api', now: Date.now() });
+    if (p === '/health') {
+      // build — метка из [vars]: по ней видно, какая сборка отвечает.
+      return json({ ok: true, service: 'crypto-astra-api', build: String(env.APP_BUILD ?? 'dev'), now: Date.now() });
+    }
     if (m === 'GET' && p === '/config') return config(env);
     // Пул: публичный отчёт открыт без авторизации, запись — только с админ-токеном.
     if (m === 'GET' && (p === '/pool.json' || p === '/pool/report')) return await poolPublic(env);

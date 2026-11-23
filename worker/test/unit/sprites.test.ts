@@ -74,12 +74,34 @@ describe('спрайты арены и фоны', () => {
   });
 
   it('фон — тоже файл, и он подключён', () => {
-    for (const name of ['space', 'arena', 'hero']) {
+    // hero.png был байт-в-байт копией space.png — держим один файл.
+    for (const name of ['space', 'arena']) {
       expect(existsSync(join(root, `client/sprites/bg/${name}.png`))).toBe(true);
     }
+    expect(existsSync(join(root, 'client/sprites/bg/hero.png'))).toBe(false);
+    expect(css).not.toContain("url('/sprites/bg/hero.png')");
     expect(css).toContain("url('/sprites/bg/space.png')");
-    expect(css).toContain("url('/sprites/bg/hero.png')");
     expect(app).toContain("'/sprites/bg/arena.png'");
+  });
+
+  it('ни одна ссылка на спрайт не ведёт в пустоту', () => {
+    // Ловит удалённый файл, о котором забыли в разметке: раньше так жил hero.png.
+    const files = new Set<string>();
+    const walk = (rel: string) => {
+      for (const name of readdirSync(join(root, 'client', rel))) {
+        const relPath = `${rel}/${name}`;
+        if (statSync(join(root, 'client', relPath)).isDirectory()) walk(relPath);
+        else files.add(`/${relPath}`);
+      }
+    };
+    for (const dir of ['sprites', 'icons', 'avatars']) walk(dir);
+
+    const texts = ['app.js', 'pay.js', 'pool.js', 'admin.js', 'i18n.js',
+      'index.html', 'pay.html', 'pool.html', 'admin.html', 'legal.html', 'styles.css', 'pay.css']
+      .map((name) => read(`client/${name}`)).join('\n');
+    const refs = new Set(Array.from(texts.matchAll(/['"(](\/(?:sprites|icons|avatars)\/[A-Za-z0-9_./-]+)/g), (m) => m[1]));
+    expect(refs.size).toBeGreaterThan(20);
+    expect([...refs].filter((ref) => !files.has(ref))).toEqual([]);
   });
 
   it('скрипт сборки спрайтов лежит в репозитории', () => {

@@ -8,6 +8,23 @@ permissions:
   contents: read
 
 jobs:
+  # site.ts собирается из client/. Если кто-то поправил client/ и забыл
+  # пересобрать, прод отдаст старую страницу — ловим это здесь.
+  client-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Сверить worker/src/static/site.ts с client/
+        run: |
+          node scripts/embed-client.mjs
+          git diff --exit-code -- worker/src/static/site.ts || {
+            echo '::error::site.ts рассинхронизирован с client/ — запустите node scripts/embed-client.mjs и закоммитьте';
+            exit 1;
+          }
+
   unit:
     runs-on: ubuntu-latest
     steps:

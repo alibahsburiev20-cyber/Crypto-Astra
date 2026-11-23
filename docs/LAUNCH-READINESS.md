@@ -48,6 +48,11 @@
 
 ## 3. Что заблокировано и почему
 
+| Наблюдаемость | `/health` с меткой сборки, `npm run health`, алерты раз в 30 минут | `docs/MONITORING.md`, `.github/workflows/health.yml` |
+| Восстановление | репетиция restore на дампе D1, сверка счётчиков | `scripts/restore-drill.sh`, `docs/RUNBOOK_BACKUP.md` |
+| Документы | черновики Impressum / Datenschutz / AGB / Widerruf на немецком | `client/legal.html` — нужна подпись юриста |
+| Доступность | фокус, reduced-motion, мобильные таблицы, переключатель языка на витрине | `client/styles.css`, `client/i18n.js` |
+
 | Блокер | Что нужно | Кто может |
 | --- | --- | --- |
 | Покупки USDT | Worker `astra-pay-signer`, 3 секрета, `[[services]]` | владелец Cloudflare-аккаунта, см. `docs/PAY-SIGNER.md` |

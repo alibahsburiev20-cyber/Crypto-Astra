@@ -1,0 +1,26 @@
+name: health
+
+# Лёгкая проверка прода без секретов: только публичные маршруты.
+# Адрес можно переопределить repository variable SITE_URL.
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Проверить живость
+        env:
+          SITE_URL: ${{ vars.SITE_URL || 'https://crypto-astra.cryptoastra.workers.dev' }}
+        run: npx tsx scripts/health-check.ts --base "$SITE_URL"

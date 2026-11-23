@@ -8,7 +8,7 @@ application/json; charset=utf-8`. Ответы не кэшируются (`Cache
 
 | Метод | Путь | Ответ |
 |---|---|---|
-| GET | `/health` | `{ ok, service, now }` — `now` в миллисекундах, серверное время |
+| GET | `/health` | `{ ok, service, build, now }` — `build` из `[vars].APP_BUILD`, `now` в миллисекундах |
 | GET | `/config` | `{ turnstile_site_key, login_turnstile_after, server_time }` |
 | POST | `/auth/register` | `{ access_token, user: { id, world_id } }` + refresh-cookie |
 | POST | `/auth/login` | то же; может вернуть `turnstile_required` |
@@ -42,6 +42,9 @@ contract, flags, schema, tables, now }`, где `flags` — шесть пере�
 | Метод | Путь | Ответ |
 |---|---|---|
 | GET | `/pay/account.json` | баланс USDT, история операций, купленная косметика |
+| GET | `/pay/address.json` | личный адрес пополнения USDT (TRC-20) |
+| GET | `/pay/withdrawals` | свои заявки на вывод, лимиты и стоп-флаг |
+| POST | `/pay/withdraw` | заявка на вывод: `{ address, amountMicro }` + `Idempotency-Key` |
 | POST | `/pay/purchase` | покупка за баланс: `{ productId }` + заголовок `Idempotency-Key` |
 
 `/pay/account.json` отдаёт `{ ok, asset: "USDT", balanceMicro, balance,
@@ -115,6 +118,24 @@ confirmed`, в сторону — только `failed` или `manual`. Рез�
 | POST | `/guild/role` | `{ playerId, role }`: `officer` или `member` |
 | POST | `/guild/rename` | `{ name, tag }`, только лидер |
 | POST | `/referrals/apply` | `{ code }`, применить код приглашения |
+| POST | `/ships/buy` | `{ type }`, покупка корпуса за ASTRA |
+| POST | `/craft/start` | `{ recipe }`, запуск крафта |
+| POST | `/modules/install` | `{ shipId, module }`, установка модуля |
+| GET | `/profile` | `{ profile, owned }` — позывной, стиль, премиум |
+| POST | `/profile/callsign` | `{ callsign }`, 3–16 символов, смена раз в 24 часа |
+| POST | `/profile/style` | `{ frame, trail }` — только из купленного |
+| GET | `/account/export` | все данные игрока одним JSON |
+| DELETE | `/account` | удаление: `{ confirm: "DELETE" }` |
+
+Коды профиля и аккаунта: `400` кривой позывной, `403` стиль не куплен, `409`
+позывной занят (уникальность по `callsign_key`, без учёта регистра), `429` смена
+чаще раза в сутки.
+
+`GET /pay/address.json` → `{ ok, address, index, created, network, asset: "USDT",
+contract }`. Адрес выводится детерминированно из индекса аккаунта и не меняется
+между запросами. Ошибки: `503 deposits_disabled` (приём выключен флагом),
+`503 signer_not_configured` (не заданы секреты Signer), `503 pay_unavailable`
+(нет базы D1). Клиент показывает адрес в `pay.html` с кнопкой копирования.
 
 ## Админка пула (этап 5)
 

@@ -31,7 +31,8 @@ describe('страница «Astra Pay» (этап 7)', () => {
 
   it('токен берётся обновлением cookie, а не из localStorage', () => {
     expect(js).toContain("'/auth/refresh'");
-    expect(js).not.toContain('localStorage');
+    // localStorage разрешён только для выбора языка; токен в нём не живёт.
+    expect(js).not.toMatch(/localStorage[^\n]*token/i);
     expect(js).toContain("credentials: 'include'");
   });
 
