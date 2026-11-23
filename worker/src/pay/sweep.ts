@@ -15,6 +15,15 @@ import { tronApiBase, usdtContract } from './tron/contracts';
 export const SWEEP_FEE_SUN = 15_000_000; // 15 TRX
 /** Сколько адресов проверяем за один вызов: TronGrid не любит шквал запросов. */
 export const SWEEP_PLAN_LIMIT = 50;
+/**
+ * Меньше этого не собираем: комиссия съест смысл.
+ *
+ * 15 TRX по курсу ≈ 0.3 $ за TRX — это около 4.5 $ за один перевод. Собирать
+ * 2–3 USDT с адреса означало бы платить за перевод больше, чем переводишь.
+ * Поэтому «мелкие» адреса копятся, пока на них не наберётся сумма, которую есть
+ * смысл двигать.
+ */
+export const SWEEP_MIN_MICRO = 10_000_000; // 10 USDT
 
 export interface SweepChainDeps {
   fetchJson: (url: string) => Promise<unknown>;
@@ -35,7 +44,9 @@ export interface SweepRow {
   /** Хватает ли TRX на перевод этой суммы. */
   enoughTrx: boolean;
   /** Что мешает собрать: null — можно. */
-  blocker: 'no_usdt' | 'trx_missing' | 'chain_error' | null;
+  blocker: 'no_usdt' | 'below_min' | 'trx_missing' | 'chain_error' | null;
+  /** Можно ли собирать прямо сейчас (деньги есть, их хватает на комиссию). */
+  sweepable: boolean;
   error: string | null;
 }
 
@@ -49,7 +60,10 @@ export interface SweepPlan {
     trxSun: number;
     /** Сколько TRX нужно докупить, чтобы собрать всё найденное. */
     trxShortfallSun: number;
+    /** Сумма по адресам, которые можно собрать прямо сейчас. */
     sweepableMicro: number;
+    /** Сумма ниже порога `SWEEP_MIN_MICRO`: копится, не собирается. */
+    belowMinMicro: number;
   };
   /** Можно ли вообще собирать: включён флаг и задан кошелёк. */
   ready: boolean;
@@ -107,16 +121,17 @@ export async function sweepPlan(input: SweepPlanInput): Promise<SweepPlan> {
       const enoughTrx = balances.trxSun >= SWEEP_FEE_SUN;
       const blocker: SweepRow['blocker'] = balances.usdtMicro <= 0
         ? 'no_usdt'
-        : enoughTrx ? null : 'trx_missing';
+        : balances.usdtMicro < SWEEP_MIN_MICRO ? 'below_min'
+          : enoughTrx ? null : 'trx_missing';
       planRows.push({
         address: row.address, userId: row.user_id,
         usdtMicro: balances.usdtMicro, trxSun: balances.trxSun,
-        enoughTrx, blocker, error: null,
+        enoughTrx, blocker, sweepable: blocker === null, error: null,
       });
     } catch (e) {
       planRows.push({
         address: row.address, userId: row.user_id,
-        usdtMicro: 0, trxSun: 0, enoughTrx: false, blocker: 'chain_error',
+        usdtMicro: 0, trxSun: 0, enoughTrx: false, blocker: 'chain_error', sweepable: false,
         error: e instanceof Error ? e.message : String(e),
       });
     }
@@ -125,13 +140,16 @@ export async function sweepPlan(input: SweepPlanInput): Promise<SweepPlan> {
   let usdtMicro = 0;
   let trxSun = 0;
   let sweepableMicro = 0;
+  let belowMinMicro = 0;
   let trxShortfallSun = 0;
   for (const row of planRows) {
     usdtMicro += row.usdtMicro;
     trxSun += row.trxSun;
     if (row.usdtMicro <= 0) continue;
-    sweepableMicro += row.usdtMicro;
-    if (!row.enoughTrx) trxShortfallSun += SWEEP_FEE_SUN - row.trxSun;
+    if (row.blocker === null) sweepableMicro += row.usdtMicro;
+    if (row.blocker === 'below_min') belowMinMicro += row.usdtMicro;
+    // Комиссию считаем только там, где сбор вообще имеет смысл.
+    if (row.blocker !== 'below_min' && !row.enoughTrx) trxShortfallSun += SWEEP_FEE_SUN - row.trxSun;
   }
 
   const reason = !input.destination
@@ -143,7 +161,7 @@ export async function sweepPlan(input: SweepPlanInput): Promise<SweepPlan> {
     destination: input.destination,
     addresses: planRows.length,
     rows: planRows,
-    totals: { usdtMicro, trxSun, trxShortfallSun, sweepableMicro },
+    totals: { usdtMicro, trxSun, trxShortfallSun, sweepableMicro, belowMinMicro },
     ready: reason === null,
     reason,
     updatedAt: now,

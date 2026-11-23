@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { makeD1 } from '../helpers/d1';
 import { ensurePaySchema, resetPaySchemaForTests } from '../../src/pay/schema';
 import {
-  SWEEP_FEE_SUN, parseBalances, sweepChainDeps, sweepPlan,
+  SWEEP_FEE_SUN, SWEEP_MIN_MICRO, parseBalances, sweepChainDeps, sweepPlan,
 } from '../../src/pay/sweep';
 import { USDT_MAINNET, TRON_API_MAINNET } from '../../src/pay/tron/contracts';
 
@@ -64,10 +64,10 @@ describe('план сбора USDT', () => {
     await addAddress(db, 'u3', 'TCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC', 3);
 
     const { fetchJson } = fakeChain({
-      // Хватает TRX — заберём 3 USDT.
-      TAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA: { trx: 20_000_000, usdt: 3_000_000 },
+      // Хватает TRX и сумма выше порога — заберём 12 USDT.
+      TAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA: { trx: 20_000_000, usdt: 12_000_000 },
       // USDT есть, TRX нет — сначала надо закинуть комиссию.
-      TBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB: { trx: 0, usdt: 1_500_000 },
+      TBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB: { trx: 0, usdt: 11_000_000 },
       // Пусто — собирать нечего.
       TCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC: { trx: 5_000_000, usdt: 0 },
     });
@@ -80,14 +80,43 @@ describe('план сбора USDT', () => {
 
     expect(plan.addresses).toBe(3);
     expect(plan.ready).toBe(true);
-    expect(plan.totals.usdtMicro).toBe(4_500_000);
-    expect(plan.totals.sweepableMicro).toBe(4_500_000);
+    expect(plan.totals.usdtMicro).toBe(23_000_000);
+    expect(plan.totals.sweepableMicro).toBe(12_000_000);
+    expect(plan.totals.belowMinMicro).toBe(0);
     expect(plan.totals.trxShortfallSun).toBe(SWEEP_FEE_SUN);
 
     const byAddr = new Map(plan.rows.map((r) => [r.address, r]));
     expect(byAddr.get('TAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA')?.blocker).toBeNull();
     expect(byAddr.get('TBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB')?.blocker).toBe('trx_missing');
     expect(byAddr.get('TCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC')?.blocker).toBe('no_usdt');
+  });
+
+  it('мелкие суммы не собирает: комиссия дороже самих денег', async () => {
+    const db = await freshDb();
+    await addAddress(db, 'u1', 'TAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', 1);
+    await addAddress(db, 'u2', 'TBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB', 2);
+
+    const { fetchJson } = fakeChain({
+      // 3 USDT при комиссии ~15 TRX (≈4.5 $) собирать бессмысленно.
+      TAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA: { trx: 20_000_000, usdt: 3_000_000 },
+      // Ровно порог — уже можно.
+      TBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB: { trx: 20_000_000, usdt: SWEEP_MIN_MICRO },
+    });
+
+    const plan = await sweepPlan({
+      db,
+      deps: { fetchJson, apiBase: TRON_API_MAINNET, contract: USDT_MAINNET },
+      network: 'mainnet', destination: DEST, sweepEnabled: true, now: T0,
+    });
+
+    const byAddr = new Map(plan.rows.map((r) => [r.address, r]));
+    expect(byAddr.get('TAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA')?.blocker).toBe('below_min');
+    expect(byAddr.get('TAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA')?.sweepable).toBe(false);
+    expect(byAddr.get('TBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB')?.sweepable).toBe(true);
+    expect(plan.totals.belowMinMicro).toBe(3_000_000);
+    expect(plan.totals.sweepableMicro).toBe(SWEEP_MIN_MICRO);
+    // На «мелкий» адрес TRX не просим: его пока не собираем.
+    expect(plan.totals.trxShortfallSun).toBe(0);
   });
 
   it('ошибка сети по адресу не отменяет план по остальным', async () => {
@@ -97,7 +126,7 @@ describe('план сбора USDT', () => {
 
     const { fetchJson } = fakeChain({
       TDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD: 'error',
-      TEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE: { trx: 30_000_000, usdt: 2_000_000 },
+      TEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE: { trx: 30_000_000, usdt: 15_000_000 },
     });
 
     const plan = await sweepPlan({
@@ -109,7 +138,7 @@ describe('план сбора USDT', () => {
     const broken = plan.rows.find((r) => r.address === 'TDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD');
     expect(broken?.blocker).toBe('chain_error');
     expect(broken?.error).toContain('http_503');
-    expect(plan.totals.usdtMicro).toBe(2_000_000);
+    expect(plan.totals.usdtMicro).toBe(15_000_000);
     expect(plan.rows.filter((r) => r.blocker === null)).toHaveLength(1);
   });
 
