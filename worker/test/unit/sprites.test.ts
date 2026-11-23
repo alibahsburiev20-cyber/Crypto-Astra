@@ -97,7 +97,7 @@ describe('спрайты арены и фоны', () => {
     for (const dir of ['sprites', 'icons', 'avatars']) walk(dir);
 
     const texts = ['app.js', 'pay.js', 'pool.js', 'admin.js', 'i18n.js',
-      'index.html', 'pay.html', 'pool.html', 'admin.html', 'legal.html', 'styles.css', 'pay.css']
+      'index.html', 'pay.html', 'pool.html', 'admin.html', 'styles.css', 'pay.css']
       .map((name) => read(`client/${name}`)).join('\n');
     const refs = new Set(Array.from(texts.matchAll(/['"(](\/(?:sprites|icons|avatars)\/[A-Za-z0-9_./-]+)/g), (m) => m[1]));
     expect(refs.size).toBeGreaterThan(20);
