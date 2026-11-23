@@ -8,9 +8,9 @@
 // настоящий TronGrid и service binding. Никаких ключей в этом файле нет.
 
 import { addressToHex } from './tron/address';
-import { usdtContract } from './tron/contracts';
+import { tronApiBase, usdtContract } from './tron/contracts';
 import type { Env } from '../env';
-import type { PayNetwork } from './flags';
+import { payFlags, type PayNetwork } from './flags';
 
 export const DEFAULT_FEE_LIMIT_SUN = 30_000_000; // 30 TRX — с запасом на энергию
 export const DEFAULT_API = 'https://api.trongrid.io';
@@ -133,6 +133,7 @@ export async function sendUsdt(
 /** Настоящий TronGrid с ключом из секретов Worker. */
 export function trongridTransport(env: Env, fetchImpl: typeof fetch = fetch): TronTransport {
   return {
+    apiBase: tronApiBase(payFlags(env).network),
     fetchJson: async (url: string, init?: { method?: string; body?: string }) => {
       const headers: Record<string, string> = { 'content-type': 'application/json' };
       if (env.TRONGRID_API_KEY) headers['TRON-PRO-API-KEY'] = env.TRONGRID_API_KEY;

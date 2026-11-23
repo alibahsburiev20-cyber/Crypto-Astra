@@ -3,6 +3,7 @@ import { cleanupAuthLimits } from './auth/rateLimit';
 import { ensureArchiveSchema } from './db/bootstrap';
 import { payFlags } from './pay/flags';
 import { applyDeposits, scanAll, trongridFetcher } from './pay/monitor';
+import { tronApiBase } from './pay/tron/contracts';
 import { ensurePaySchema } from './pay/schema';
 import { reconcileAndFlag } from './pay/reconcile';
 import { usdtContracts } from './pay/tron/contracts';
@@ -88,6 +89,7 @@ export default {
         const summary = await scanAll(env.DB, {
           fetchJson: trongridFetcher(env.TRONGRID_API_KEY),
           contracts: usdtContracts(env, pay.network),
+          apiBase: tronApiBase(pay.network),
         }, Date.now(), 20);
         const applied = await applyDeposits(env.DB, Date.now(), 100);
         if (summary.stored || summary.errors.length || applied.credited) {

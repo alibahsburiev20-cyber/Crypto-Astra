@@ -9,6 +9,11 @@ import {
 import {
   TRANSFER_TOPIC, parseAccountTransfer, parseContractLog, isIncomingTransfer, TransferError,
 } from '../../src/pay/tron/transfer';
+import {
+  TRON_API_MAINNET, TRON_API_NILE, defaultContract, tronApiBase, USDT_NILE,
+} from '../../src/pay/tron/contracts';
+import { trongridTransport } from '../../src/pay/broadcast';
+import type { Env } from '../../src/env';
 
 // Векторы взяты из настоящей сети: контракт USDT в mainnet.
 const USDT_CONTRACT = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
@@ -201,5 +206,26 @@ describe('лог контракта из полного узла', () => {
 
   it('неуспешная транзакция не даёт перевода', () => {
     expect(() => parseContractLog(log(), { ...tx, ret: 'OUT_OF_ENERGY' }, opts)).toThrow(/not_success/);
+  });
+});
+
+// Тестнет — единственный способ проверить деньги бесплатно. Для этого сеть
+// должна переключать не только контракт USDT, но и адрес TronGrid: иначе монитор
+// на nile стучится в mainnet и «не видит» переводы, а тест выглядит как поломка.
+describe('сеть и адреса TronGrid', () => {
+  it('nile и mainnet ведут на разные хосты и разные контракты', () => {
+    expect(tronApiBase('nile')).toBe(TRON_API_NILE);
+    expect(tronApiBase('mainnet')).toBe(TRON_API_MAINNET);
+    expect(tronApiBase('mainnet')).not.toBe(tronApiBase('nile'));
+    expect(defaultContract('nile')).toBe(USDT_NILE);
+    expect(defaultContract('mainnet')).toBe('TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t');
+  });
+
+  it('транспорт выплат берёт хост из PAY_NETWORK', () => {
+    const env = (network: string) => ({ PAY_NETWORK: network }) as unknown as Env;
+    expect(trongridTransport(env('nile')).apiBase).toBe(TRON_API_NILE);
+    expect(trongridTransport(env('mainnet')).apiBase).toBe(TRON_API_MAINNET);
+    // Пустое значение — как в превью: остаёмся на тестнете, а не на живых деньгах.
+    expect(trongridTransport(env('')).apiBase).toBe(TRON_API_NILE);
   });
 });

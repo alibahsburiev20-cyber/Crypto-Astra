@@ -384,6 +384,51 @@ Access; `curl` без cookie даёт 302/403, а не 401 от нашего к�
 `contractRet`, контракт, адрес). Ничего не «докручивать» вручную, пока не понятна
 причина.
 
+### T6a. Бесплатная проверка на тестнете (nile), если денег нет
+
+Живые 1 USDT не обязательны, чтобы проверить весь путь: `PAY_NETWORK=nile`
+переключает и контракт USDT (`TXLAQ63Xg1NAzckPwKHvzw7CSEmLMEqcdj`), и хост
+TronGrid (`nile.trongrid.io`). Тестовые TRX бесплатные, тестовый USDT — из
+faucet'а Nile или свой TRC-20 (адрес контракта задаётся `PAY_USDT_CONTRACT`).
+
+Отдельная среда, чтобы не смешивать с продом:
+
+1. Создать базу: `npx wrangler d1 create astra-staging` → взять `database_id`.
+2. Добавить в `wrangler.toml`:
+
+   ```toml
+   [env.staging]
+   name = "crypto-astra-staging"
+   workers_dev = true
+
+   [env.staging.vars]
+   APP_BUILD = "staging"
+   PAYMENTS_ENABLED = "on"
+   DEPOSITS_ENABLED = "on"
+   PURCHASES_ENABLED = "on"
+   POOL_ENABLED = "off"
+   PAYOUTS_ENABLED = "off"
+   SWEEP_ENABLED = "off"
+   PAY_NETWORK = "nile"
+
+   [[env.staging.d1_databases]]
+   binding = "DB"
+   database_name = "astra-staging"
+   database_id = "<из шага 1>"
+   ```
+
+   Плюс `[[env.staging.durable_objects]]` для `WORLD` и `LOBBY` и
+   `[[env.staging.services]]` с тем же `SIGNER`, если Signer уже есть.
+3. Секреты среды: `npx wrangler secret put JWT_SECRET --env staging` (и
+   `ADMIN_TOKEN`, `SIGNER_TOKEN`).
+4. Деплой: `npx wrangler deploy --env staging`.
+5. Проверка: `wallets:"ready"`, адрес выдаётся, затем перевод тестовых USDT на
+   этот адрес и `credited` в `/admin/pay` в течение пары минут.
+
+**Чего это не заменяет:** проверку mainnet-контракта и реального лимита
+TronGrid. Поэтому перед публичным запуском T6 (1 USDT на mainnet) всё равно
+нужен, но его можно отложить — тестнет показывает, что код работает.
+
 ### T7. Продовый замер нагрузки (только чтение)
 
 ```bash
