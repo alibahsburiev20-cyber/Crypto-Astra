@@ -8,7 +8,8 @@ import {
   referralApply, repair, season, shipBuy, social, startExpedition,
 } from '../routes/game';
 import {
-  adminPay, adminPaySend, adminPayStop, adminPayWithdrawal, payAccount, payAddress, payProducts, payPurchase,
+  adminPay, adminPaySend, adminPayStop, adminPaySweepPlan, adminPayWithdrawal,
+  payAccount, payAddress, payProducts, payPurchase,
   payStatus, payWithdraw, payWithdrawals,
 } from '../routes/pay';
 import { adminPool, adminPoolEntry, poolPublic } from '../routes/pool';
@@ -42,8 +43,10 @@ export async function route(request: Request, env: Env): Promise<Response> {
       if (m === 'POST' && p === '/pay/withdraw') return await payWithdraw(request, env, auth);
       return json({ error: 'not_found' }, 404);
     }
-    if (p === '/admin/pay' || p === '/admin/pay/withdrawal' || p === '/admin/pay/stop' || p === '/admin/pay/send') {
+    if (p === '/admin/pay' || p === '/admin/pay/withdrawal' || p === '/admin/pay/stop'
+      || p === '/admin/pay/send' || p === '/admin/pay/sweep/plan') {
       if (m === 'GET' && p === '/admin/pay') return await adminPay(request, env);
+      if (m === 'GET' && p === '/admin/pay/sweep/plan') return await adminPaySweepPlan(request, env);
       if (m === 'POST' && p === '/admin/pay/withdrawal') return await adminPayWithdrawal(request, env);
       if (m === 'POST' && p === '/admin/pay/stop') return await adminPayStop(request, env);
       if (m === 'POST' && p === '/admin/pay/send') return await adminPaySend(request, env);
