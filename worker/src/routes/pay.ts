@@ -5,10 +5,13 @@ import { ensureAddress, findAddress, signerDeriver } from '../pay/addresses';
 import { payFlags, publicFlags, walletState } from '../pay/flags';
 import { payBalanceMicro, payHistory } from '../pay/ledger';
 import { prizeSharePercent, usdtPoolBlock } from '../pay/pool';
-import { sweepChainDeps, sweepPlan } from '../pay/sweep';
+import { accountBalances, sweepChainDeps, sweepPlan } from '../pay/sweep';
+import {
+  MAX_PRIZE_AWARD_MICRO, PrizeError, awardPrize, listPrizes, prizeSummary,
+} from '../pay/prize';
 import { ensurePaySchema, PAY_SCHEMA_VERSION, PAY_TABLES } from '../pay/schema';
 import { ShopError, catalogForClient, entitlements, premiumStatus, purchase } from '../pay/shop';
-import { formatMicroUsdt } from '../pay/tron/amount';
+import { formatMicroUsdt, isMicroAmount, parseUsdtToMicro } from '../pay/tron/amount';
 import { usdtContract } from '../pay/tron/contracts';
 import { requireAdmin } from '../http/admin';
 import {
@@ -385,4 +388,118 @@ export async function adminPaySweepPlan(request: Request, env: Env): Promise<Res
     flags: { sweep: flags.sweep, payouts: flags.payouts, network: flags.network },
     plan,
   }, 200, { 'Cache-Control': 'no-store' });
+}
+
+
+// --- Призы из фонда сезона ----------------------------------------------------
+//
+// Фонд = 40 % выручки магазина. Приз списывается из фонда и зачисляется на
+// баланс игрока; дальше деньги уходят обычным выводом. Здесь нет ни подписи, ни
+// отправки — только «записать приз в деньги игрока».
+//
+// Главное ограничение зашито в SQL: `prize_budget >= сумма`. Пообещать больше,
+// чем накоплено, нельзя даже двумя одновременными запросами.
+
+/** Что в фонде, что уже выдано и чем реально можно платить (USDT на кошельке). */
+export async function adminPayPrize(request: Request, env: Env): Promise<Response> {
+  await requireAdmin(request, env);
+  if (!(await ensurePaySchema(env.DB))) throw new ApiError(503, 'pay_unavailable');
+  const now = Date.now();
+  const flags = payFlags(env);
+  const owner = String(env.PAY_HOT_ADDRESS ?? '').trim();
+
+  const [summary, awards] = await Promise.all([
+    prizeSummary(env.DB, now),
+    listPrizes(env.DB, 20),
+  ]);
+
+  // Баланс кошелька читаем, только если он задан: без адреса это бессмысленный
+  // запрос в сеть на каждый просмотр админки.
+  let wallet: { address: string; usdtMicro: number; usdt: string; trxSun: number; error: string | null } | null = null;
+  if (owner) {
+    try {
+      const balances = await accountBalances(
+        sweepChainDeps(trongridFetcher(env.TRONGRID_API_KEY), flags.network, env), owner,
+      );
+      wallet = {
+        address: owner,
+        usdtMicro: balances.usdtMicro,
+        usdt: formatMicroUsdt(balances.usdtMicro),
+        trxSun: balances.trxSun,
+        error: null,
+      };
+    } catch (e) {
+      wallet = { address: owner, usdtMicro: 0, usdt: '0.00', trxSun: 0, error: 'chain_error' };
+    }
+  }
+
+  return json({
+    ok: true,
+    prize: summary,
+    awards,
+    wallet,
+    flags: { payouts: flags.payouts, network: flags.network },
+    now,
+  }, 200, { 'Cache-Control': 'no-store' });
+}
+
+/**
+ * Начислить приз. `dryRun` (по умолчанию `true`) показывает, что произойдёт, и
+ * ничего не пишет: первый вызов должен быть проверкой, а не списанием.
+ */
+export async function adminPayPrizeAward(request: Request, env: Env): Promise<Response> {
+  await requireAdmin(request, env);
+  if (!(await ensurePaySchema(env.DB))) throw new ApiError(503, 'pay_unavailable');
+
+  const body = await readJsonObject(request);
+  const userId = String(body.userId ?? '').trim();
+  const rawAmount = body.amountMicro ?? body.amount ?? 0;
+  let amountMicro: number;
+  try {
+    amountMicro = isMicroAmount(body.amountMicro) ? Number(body.amountMicro) : parseUsdtToMicro(rawAmount as string | number);
+  } catch {
+    throw new ApiError(400, 'bad_amount');
+  }
+  const note = String(body.note ?? '').slice(0, 200);
+  const idemKey = String(request.headers.get('Idempotency-Key') ?? body.idemKey ?? '').trim();
+  const dryRun = body.dryRun !== false;
+
+  if (amountMicro > MAX_PRIZE_AWARD_MICRO) throw new ApiError(422, 'above_maximum');
+  if (!idemKey) throw new ApiError(400, 'bad_idem_key');
+
+  const now = Date.now();
+  const summary = await prizeSummary(env.DB, now);
+
+  if (dryRun) {
+    return json({
+      ok: true,
+      dryRun: true,
+      willAward: {
+        userId,
+        amountMicro,
+        amount: formatMicroUsdt(amountMicro),
+        note,
+        // Сколько останется в фонде, если приз пройдёт.
+        budgetAfterMicro: summary.budgetMicro - amountMicro,
+        budgetAfter: formatMicroUsdt(summary.budgetMicro - amountMicro),
+        enough: summary.budgetMicro >= amountMicro,
+      },
+      prize: summary,
+      now,
+    }, 200, { 'Cache-Control': 'no-store' });
+  }
+
+  try {
+    const award = await awardPrize(env.DB, { userId, amountMicro, note, idemKey }, now);
+    return json({ ok: true, dryRun: false, award }, award.duplicated ? 200 : 201);
+  } catch (e) {
+    if (e instanceof PrizeError) {
+      const status = e.code === 'insufficient_prize_fund' ? 409
+        : e.code === 'above_maximum' ? 422
+        : e.code === 'no_open_cycle' ? 409
+        : 400;
+      throw new ApiError(status, e.code);
+    }
+    throw e;
+  }
 }

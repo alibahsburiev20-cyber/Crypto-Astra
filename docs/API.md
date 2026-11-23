@@ -79,6 +79,8 @@ purchasesEnabled, history[], entitlements[] }`. История — только 
 | POST | `/admin/pay/stop` | админ | `{ stop: true/false, reason }` — стоп-флаг выплат |
 | POST | `/admin/pay/send` | админ | `{ id }` — собрать, подписать в Signer и отправить заявку в состоянии `reserved` |
 | GET | `/admin/pay/sweep/plan` | админ | план сбора: по каждому адресу USDT, TRX, хватает ли на комиссию; ничего не двигает |
+| GET | `/admin/pay/prize` | админ | сколько в призовом фонде, сколько выдано, баланс кошелька (USDT/TRX) и последние призы |
+| POST | `/admin/pay/prize/award` | админ | начислить приз из фонда на баланс игрока; `dryRun` по умолчанию, сумма не больше остатка фонда |
 
 Админка пока закрыта заголовком `X-Admin-Token` (срез 5.3 заменит его на
 Cloudflare Access, токен останется вторым замком).
