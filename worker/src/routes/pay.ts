@@ -5,7 +5,8 @@ import { ensureAddress, findAddress, signerDeriver } from '../pay/addresses';
 import { payFlags, publicFlags, walletState } from '../pay/flags';
 import { payBalanceMicro, payHistory } from '../pay/ledger';
 import { prizeSharePercent, usdtPoolBlock } from '../pay/pool';
-import { accountBalances, sweepChainDeps, sweepPlan } from '../pay/sweep';
+import { SWEEP_FEE_SUN, accountBalances, sweepChainDeps, sweepPlan } from '../pay/sweep';
+import { hotWalletState } from '../pay/hotwallet';
 import {
   MAX_PRIZE_AWARD_MICRO, PrizeError, awardPrize, listPrizes, prizeSummary,
 } from '../pay/prize';
@@ -340,6 +341,30 @@ export async function adminPaySend(request: Request, env: Env): Promise<Response
   const owner = String(env.PAY_HOT_ADDRESS ?? '');
   if (!owner) throw new ApiError(503, 'hot_wallet_missing');
   if (!env.SIGNER) throw new ApiError(503, 'signer_not_configured');
+
+  // Платить нечем — говорим сразу и оставляем заявку в `reserved`.
+  // Раньше такой перевод уходил в сеть и падал там, а игрок видел «отправляется».
+  const wallet = await hotWalletState(
+    sweepChainDeps(trongridFetcher(env.TRONGRID_API_KEY), flags.network, env),
+    owner,
+    Number(row.amount_micro),
+  );
+  if (wallet.blocker) {
+    // 409, а не 502: ничего не сломалось, просто нечем платить. Заявка остаётся
+    // `reserved`, деньги с баланса игрока уже списаны и не потеряны.
+    return json({
+      ok: false,
+      error: wallet.blocker,
+      withdrawal: { id: row.id, status: row.status, amount: formatMicroUsdt(Number(row.amount_micro)) },
+      wallet: {
+        address: wallet.address,
+        usdt: wallet.usdt,
+        shortfall: wallet.shortfall,
+        trxSun: wallet.trxSun,
+        needTrxSun: SWEEP_FEE_SUN,
+      },
+    }, 409);
+  }
 
   const attemptRow = await env.DB.prepare('SELECT COUNT(*) AS c FROM pay_payouts WHERE withdrawal_id = ?')
     .bind(id).first<number>('c');
