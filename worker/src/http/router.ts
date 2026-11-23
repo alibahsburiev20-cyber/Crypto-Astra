@@ -8,7 +8,7 @@ import {
   referralApply, repair, season, shipBuy, social, startExpedition,
 } from '../routes/game';
 import {
-  adminPay, adminPayPrize, adminPayPrizeAward, adminPaySend, adminPayStop,
+  adminPay, adminPayPrize, adminPayPrizeAward, adminPaySend, adminPaySolvency, adminPayStop,
   adminPaySweepPlan, adminPayWithdrawal,
   payAccount, payAddress, payProducts, payPurchase,
   payStatus, payWithdraw, payWithdrawals,
@@ -46,10 +46,12 @@ export async function route(request: Request, env: Env): Promise<Response> {
     }
     if (p === '/admin/pay' || p === '/admin/pay/withdrawal' || p === '/admin/pay/stop'
       || p === '/admin/pay/send' || p === '/admin/pay/sweep/plan'
-      || p === '/admin/pay/prize' || p === '/admin/pay/prize/award') {
+      || p === '/admin/pay/prize' || p === '/admin/pay/prize/award'
+      || p === '/admin/pay/solvency') {
       if (m === 'GET' && p === '/admin/pay') return await adminPay(request, env);
       if (m === 'GET' && p === '/admin/pay/sweep/plan') return await adminPaySweepPlan(request, env);
       if (m === 'GET' && p === '/admin/pay/prize') return await adminPayPrize(request, env);
+      if (m === 'GET' && p === '/admin/pay/solvency') return await adminPaySolvency(request, env);
       if (m === 'POST' && p === '/admin/pay/prize/award') return await adminPayPrizeAward(request, env);
       if (m === 'POST' && p === '/admin/pay/withdrawal') return await adminPayWithdrawal(request, env);
       if (m === 'POST' && p === '/admin/pay/stop') return await adminPayStop(request, env);
