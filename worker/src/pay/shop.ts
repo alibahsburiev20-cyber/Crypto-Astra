@@ -16,6 +16,7 @@
 
 import { formatMicroUsdt } from './tron/amount';
 import { payBalanceMicro, payLedgerHead, payCanonical } from './ledger';
+import { PRIZE_SHARE_DEFAULT, ensureOpenCycle, prizeFromPrice } from './pool';
 import { sha256Hex } from '../shared/sha256';
 
 export type ProductKind = 'cosmetic' | 'service' | 'premium';
@@ -160,6 +161,8 @@ export async function purchase(
   db: D1Database,
   input: PurchaseInput,
   now: number,
+  /** Доля выручки в призовой фонд, % (`POOL_PRIZE_SHARE`, по умолчанию 40). */
+  prizePercent: number = PRIZE_SHARE_DEFAULT,
 ): Promise<PurchaseResult> {
   const product = findProduct(String(input.productId ?? ''));
   if (!product || !product.enabled) throw new ShopError('unknown_product');
@@ -191,6 +194,17 @@ export async function purchase(
     createdAt: now,
   };
   const hash = sha256Hex(payCanonical(entry, prev));
+  const prizeMicro = prizeFromPrice(product.priceMicro, prizePercent);
+
+  // Призовой фонд — доля нашей выручки, а не взносы игроков. Цикл пула может
+  // отсутствовать; это не повод отменять покупку, поэтому ошибка только в лог.
+  if (prizeMicro > 0) {
+    try {
+      await ensureOpenCycle(db, now);
+    } catch (e) {
+      console.error('prize cycle failed', e);
+    }
+  }
 
   try {
     await db.batch([
@@ -216,8 +230,14 @@ export async function purchase(
         'INSERT INTO pay_audit_log (id, actor, action, target, payload, created_at) VALUES (?, ?, ?, ?, ?, ?)',
       ).bind(
         `au_${hashId(idemKey)}`, input.userId, 'purchase', product.id,
-        JSON.stringify({ priceMicro: product.priceMicro, idemKey: rawKey }), now,
+        JSON.stringify({ priceMicro: product.priceMicro, idemKey: rawKey, prizeMicro }), now,
       ),
+      // Начисление в призовой фонд ровно один раз: только если запись журнала
+      // с этим ключом реально появилась (повтор того же заказа не удвоит фонд).
+      db.prepare(
+        `UPDATE pay_pool_cycles SET prize_budget = prize_budget + ?
+          WHERE status = 'open' AND EXISTS (SELECT 1 FROM pay_ledger WHERE idem_key = ?)`,
+      ).bind(prizeMicro, idemKey),
     ]);
   } catch (e) {
     const again = await db.prepare('SELECT id FROM pay_entitlements WHERE user_id = ? AND purchase_id = ?')

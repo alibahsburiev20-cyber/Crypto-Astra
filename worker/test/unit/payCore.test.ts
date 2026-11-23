@@ -7,7 +7,8 @@ import {
 import { applyDeposits, scanAddress, scanAll } from '../../src/pay/monitor';
 import { catalogForClient, entitlements, purchase, ShopError } from '../../src/pay/shop';
 import {
-  addPoolIncome, availableMicro, closeCycle, ensureOpenCycle, reservePayout, usdtPoolBlock,
+  addPoolIncome, availableMicro, closeCycle, ensureOpenCycle, prizeFromPrice, prizeSharePercent,
+  reservePayout, usdtPoolBlock,
 } from '../../src/pay/pool';
 import { hexToBase58 } from '../../src/pay/tron/address';
 
@@ -329,3 +330,51 @@ function makeD1Raw(db: D1Database) {
   if (!raw) throw new Error('raw недоступен');
   return raw;
 }
+
+// Призовой фонд: 40% от выручки магазина, а не взносы игроков.
+// Проверяем ровно то, что обещано в интерфейсе: фонд растёт только от покупок,
+// повтор того же заказа его не удваивает, а доля настраивается без правки кода.
+describe('призовой фонд из выручки', () => {
+  it('40% от цены покупки уходит в фонд сезона', async () => {
+    const db = await freshDb();
+    await appendPayLedger(db, { userId: 'u1', delta: 10_000_000, reason: 'deposit', sourceRef: 't1', idemKey: 'dep:t1', createdAt: T0 });
+    await ensureOpenCycle(db, T0);
+
+    await purchase(db, { userId: 'u1', productId: 'premium_30', idemKey: 'premium-0001' }, T0);
+
+    const block = await usdtPoolBlock(db, T0);
+    // Premium — 5 USDT, значит в фонд 40% = 2 USDT.
+    expect(block.prizeBudget).toBe(2_000_000);
+    expect(block.prizeBudgetText).toBe('2.00');
+    // Взносов игроков нет: confirmed_in не двигается от покупок.
+    expect(block.confirmedIn).toBe(0);
+  });
+
+  it('повторная покупка с тем же ключом не удваивает фонд', async () => {
+    const db = await freshDb();
+    await appendPayLedger(db, { userId: 'u1', delta: 10_000_000, reason: 'deposit', sourceRef: 't2', idemKey: 'dep:t2', createdAt: T0 });
+    await ensureOpenCycle(db, T0);
+
+    await purchase(db, { userId: 'u1', productId: 'skin_nebula', idemKey: 'order-0001' }, T0);
+    await purchase(db, { userId: 'u1', productId: 'skin_nebula', idemKey: 'order-0001' }, T0 + 1);
+
+    // Корпус — 2 USDT, 40% = 0.8 USDT, ровно один раз.
+    expect((await usdtPoolBlock(db, T0)).prizeBudget).toBe(800_000);
+  });
+
+  it('доля берётся из конфигурации и не превышает цену', async () => {
+    const db = await freshDb();
+    await appendPayLedger(db, { userId: 'u1', delta: 10_000_000, reason: 'deposit', sourceRef: 't3', idemKey: 'dep:t3', createdAt: T0 });
+    await ensureOpenCycle(db, T0);
+
+    await purchase(db, { userId: 'u1', productId: 'badge_pioneer', idemKey: 'order-0003' }, T0, 100);
+    expect((await usdtPoolBlock(db, T0)).prizeBudget).toBe(1_000_000);
+
+    expect(prizeFromPrice(1_000_000, 40)).toBe(400_000);
+    expect(prizeFromPrice(0, 40)).toBe(0);
+    expect(prizeSharePercent('40')).toBe(40);
+    expect(prizeSharePercent('')).toBe(40);
+    expect(prizeSharePercent('200')).toBe(40);
+    expect(prizeSharePercent('0')).toBe(0);
+  });
+});
