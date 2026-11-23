@@ -509,7 +509,7 @@ function profileCard() {
     el('div', { class: 'profile-info' },
       el('b', { class: `profile-name ${style ? style.cls : ''}` }, callsign()),
       el('p', { class: 'muted' },
-        style === SKIN_STYLE.premium ? 'Astra Premium: рамка, след и второй слот крафта.'
+        style === SKIN_STYLE.premium ? 'Astra Premium: рамка, след и значок.'
           : style ? 'Купленный скин: цвет позывного, рамка и след двигателя.'
             : 'Косметики нет — купите скин или Premium в магазине.'),
       el('div', { class: 'profile-medals' },
@@ -1171,7 +1171,7 @@ function renderBonus() {
         el('h3', {}, 'Premium'),
         premium
           ? el('p', { class: 'muted' }, `Astra Premium активен до ${new Date(premium.until || 0).toLocaleDateString('ru-RU')}. Значок и эксклюзивный корпус — в профиле.`)
-          : el('p', { class: 'muted' }, 'Значок Premium, эксклюзивный корпус и второй слот Pass. Без влияния на экономику.'),
+          : el('p', { class: 'muted' }, 'Значок Premium, эксклюзивный корпус, +1 ячейка гаража и +2 попытки арены. Без влияния на экономику.'),
         el('a', { class: 'cta cta-small', href: '/pay.html' }, premium ? 'Магазин' : 'Открыть магазин')),
       el('div', { class: 'block' },
         el('h3', {}, 'Как это работает'),

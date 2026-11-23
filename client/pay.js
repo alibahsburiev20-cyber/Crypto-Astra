@@ -168,7 +168,7 @@ async function loadAccount() {
     '[data-pay="premium"]',
     premium?.active
       ? `Premium активен${premium.until ? ` до ${new Date(premium.until).toLocaleDateString('ru-RU')}` : ''}.`
-      : 'Premium не активен: 5 USDT за 30 дней — значок, эксклюзивный корпус и второй слот Pass.',
+      : 'Premium не активен: 5 USDT за 30 дней — значок, эксклюзивный корпус, +1 ячейка гаража и +2 попытки арены.',
   );
   renderHistory(res.data.history);
 }
