@@ -7,6 +7,7 @@ import { payBalanceMicro, payHistory } from '../pay/ledger';
 import { prizeSharePercent, usdtPoolBlock } from '../pay/pool';
 import { SWEEP_FEE_SUN, accountBalances, sweepChainDeps, sweepPlan } from '../pay/sweep';
 import { hotWalletState } from '../pay/hotwallet';
+import { solvencySheet } from '../pay/solvency';
 import {
   MAX_PRIZE_AWARD_MICRO, PrizeError, awardPrize, listPrizes, prizeSummary,
 } from '../pay/prize';
@@ -527,4 +528,51 @@ export async function adminPayPrizeAward(request: Request, env: Env): Promise<Re
     }
     throw e;
   }
+}
+
+
+// --- Баланс целиком: обязательства против блокчейна ---------------------------
+//
+// «Можно всё суммировать?» — деньги и так лежат в одном контуре, но важен не
+// факт, а сравнение: сколько мы должны игрокам и сколько реально есть. Если
+// обязательств больше, чем активов, выплаты финансируются будущими взносами,
+// и это надо видеть ДО того, как первый игрок нажмёт «вывести».
+
+export async function adminPaySolvency(request: Request, env: Env): Promise<Response> {
+  await requireAdmin(request, env);
+  if (!(await ensurePaySchema(env.DB))) throw new ApiError(503, 'pay_unavailable');
+  const flags = payFlags(env);
+  const owner = String(env.PAY_HOT_ADDRESS ?? '').trim();
+  const deps = sweepChainDeps(trongridFetcher(env.TRONGRID_API_KEY), flags.network, env);
+
+  const plan = await sweepPlan({
+    db: env.DB,
+    deps,
+    network: flags.network,
+    destination: owner,
+    sweepEnabled: flags.sweep,
+  });
+  const chainErrors = plan.rows.filter((row) => row.blocker === 'chain_error').length;
+
+  const hot = owner ? await hotWalletState(deps, owner, 0) : null;
+
+  const sheet = await solvencySheet(env.DB, {
+    // Часть адресов не прочиталась — активы неполные, и «покрыто» утверждать нельзя.
+    addressesMicro: chainErrors > 0 ? null : plan.totals.usdtMicro,
+    hotMicro: hot && !hot.error ? hot.usdtMicro : null,
+    addresses: plan.addresses,
+    chainErrors,
+  });
+
+  return json({
+    ok: true,
+    sheet,
+    plan: {
+      addresses: plan.addresses,
+      chainErrors,
+      totals: plan.totals,
+      ready: plan.ready,
+      reason: plan.reason,
+    },
+  }, 200, { 'Cache-Control': 'no-store' });
 }
