@@ -134,14 +134,43 @@ ADMIN_TOKEN=<значение секрета>
 
 ### T1. Миграции D1 (без денег, безопасно)
 
+**Если журнал отстаёт от схемы — это норма, а не авария.** Прод деплоится из
+браузера, поэтому таблицы создаёт код (`ensurePaySchema`, `ensurePoolSchema`
+в `worker/src/db/bootstrap.ts`). В `d1_migrations` при этом может быть только
+`0001–0005`, хотя таблицы `pool_entries` и 14 таблиц `pay_*` уже существуют.
+С миграции от 2026-11-17 все объекты в `0006`/`0007` объявлены с
+`IF NOT EXISTS`, поэтому прогон на такой базе — безопасный no-op: он не
+пересоздаёт таблицы и не трогает данные, а только дописывает журнал.
+
+**Сначала зафиксируй «до» (чтобы потом было с чем сравнить):**
+
+```bash
+npx wrangler d1 execute DB --remote --command \
+  "SELECT COUNT(*) AS tables FROM sqlite_master WHERE type='table'"
+npx wrangler d1 execute DB --remote --command \
+  "SELECT name FROM d1_migrations ORDER BY name"
+npx wrangler d1 execute DB --remote --command \
+  "SELECT COUNT(*) AS pay_rows FROM pay_ledger"
+```
+
+Запомни три числа. Затем:
+
 ```bash
 npx wrangler d1 migrations list DB --remote
 npx wrangler d1 migrations apply DB --remote
 npx wrangler d1 migrations apply DB --remote --preview   # база превью
 ```
 
-**Проверка:** `GET /pay/status.json` → `"schema":"ready"`, `"tables":14`;
+**Проверка:** те же три запроса. Ожидаемо: число таблиц **не изменилось**
+(было 22 — осталось 22), в журнале теперь `0001–0007`, `pay_ledger` не потерял
+ни одной строки. Плюс `GET /pay/status.json` → `"schema":"ready"`, `"tables":14`,
 `GET /health` → `200`.
+
+**Если `migrations apply` всё же упал** — не удалять таблицы и не «чинить»
+журнал вручную: остановиться, прислать владельцу текст ошибки. Единственный
+разрешённый ручной шаг — `INSERT INTO d1_migrations` для уже применённой
+миграции, и только с письменного согласия владельца.
+
 **Успех:** ошибок 5xx нет, `tables` = 14.
 **Откат:** у D1 нет «отмены миграции»; восстанавливать из Time Travel
 (Dashboard → D1 → astra-global → Time Travel). Поэтому миграции применяются
