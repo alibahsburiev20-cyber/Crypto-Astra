@@ -5,6 +5,7 @@ import { ensureAddress, findAddress, signerDeriver } from '../pay/addresses';
 import { payFlags, publicFlags, walletState } from '../pay/flags';
 import { payBalanceMicro, payHistory } from '../pay/ledger';
 import { prizeSharePercent, usdtPoolBlock } from '../pay/pool';
+import { sweepChainDeps, sweepPlan } from '../pay/sweep';
 import { ensurePaySchema, PAY_SCHEMA_VERSION, PAY_TABLES } from '../pay/schema';
 import { ShopError, catalogForClient, entitlements, premiumStatus, purchase } from '../pay/shop';
 import { formatMicroUsdt } from '../pay/tron/amount';
@@ -18,6 +19,7 @@ import {
 import { isPayoutsStopped, reconcile, setPayoutsStop } from '../pay/reconcile';
 import { ownedCosmetics } from '../pay/cosmetics';
 import { BroadcastError, sendUsdt, signerClient, trongridTransport } from '../pay/broadcast';
+import { trongridFetcher } from '../pay/monitor';
 import { usdtContract as usdtContractOf } from '../pay/tron/contracts';
 import { ApiError } from '../world/errors';
 
@@ -356,4 +358,31 @@ export async function adminPaySend(request: Request, env: Env): Promise<Response
     }
     throw e;
   }
+}
+
+
+// --- План сбора (sweep): только чтение ---------------------------------------
+
+/**
+ * Что можно собрать в кошелёк владельца и сколько для этого нужно TRX.
+ * Ничего не подписывает и не отправляет: сначала цифры, потом решение.
+ */
+export async function adminPaySweepPlan(request: Request, env: Env): Promise<Response> {
+  await requireAdmin(request, env);
+  if (!(await ensurePaySchema(env.DB))) throw new ApiError(503, 'pay_unavailable');
+  const flags = payFlags(env);
+
+  const plan = await sweepPlan({
+    db: env.DB,
+    deps: sweepChainDeps(trongridFetcher(env.TRONGRID_API_KEY), flags.network, env),
+    network: flags.network,
+    destination: String(env.PAY_HOT_ADDRESS ?? '').trim(),
+    sweepEnabled: flags.sweep,
+  });
+
+  return json({
+    ok: true,
+    flags: { sweep: flags.sweep, payouts: flags.payouts, network: flags.network },
+    plan,
+  }, 200, { 'Cache-Control': 'no-store' });
 }
