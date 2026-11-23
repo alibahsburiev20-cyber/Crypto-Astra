@@ -9,9 +9,14 @@
 -- оттуда не запустить. Эта миграция — канон для локальной разработки и для тех,
 -- у кого есть терминал.
 --
+-- Следствие, из-за которого здесь везде `IF NOT EXISTS`: журнал `d1_migrations`
+-- может отставать от фактической схемы (таблицы уже есть, записи о миграции нет).
+-- Повторный прогон на такой базе должен быть no-op, иначе T1 превращается в
+-- «удалить и создать заново» — а это потеря данных.
+--
 -- Деньги по умолчанию выключены: таблицы есть, операций нет.
 
-CREATE TABLE pay_addresses (
+CREATE TABLE IF NOT EXISTS pay_addresses (
   id               TEXT PRIMARY KEY,
   user_id          TEXT NOT NULL UNIQUE,
   address          TEXT NOT NULL UNIQUE,
@@ -23,9 +28,9 @@ CREATE TABLE pay_addresses (
   created_at       INTEGER NOT NULL
 );
 
-CREATE INDEX idx_pay_addresses_active ON pay_addresses (active, created_at);
+CREATE INDEX IF NOT EXISTS idx_pay_addresses_active ON pay_addresses (active, created_at);
 
-CREATE TABLE pay_invoices (
+CREATE TABLE IF NOT EXISTS pay_invoices (
   id           TEXT PRIMARY KEY,
   user_id      TEXT NOT NULL,
   product_id   TEXT,
@@ -40,9 +45,9 @@ CREATE TABLE pay_invoices (
 );
 
 -- Один активный счёт на игрока: два открытых счёта — путь к двойной оплате.
-CREATE UNIQUE INDEX ux_pay_invoices_open ON pay_invoices (user_id) WHERE status = 'open';
+CREATE UNIQUE INDEX IF NOT EXISTS ux_pay_invoices_open ON pay_invoices (user_id) WHERE status = 'open';
 
-CREATE TABLE pay_chain_blocks (
+CREATE TABLE IF NOT EXISTS pay_chain_blocks (
   height         INTEGER PRIMARY KEY,
   block_id       TEXT NOT NULL,
   parent_id      TEXT NOT NULL DEFAULT '',
@@ -50,7 +55,7 @@ CREATE TABLE pay_chain_blocks (
   processed_at   INTEGER NOT NULL
 );
 
-CREATE TABLE pay_chain_events (
+CREATE TABLE IF NOT EXISTS pay_chain_events (
   txid         TEXT NOT NULL,
   event_index  INTEGER NOT NULL,
   block_height INTEGER NOT NULL,
@@ -65,10 +70,10 @@ CREATE TABLE pay_chain_events (
   PRIMARY KEY (txid, event_index)
 );
 
-CREATE INDEX idx_pay_chain_events_block ON pay_chain_events (block_height);
-CREATE INDEX idx_pay_chain_events_to ON pay_chain_events (to_addr, block_height);
+CREATE INDEX IF NOT EXISTS idx_pay_chain_events_block ON pay_chain_events (block_height);
+CREATE INDEX IF NOT EXISTS idx_pay_chain_events_to ON pay_chain_events (to_addr, block_height);
 
-CREATE TABLE pay_deposits (
+CREATE TABLE IF NOT EXISTS pay_deposits (
   id            TEXT PRIMARY KEY,
   txid          TEXT NOT NULL,
   event_index   INTEGER NOT NULL,
@@ -84,11 +89,11 @@ CREATE TABLE pay_deposits (
   UNIQUE (txid, event_index)
 );
 
-CREATE INDEX idx_pay_deposits_user ON pay_deposits (user_id, created_at);
-CREATE INDEX idx_pay_deposits_status ON pay_deposits (status, created_at);
+CREATE INDEX IF NOT EXISTS idx_pay_deposits_user ON pay_deposits (user_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_pay_deposits_status ON pay_deposits (status, created_at);
 
 -- Финансовый Ledger. Append-only: исправление — новая строка с обратным знаком.
-CREATE TABLE pay_ledger (
+CREATE TABLE IF NOT EXISTS pay_ledger (
   id         TEXT PRIMARY KEY,
   user_id    TEXT NOT NULL,
   asset      TEXT NOT NULL DEFAULT 'USDT' CHECK (asset = 'USDT'),
@@ -102,16 +107,16 @@ CREATE TABLE pay_ledger (
   created_at INTEGER NOT NULL
 );
 
-CREATE INDEX idx_pay_ledger_user ON pay_ledger (user_id, created_at);
-CREATE INDEX idx_pay_ledger_reason ON pay_ledger (reason, created_at);
+CREATE INDEX IF NOT EXISTS idx_pay_ledger_user ON pay_ledger (user_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_pay_ledger_reason ON pay_ledger (reason, created_at);
 
-CREATE TRIGGER pay_ledger_no_update BEFORE UPDATE ON pay_ledger
+CREATE TRIGGER IF NOT EXISTS pay_ledger_no_update BEFORE UPDATE ON pay_ledger
   BEGIN SELECT RAISE(ABORT, 'pay ledger is append-only'); END;
 
-CREATE TRIGGER pay_ledger_no_delete BEFORE DELETE ON pay_ledger
+CREATE TRIGGER IF NOT EXISTS pay_ledger_no_delete BEFORE DELETE ON pay_ledger
   BEGIN SELECT RAISE(ABORT, 'pay ledger is append-only'); END;
 
-CREATE TABLE pay_products (
+CREATE TABLE IF NOT EXISTS pay_products (
   id           TEXT PRIMARY KEY,
   kind         TEXT NOT NULL CHECK (kind IN ('cosmetic', 'premium', 'service')),
   title        TEXT NOT NULL,
@@ -122,7 +127,7 @@ CREATE TABLE pay_products (
   created_at   INTEGER NOT NULL
 );
 
-CREATE TABLE pay_entitlements (
+CREATE TABLE IF NOT EXISTS pay_entitlements (
   id          TEXT PRIMARY KEY,
   user_id     TEXT NOT NULL,
   product_id  TEXT NOT NULL,
@@ -134,7 +139,7 @@ CREATE TABLE pay_entitlements (
 );
 
 -- Циклы пула в USDT: Available = confirmed_in - reserved - paid - locked.
-CREATE TABLE pay_pool_cycles (
+CREATE TABLE IF NOT EXISTS pay_pool_cycles (
   id            TEXT PRIMARY KEY,
   period_start  INTEGER NOT NULL,
   period_end    INTEGER NOT NULL,
@@ -149,9 +154,9 @@ CREATE TABLE pay_pool_cycles (
   closed_at     INTEGER
 );
 
-CREATE UNIQUE INDEX ux_pay_pool_cycles_open ON pay_pool_cycles (status) WHERE status = 'open';
+CREATE UNIQUE INDEX IF NOT EXISTS ux_pay_pool_cycles_open ON pay_pool_cycles (status) WHERE status = 'open';
 
-CREATE TABLE pay_withdrawals (
+CREATE TABLE IF NOT EXISTS pay_withdrawals (
   id           TEXT PRIMARY KEY,
   user_id      TEXT NOT NULL,
   address      TEXT NOT NULL,
@@ -166,10 +171,10 @@ CREATE TABLE pay_withdrawals (
   txid         TEXT UNIQUE
 );
 
-CREATE INDEX idx_pay_withdrawals_user ON pay_withdrawals (user_id, created_at);
-CREATE INDEX idx_pay_withdrawals_status ON pay_withdrawals (status, created_at);
+CREATE INDEX IF NOT EXISTS idx_pay_withdrawals_user ON pay_withdrawals (user_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_pay_withdrawals_status ON pay_withdrawals (status, created_at);
 
-CREATE TABLE pay_payouts (
+CREATE TABLE IF NOT EXISTS pay_payouts (
   id            TEXT PRIMARY KEY,
   withdrawal_id TEXT NOT NULL,
   attempt       INTEGER NOT NULL CHECK (attempt >= 1),
@@ -182,7 +187,7 @@ CREATE TABLE pay_payouts (
   UNIQUE (withdrawal_id, attempt)
 );
 
-CREATE TABLE pay_treasury (
+CREATE TABLE IF NOT EXISTS pay_treasury (
   id            TEXT PRIMARY KEY,
   kind          TEXT NOT NULL CHECK (kind IN ('hot', 'cold', 'deposit')),
   address       TEXT NOT NULL,
@@ -194,7 +199,7 @@ CREATE TABLE pay_treasury (
   UNIQUE (kind, address)
 );
 
-CREATE TABLE pay_operations (
+CREATE TABLE IF NOT EXISTS pay_operations (
   scope        TEXT NOT NULL,
   idem_key     TEXT NOT NULL,
   user_id      TEXT,
@@ -204,7 +209,7 @@ CREATE TABLE pay_operations (
   PRIMARY KEY (scope, idem_key)
 );
 
-CREATE TABLE pay_audit_log (
+CREATE TABLE IF NOT EXISTS pay_audit_log (
   id         TEXT PRIMARY KEY,
   actor      TEXT NOT NULL,
   action     TEXT NOT NULL,
@@ -213,10 +218,10 @@ CREATE TABLE pay_audit_log (
   created_at INTEGER NOT NULL
 );
 
-CREATE INDEX idx_pay_audit_log_created ON pay_audit_log (created_at);
+CREATE INDEX IF NOT EXISTS idx_pay_audit_log_created ON pay_audit_log (created_at);
 
-CREATE TRIGGER pay_audit_log_no_update BEFORE UPDATE ON pay_audit_log
+CREATE TRIGGER IF NOT EXISTS pay_audit_log_no_update BEFORE UPDATE ON pay_audit_log
   BEGIN SELECT RAISE(ABORT, 'pay audit log is append-only'); END;
 
-CREATE TRIGGER pay_audit_log_no_delete BEFORE DELETE ON pay_audit_log
+CREATE TRIGGER IF NOT EXISTS pay_audit_log_no_delete BEFORE DELETE ON pay_audit_log
   BEGIN SELECT RAISE(ABORT, 'pay audit log is append-only'); END;
