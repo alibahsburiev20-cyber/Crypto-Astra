@@ -17,6 +17,8 @@ import { claimPass, passView } from './modules/pass';
 import { applyReferral, referralView } from './modules/referrals';
 import { installModule } from './modules/shipModules';
 import { buyShip } from './modules/ships';
+import { buySlot, garageView } from './modules/garage';
+import { adminSummary, grantAstra, setFrozen } from './modules/adminWorld';
 import { buyLot, cancelLot, createLot, marketView, type CreateLotInput } from './modules/market';
 import { buyFuel, repairShip } from './modules/upkeep';
 import {
@@ -79,9 +81,37 @@ export class World extends DurableObject<Env> {
     return result;
   }
 
-  async buyShip(playerId: string, idemKey: string, type: string) {
+  async buyShip(playerId: string, idemKey: string, type: string, premium = false) {
     const now = Date.now();
-    const result = this.ctx.storage.transactionSync(() => buyShip(this.sql, playerId, idemKey, type, now));
+    const result = this.ctx.storage.transactionSync(() => buyShip(this.sql, playerId, idemKey, type, now, premium));
+    await this.arm();
+    return result;
+  }
+
+  // ── Гараж (этап 14) ────────────────────────────────────────────────────────
+  getGarage(playerId: string, premium: boolean) {
+    return this.ctx.storage.transactionSync(() => garageView(this.sql, playerId, premium));
+  }
+
+  async buyGarageSlot(playerId: string, idemKey: string) {
+    const now = Date.now();
+    const result = this.ctx.storage.transactionSync(() => buySlot(this.sql, playerId, idemKey, now));
+    await this.arm();
+    return result;
+  }
+
+  // ── Админка мира (этап 15) ─────────────────────────────────────────────────
+  adminWorld() {
+    return this.ctx.storage.transactionSync(() => adminSummary(this.sql));
+  }
+
+  setFrozen(frozen: boolean) {
+    return this.ctx.storage.transactionSync(() => setFrozen(this.sql, frozen));
+  }
+
+  async grant(adminRef: string, playerId: string, astra: number, reason: string) {
+    const now = Date.now();
+    const result = this.ctx.storage.transactionSync(() => grantAstra(this.sql, { playerId, astra, reason, adminRef }, now));
     await this.arm();
     return result;
   }

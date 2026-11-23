@@ -7,6 +7,7 @@ import { ApiError } from '../errors';
 import { withIdempotency } from '../idempotency';
 import { assertPlayable } from './maintenance';
 import { playerExists } from './players';
+import { ratingLabel } from './season';
 
 // Мини-игра (этап 13). Правила простые и проверяемые:
 //   • попытки — по 5 в сутки, Premium добавляет +2 (маршрут спрашивает его у D1);
@@ -23,6 +24,9 @@ export const DAILY_ASTRA_CAP = 150;
 export const DAILY_POINTS_CAP = 400;
 /** Запас времени на загрузку трассы после конца забега. */
 export const FINISH_GRACE_MS = 90_000;
+/** Недельная цель: 20 побед за календарную неделю (UTC). */
+export const WEEKLY_WINS = 20;
+export const WEEKLY_ASTRA = 150;
 
 export interface AttemptsView {
   used: number;
@@ -56,6 +60,40 @@ function bestScore(sql: SqlStorage, playerId: string): number {
     playerId,
   ).toArray()[0];
   return row && row.s != null ? Number(row.s) : 0;
+}
+
+/** Начало недели (UTC, понедельник 00:00) — та же сетка, что у миссий. */
+export function weekStartOf(now: number): number {
+  const day = utcDay(now);
+  // 1 января 1970 — четверг, поэтому «понедельник» это day - ((day + 3) % 7).
+  const monday = day - ((day + 3) % 7);
+  return monday * DAY_MS;
+}
+
+function weeklyWins(sql: SqlStorage, playerId: string, now: number): number {
+  const row = sql.exec(
+    `SELECT COUNT(*) AS n FROM minigame_runs
+      WHERE player_id = ? AND status = 'finished' AND win = 1 AND started_at >= ?`,
+    playerId, weekStartOf(now),
+  ).toArray()[0];
+  return row ? Number(row.n) : 0;
+}
+
+/** Лидерборд арены: победы, потом лучший счёт. Пусто — когда никто не играл. */
+export function arenaLeaderboard(sql: SqlStorage, playerId: string, limit = 10) {
+  const rows = sql.exec(
+    `SELECT player_id, COUNT(*) AS wins, MAX(score) AS best
+       FROM minigame_runs WHERE status = 'finished' AND win = 1
+      GROUP BY player_id ORDER BY wins DESC, best DESC LIMIT ?`,
+    limit,
+  ).toArray();
+  return rows.map((r, i) => ({
+    rank: i + 1,
+    label: ratingLabel(String(r.player_id)),
+    wins: Number(r.wins),
+    best: Number(r.best),
+    isMe: String(r.player_id) === playerId,
+  }));
 }
 
 /** Просроченные забеги закрываем: они не должны держать «занятую» попытку вечно. */
@@ -212,6 +250,19 @@ export function finishRun(
       awards.push({ wins: tier.wins, title: tier.title, medal: tier.medal, astra: tier.astra });
     }
 
+    // Недельная цель: 20 побед за неделю → разовая награда. Ключ включает
+    // начало недели, поэтому следующая неделя снова доступна.
+    const weekWin = weeklyWins(sql, playerId, now);
+    if (weekWin >= WEEKLY_WINS) {
+      const medal = `arena_week_${weekStartOf(now)}`;
+      const already = sql.exec('SELECT 1 FROM minigame_awards WHERE player_id = ? AND award = ?', playerId, medal).toArray().length;
+      if (!already) {
+        sql.exec('INSERT INTO minigame_awards (player_id, award, wins, at) VALUES (?, ?, ?, ?)', playerId, medal, WEEKLY_WINS, now);
+        applyDelta(sql, { playerId, asset: 'astra', delta: WEEKLY_ASTRA, reason: 'minigame_weekly', sourceRef: medal, idemKey }, now);
+        awards.push({ wins: WEEKLY_WINS, title: 'Неделя в поясе', medal, astra: WEEKLY_ASTRA });
+      }
+    }
+
     return {
       value: {
         ok: true,
@@ -261,6 +312,13 @@ export function minigameView(sql: SqlStorage, playerId: string, now: number, pre
       awarded: medals.has(t.medal), progress: Math.min(t.wins, wins),
     })),
     today: { runs: day.runs, wins: day.wins, astra: day.astra, points: day.points, astraCap: DAILY_ASTRA_CAP },
+    weekly: {
+      wins: weeklyWins(sql, playerId, now),
+      target: WEEKLY_WINS,
+      reward: WEEKLY_ASTRA,
+      awarded: sql.exec('SELECT 1 FROM minigame_awards WHERE player_id = ? AND award = ?', playerId, `arena_week_${weekStartOf(now)}`).toArray().length > 0,
+    },
+    leaderboard: arenaLeaderboard(sql, playerId),
     caps: { astra: DAILY_ASTRA_CAP, points: DAILY_POINTS_CAP },
     field: { width: 1000, runMs: RUN_MS },
     balance: getBalance(sql, playerId, 'astra'),

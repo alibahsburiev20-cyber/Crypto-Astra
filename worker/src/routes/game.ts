@@ -154,7 +154,7 @@ export async function shipBuy(request: Request, env: Env, a: AuthContext): Promi
   const body = await readJson(request);
   const type = typeof body.type === 'string' ? body.type : '';
   if (!type) throw new ApiError(400, 'bad_ship_type');
-  return json(await world(env, a).buyShip(a.userId, idemKey(request), type));
+  return json(await world(env, a).buyShip(a.userId, idemKey(request), type, await isPremium(env, a)));
 }
 
 export async function market(url: URL, env: Env, a: AuthContext): Promise<Response> {
@@ -257,4 +257,13 @@ export async function referralApply(request: Request, env: Env, a: AuthContext):
   const code = typeof body.code === 'string' ? body.code : '';
   if (!code) throw new ApiError(400, 'referral_not_found');
   return json(await world(env, a).applyReferral(a.userId, idemKey(request), code));
+}
+
+// ── Гараж (этап 14) ──────────────────────────────────────────────────────────
+export async function garage(env: Env, a: AuthContext): Promise<Response> {
+  return json(await world(env, a).getGarage(a.userId, await isPremium(env, a)));
+}
+
+export async function garageBuy(request: Request, env: Env, a: AuthContext): Promise<Response> {
+  return json(await world(env, a).buyGarageSlot(a.userId, idemKey(request)));
 }

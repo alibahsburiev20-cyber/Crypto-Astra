@@ -292,7 +292,7 @@ curl -s -X POST https://<worker>/claim \
 
 | Метод | Путь | Тело | Ответ |
 | --- | --- | --- | --- |
-| GET | `/minigame` | — | `attempts`, `wins`, `best`, `tiers`, `today`, `caps`, `recent` |
+| GET | `/minigame` | — | `attempts`, `wins`, `best`, `tiers`, `today`, `weekly`, `leaderboard`, `caps`, `recent` |
 | POST | `/minigame/start` | `{}` + `Idempotency-Key` | `runId`, `seed`, `endsAt`, `runMs`, `attempts` |
 | POST | `/minigame/finish` | `{ runId, trace: [{ t, x }] }` + `Idempotency-Key` | `result`, `rewards`, `awards`, `attempts`, `wins`, `best` |
 
@@ -301,3 +301,39 @@ curl -s -X POST https://<worker>/claim \
 затем сам считает попадания и сборы. Ошибки: `daily_limit` (429), `run_not_found`
 (404), `run_expired`, `bad_trace`, `too_fast`, `short` (409). Кривая трасса
 сжигает попытку. Подробности и числа — `docs/MINIGAME.md`.
+
+`weekly` — `{ wins, target, reward, awarded }`: цель 20 побед за календарную
+неделю (с понедельника UTC), награда 150 ASTRA выдаётся один раз и помечается
+медалью `arena_week_<начало недели в мс>`. `leaderboard` — топ-10 по победам,
+затем по лучшему счёту; у своей строки `isMe: true`.
+
+## Гараж
+
+| Метод | Путь | Тело | Ответ |
+| --- | --- | --- | --- |
+| GET | `/garage` | — | `slots`, `used`, `free`, `max`, `base`, `extra`, `premiumBonus`, `price`, `canBuy` |
+| POST | `/garage/buy` | `{}` + `Idempotency-Key` | `slots`, `extra`, `astra`, `price` |
+
+База — 3 ячейки, потолок — 8, ячейка стоит 200 ASTRA, Premium добавляет одну.
+Корабль в полный гараж не продаётся (`garage_full`, 409) и ASTRA не списываются;
+дальше потолка ячейки не продаются (`garage_max`, 409). Корабли с типом, ценой и
+состоянием лежат в `/me` → `ships` и `catalog`.
+
+## Админка мира
+
+Только для оператора: заголовок `X-Admin-Token` (секрет `ADMIN_TOKEN`),
+идентификатор мира — обязательный `?world=w1` (`[a-zA-Z0-9_-]`, до 32 символов;
+иначе `bad_world`).
+
+| Метод | Путь | Тело | Ответ |
+| --- | --- | --- | --- |
+| GET | `/admin/world` | — | `world`, `frozen`, `totals`, `verify`, `players[]` |
+| POST | `/admin/world/freeze` | `{ frozen: boolean }` | `frozen` |
+| POST | `/admin/world/grant` | `{ playerId, astra, reason }` | `granted`, `astra` |
+
+`verify` — сверка журнала: `{ ok, rows, brokenAtSeq?, mismatches? }`. `totals` —
+`players`, `astra`, `points`, `ships`, `adventures`. Начисление принимает
+`astra` от −100000 до 100000, не ноль и не дробь (`bad_amount`), требует
+непустую причину и пишет строку в `admin_log`; отрицательная сумма работает как
+списание и упадёт с `insufficient_funds`, если баланса не хватает. Ошибки:
+`unauthorized` (401), `bad_world`, `player_not_found` (404).

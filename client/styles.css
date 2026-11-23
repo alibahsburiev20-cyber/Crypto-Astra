@@ -1000,3 +1000,62 @@ body {
   background-image: url('/sprites/bg/arena.png');
   background-size: cover;
 }
+
+/* --- Профиль, косметика, гараж, модули (этапы 14–15) --------------------- */
+
+.profile-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 16px 0;
+  padding: 16px 18px;
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(30, 46, 86, 0.55), rgba(10, 17, 34, 0.75));
+  border: 1px solid rgba(130, 170, 255, 0.2);
+}
+
+.profile-avatar { position: relative; width: 64px; height: 64px; flex: 0 0 64px; }
+.profile-frame { position: absolute; left: -16px; top: -16px; pointer-events: none; }
+.profile-info { display: flex; flex-direction: column; gap: 4px; }
+.profile-info p { margin: 0; font-size: 0.85rem; }
+.profile-medals { display: flex; gap: 6px; align-items: center; margin: 4px 0; }
+.profile-name { transition: color 0.2s ease; }
+
+/* Цвет позывного — часть косметики. Классы, а не инлайн-стили: CSP. */
+.cs-nebula { color: #8fe6ff; text-shadow: 0 0 12px rgba(143, 230, 255, 0.45); }
+.cs-ember { color: #ffb27b; text-shadow: 0 0 12px rgba(255, 150, 90, 0.45); }
+.cs-premium { color: #d9c4ff; text-shadow: 0 0 12px rgba(201, 166, 255, 0.45); }
+
+.garage-block { margin-bottom: 16px; }
+.garage-grid { display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0; }
+.garage-slot { display: flex; flex-direction: column; align-items: center; gap: 4px; width: 104px; }
+.garage-cell { width: 96px; height: 96px; }
+.garage-label { font-size: 0.75rem; opacity: 0.8; }
+.garage-slot.is-filled .garage-label { opacity: 1; font-weight: 600; }
+
+.ship-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.ship-tabs button { display: inline-flex; align-items: center; gap: 6px; }
+
+.slot-row { display: flex; flex-wrap: wrap; gap: 10px; margin: 10px 0; }
+.slot-cell { display: flex; flex-direction: column; align-items: center; gap: 4px; width: 84px; }
+.slot-art { width: 64px; height: 64px; }
+.slot-label { font-size: 0.72rem; opacity: 0.82; text-align: center; }
+.slot-cell.is-filled .slot-label { opacity: 1; font-weight: 600; }
+
+.arena-table tr.is-me { background: rgba(120, 170, 255, 0.12); font-weight: 600; }
+
+/* --- Админка -------------------------------------------------------------- */
+.admin-body { padding: 24px 16px 64px; }
+.admin-shell { max-width: 1000px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+.admin-shell h1 { display: flex; align-items: center; gap: 10px; font-size: 1.6rem; }
+.admin-shell h2 { font-size: 1.1rem; margin: 0 0 10px; }
+.admin-shell label { display: inline-flex; align-items: center; gap: 8px; margin: 0 12px 8px 0; font-size: 0.9rem; }
+.admin-shell input { padding: 8px 10px; border-radius: 10px; border: 1px solid rgba(140, 170, 255, 0.25); background: rgba(8, 14, 28, 0.8); color: var(--text); }
+.admin-actions { display: flex; gap: 10px; margin-top: 10px; }
+.admin-totals { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+.admin-total { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-radius: 12px; background: rgba(255, 255, 255, 0.04); }
+.admin-total b { font-size: 1.2rem; }
+
+/* Кнопка звука арены: выключенный звук — приглушённая иконка, а не пропавшая. */
+.sound-btn { display: inline-flex; align-items: center; justify-content: center; padding: 4px; border-radius: 10px; background: rgba(255, 255, 255, 0.06); }
+.sound-btn.is-off { opacity: 0.4; }

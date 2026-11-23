@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Админка мира — Crypto Astra</title>
+  <link rel="icon" href="/icons/ui/admin.png">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body class="admin-body">
+  <main class="admin-shell">
+    <h1><img src="/icons/ui/admin.png" alt="" width="28" height="28"> Админка мира</h1>
+    <p class="muted">Служебная страница. Доступ — токен оператора (<code>ADMIN_TOKEN</code> в секретах Worker).
+      Токен хранится только в этой вкладке (sessionStorage) и уходит заголовком <code>X-Admin-Token</code>.</p>
+
+    <section class="block">
+      <h2>Подключение</h2>
+      <label>Мир <input id="world" value="w1" size="6" autocomplete="off"></label>
+      <label>Токен <input id="token" type="password" size="32" autocomplete="off" placeholder="ADMIN_TOKEN"></label>
+      <button type="button" id="connect"><img src="/icons/ui/login.png" alt="" width="18" height="18"> Загрузить</button>
+      <p id="status" class="muted"></p>
+    </section>
+
+    <section class="block" id="summary-block" hidden>
+      <h2>Состояние</h2>
+      <div id="totals" class="admin-totals"></div>
+      <p id="verify"></p>
+      <div class="admin-actions">
+        <button type="button" id="freeze"><img src="/icons/ui/freeze.png" alt="" width="18" height="18"> Заморозить</button>
+        <button type="button" id="unfreeze" class="ghost"><img src="/icons/ui/play.png" alt="" width="18" height="18"> Разморозить</button>
+      </div>
+    </section>
+
+    <section class="block" id="players-block" hidden>
+      <h2>Игроки</h2>
+      <table class="arena-table" id="players"></table>
+    </section>
+
+    <section class="block" id="grant-block" hidden>
+      <h2>Ручное начисление</h2>
+      <p class="muted">Каждая выдача пишется в журнал мира с причиной и попадает в <code>admin_log</code>.</p>
+      <label>Игрок <input id="grant-player" size="40" autocomplete="off" placeholder="id игрока"></label>
+      <label>ASTRA <input id="grant-amount" type="number" value="100" step="1"></label>
+      <label>Причина <input id="grant-reason" size="32" autocomplete="off" placeholder="компенсация за сбой"></label>
+      <button type="button" id="grant"><img src="/icons/ui/grant.png" alt="" width="18" height="18"> Начислить</button>
+      <p id="grant-status" class="muted"></p>
+    </section>
+  </main>
+  <script type="module" src="/admin.js"></script>
+</body>
+</html>
