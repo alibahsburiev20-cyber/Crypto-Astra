@@ -1,6 +1,12 @@
 // Схема мира. Зеркалит worker/schema/world/*.sql, но с IF NOT EXISTS: применяется при старте объекта.
 // Каждый элемент — одна инструкция (в триггерах есть «;» внутри BEGIN...END).
 export const WORLD_SCHEMA: string[] = [
+  `CREATE TABLE IF NOT EXISTS player_identity (
+     player_id TEXT PRIMARY KEY REFERENCES players (id),
+     callsign TEXT, callsign_key TEXT, callsign_at INTEGER,
+     frame TEXT, trail TEXT, badge TEXT, premium_until INTEGER)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_identity_callsign
+     ON player_identity (callsign_key) WHERE callsign_key IS NOT NULL`,
   `CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS players (
      id TEXT PRIMARY KEY, level INTEGER NOT NULL DEFAULT 1, xp INTEGER NOT NULL DEFAULT 0,

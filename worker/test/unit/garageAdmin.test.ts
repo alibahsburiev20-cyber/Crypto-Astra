@@ -148,9 +148,14 @@ describe('арена: лидерборд и недельная цель', () => 
   }
 
   it('лидерборд собирает победы и помечает себя', () => {
-    const { sql, tx } = world();
-    const res = play(tx as never, sql, 'w1', T0);
-    expect((res as { ok: boolean }).ok).toBe(true);
+    const { sql } = world();
+    // Победа вставляется напрямую: исход синтетического забега зависит от зерна,
+    // а тест проверяет лидерборд, а не удачу трассы.
+    sql.exec(
+      `INSERT INTO minigame_runs (id, player_id, seed, started_at, ends_at, status, score, hits, picks, win, astra)
+       VALUES ('board-win', 'p1', 1, ?, ?, 'finished', 180, 1, 19, 1, 150)`,
+      T0, T0 + RUN_MS,
+    );
     const view = minigameView(sql, 'p1', T0 + RUN_MS, false);
     expect(view.leaderboard.length).toBe(1);
     expect(view.leaderboard[0].wins).toBe(1);

@@ -1059,3 +1059,12 @@ body {
 /* Кнопка звука арены: выключенный звук — приглушённая иконка, а не пропавшая. */
 .sound-btn { display: inline-flex; align-items: center; justify-content: center; padding: 4px; border-radius: 10px; background: rgba(255, 255, 255, 0.06); }
 .sound-btn.is-off { opacity: 0.4; }
+
+/* --- Профиль: позывной, стиль, первые шаги (этап 17) ---------------------- */
+.profile-form { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0; }
+.profile-form input { min-width: 160px; }
+.style-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0; }
+.tutorial { border-left: 3px solid rgba(143, 230, 255, 0.5); }
+.tutorial-steps { margin: 8px 0 12px; padding-left: 18px; }
+.tutorial-steps li { margin: 4px 0; }
+.member-name .badge { margin-left: 6px; }

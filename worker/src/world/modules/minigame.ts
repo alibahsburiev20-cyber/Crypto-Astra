@@ -7,7 +7,7 @@ import { ApiError } from '../errors';
 import { withIdempotency } from '../idempotency';
 import { assertPlayable } from './maintenance';
 import { playerExists } from './players';
-import { ratingLabel } from './season';
+import { publicIdentity } from './identity';
 
 // Мини-игра (этап 13). Правила простые и проверяемые:
 //   • попытки — по 5 в сутки, Premium добавляет +2 (маршрут спрашивает его у D1);
@@ -80,20 +80,27 @@ function weeklyWins(sql: SqlStorage, playerId: string, now: number): number {
 }
 
 /** Лидерборд арены: победы, потом лучший счёт. Пусто — когда никто не играл. */
-export function arenaLeaderboard(sql: SqlStorage, playerId: string, limit = 10) {
+export function arenaLeaderboard(sql: SqlStorage, playerId: string, now: number, limit = 10) {
   const rows = sql.exec(
     `SELECT player_id, COUNT(*) AS wins, MAX(score) AS best
        FROM minigame_runs WHERE status = 'finished' AND win = 1
       GROUP BY player_id ORDER BY wins DESC, best DESC LIMIT ?`,
     limit,
   ).toArray();
-  return rows.map((r, i) => ({
-    rank: i + 1,
-    label: ratingLabel(String(r.player_id)),
-    wins: Number(r.wins),
-    best: Number(r.best),
-    isMe: String(r.player_id) === playerId,
-  }));
+  return rows.map((r, i) => {
+    const who = publicIdentity(sql, String(r.player_id), now);
+    return {
+      rank: i + 1,
+      label: who.label,
+      frame: who.frame,
+      trail: who.trail,
+      badge: who.badge,
+      premium: who.premium,
+      wins: Number(r.wins),
+      best: Number(r.best),
+      isMe: String(r.player_id) === playerId,
+    };
+  });
 }
 
 /** Просроченные забеги закрываем: они не должны держать «занятую» попытку вечно. */
@@ -318,7 +325,7 @@ export function minigameView(sql: SqlStorage, playerId: string, now: number, pre
       reward: WEEKLY_ASTRA,
       awarded: sql.exec('SELECT 1 FROM minigame_awards WHERE player_id = ? AND award = ?', playerId, `arena_week_${weekStartOf(now)}`).toArray().length > 0,
     },
-    leaderboard: arenaLeaderboard(sql, playerId),
+    leaderboard: arenaLeaderboard(sql, playerId, now),
     caps: { astra: DAILY_ASTRA_CAP, points: DAILY_POINTS_CAP },
     field: { width: 1000, runMs: RUN_MS },
     balance: getBalance(sql, playerId, 'astra'),

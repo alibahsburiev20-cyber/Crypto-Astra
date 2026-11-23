@@ -15,6 +15,7 @@ import {
   withdrawalQueue,
 } from '../pay/payouts';
 import { isPayoutsStopped, reconcile, setPayoutsStop } from '../pay/reconcile';
+import { ownedCosmetics } from '../pay/cosmetics';
 import { BroadcastError, sendUsdt, signerClient, trongridTransport } from '../pay/broadcast';
 import { usdtContract as usdtContractOf } from '../pay/tron/contracts';
 import { ApiError } from '../world/errors';
@@ -137,6 +138,21 @@ export async function payPurchase(request: Request, env: Env, auth: AuthContext)
 
   try {
     const result = await purchase(env.DB, { userId: auth.userId, productId, idemKey }, Date.now());
+    // Купленное сразу видно другим: мир получает срок Premium и выбранный стиль.
+    try {
+      const owned = await ownedCosmetics(env.DB, auth.userId, Date.now());
+      const skin = productId === 'skin_nebula' ? 'nebula' : productId === 'skin_ember' ? 'ember' : productId === 'premium_30' ? 'premium' : null;
+      const payload: Record<string, unknown> = {};
+      if (skin) { payload.frame = skin; payload.trail = skin; }
+      if (productId === 'badge_pioneer') payload.badge = 'pioneer';
+      await env.WORLD.get(env.WORLD.idFromName(auth.worldId)).syncPremium(
+        auth.userId, owned.premiumUntil,
+        { ...owned, ...(payload as { frame?: 'nebula'; trail?: 'nebula'; badge?: 'pioneer' }) },
+      );
+    } catch (e) {
+      // Покупка уже прошла: сбой синхронизации косметики не отменяет её.
+      console.error('cosmetic sync failed', e);
+    }
     return json({
       ok: true,
       ...result,

@@ -43,6 +43,11 @@ export const STATUS_BY_CODE: Record<string, number> = {
   ship_locked: 403,
   ship_owned: 409,
   admin_email_forbidden: 403,
+  callsign_taken: 409,
+  callsign_cooldown: 409,
+  style_not_owned: 403,
+  too_many_requests: 429,
+  account_deleted: 403,
   garage_full: 409,
   garage_max: 409,
   // Срез 6: рынок.

@@ -28,3 +28,23 @@ export function claim(sql: SqlStorage, playerId: string, idemKey: string, now: n
     return { value: { ok: true, reward: d.reward, balance, nextClaimAt: d.nextClaimAt }, store: true };
   });
 }
+
+/**
+ * Авто-клейм для Premium: сервер сам забирает готовый бонус при заходе.
+ * Ключ идемпотентности выводится из времени, поэтому повторный заход в ту же
+ * секунду не начислит дважды, а пропущенный бонус не «сгорает» молча: он
+ * начисляется при следующем визите.
+ */
+export function autoClaim(sql: SqlStorage, playerId: string, now: number): ClaimResult | null {
+  const row = sql.exec('SELECT last_claim_at, day, count FROM claim_state WHERE player_id = ?', playerId).toArray()[0];
+  const state: ClaimState | null = row ? { lastClaimAt: Number(row.last_claim_at), day: Number(row.day), count: Number(row.count) } : null;
+  if (!decideClaim(state, now).ok) return null;
+  try {
+    const res = claim(sql, playerId, `premium-auto:${now}`, now);
+    return res;
+  } catch (e) {
+    // Авто-клейм — удобство: его сбой не должен ломать открытие игры.
+    console.error('auto claim failed', e);
+    return null;
+  }
+}

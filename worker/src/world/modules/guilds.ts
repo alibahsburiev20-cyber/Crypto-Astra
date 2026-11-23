@@ -5,7 +5,7 @@ import { applyDelta, getBalance } from '../balances';
 import { ApiError } from '../errors';
 import { withIdempotency } from '../idempotency';
 import { assertPlayable } from './maintenance';
-import { ratingLabel } from './season';
+import { publicIdentity } from './identity';
 
 // Гильдии (этап 4). Гильдия — социальный круг, а не множитель дохода: её рейтинг
 // это сумма очков участников. Никаких бонусов к добыче нет, иначе гильдейские
@@ -77,24 +77,40 @@ export interface GuildMemberView {
   isMe: boolean;
 }
 
-function membersOf(sql: SqlStorage, guildId: string, me: string): GuildMemberView[] {
-  return sql.exec(
-    `SELECT m.player_id, m.role, p.level, COALESCE(b.amount, 0) AS points
+function membersOf(sql: SqlStorage, guildId: string, me: string, now: number): GuildMemberView[] {
+  const rows = sql.exec(
+    `SELECT m.player_id, m.role, p.level, m.joined_at, COALESCE(b.amount, 0) AS points,
+            i.callsign AS callsign, i.premium_until AS premium_until
        FROM guild_members m
        JOIN players p ON p.id = m.player_id
        LEFT JOIN balances b ON b.player_id = m.player_id AND b.asset = 'points'
+       LEFT JOIN player_identity i ON i.player_id = m.player_id
       WHERE m.guild_id = ?
       ORDER BY CASE m.role WHEN 'leader' THEN 0 WHEN 'officer' THEN 1 ELSE 2 END,
                points DESC, m.joined_at ASC`,
     guildId,
-  ).toArray().map((r) => ({
-    playerId: String(r.player_id),
-    label: ratingLabel(String(r.player_id)),
-    role: String(r.role) as GuildRole,
-    points: Number(r.points),
-    level: Number(r.level),
-    isMe: String(r.player_id) === me,
-  }));
+  ).toArray();
+  return rows.map((r) => {
+    const id = String(r.player_id);
+    const who = publicIdentity(sql, id, now);
+    return {
+      playerId: id,
+      label: who.label,
+      frame: who.frame,
+      badge: who.badge,
+      premium: who.premium,
+      role: String(r.role) as GuildRole,
+      points: Number(r.points),
+      level: Number(r.level),
+      isMe: id === me,
+    };
+  }).sort((a, b) => {
+    // Premium поднимается вверх только внутри своей роли: лидер остаётся лидером.
+    if (a.role !== b.role) return 0;
+    if (a.premium !== b.premium) return a.premium ? -1 : 1;
+    if (a.points !== b.points) return b.points - a.points;
+    return 0;
+  });
 }
 
 function guildPoints(sql: SqlStorage, guildId: string): number {
@@ -141,7 +157,7 @@ export function guildRating(sql: SqlStorage, me: string): GuildTopRow[] {
   }));
 }
 
-export function guildView(sql: SqlStorage, playerId: string) {
+export function guildView(sql: SqlStorage, playerId: string, now = Date.now()) {
   const guild = guildOf(sql, playerId);
   const rating = guildRating(sql, playerId);
   if (!guild) {
@@ -159,7 +175,7 @@ export function guildView(sql: SqlStorage, playerId: string) {
   return {
     mine: { id: guild.id, name: guild.name, tag: guild.tag, inviteCode: guild.inviteCode, points: guildPoints(sql, guild.id) },
     role: roleOf(sql, playerId),
-    members: membersOf(sql, guild.id, playerId),
+    members: membersOf(sql, guild.id, playerId, now),
     top: rating,
     rank: mineRow?.rank ?? null,
     cost: GUILD_CREATE_COST,

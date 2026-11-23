@@ -4,6 +4,7 @@ import {
 import { applyDelta } from '../balances';
 import { ApiError } from '../errors';
 import { enqueue } from '../scheduler';
+import { publicIdentity } from './identity';
 
 // Сезон (этап 3). Рейтинг не хранится отдельным счётчиком: он читается из баланса
 // `points`, который живёт в Ledger как обычный актив. Поэтому подделать очки из
@@ -172,7 +173,7 @@ export function seasonReport(sql: SqlStorage, playerId: string, now: number) {
   const rows = ratingRows(sql);
   const top: SeasonTopRow[] = rows.slice(0, SEASON_TOP_LIMIT).map((r, i) => ({
     rank: i + 1,
-    label: ratingLabel(r.id),
+    label: publicIdentity(sql, r.id, now).label,
     points: r.points,
     level: r.level,
     ships: r.ships,
@@ -200,7 +201,7 @@ export function seasonReport(sql: SqlStorage, playerId: string, now: number) {
       closedAt: Number(s.closed_at),
       players: Number(s.players),
       pointsTotal: Number(s.points),
-      winner: winner ? { label: ratingLabel(String(winner.player_id)), points: Number(winner.points), reward: Number(winner.reward) } : null,
+      winner: winner ? { label: publicIdentity(sql, String(winner.player_id), now).label, points: Number(winner.points), reward: Number(winner.reward) } : null,
       me: mine ? { rank: Number(mine.rank), points: Number(mine.points), reward: Number(mine.reward) } : null,
     };
   });
@@ -217,7 +218,7 @@ export function seasonReport(sql: SqlStorage, playerId: string, now: number) {
       pointsTotal: rows.reduce((sum, r) => sum + r.points, 0),
     },
     me: {
-      label: ratingLabel(playerId),
+      label: publicIdentity(sql, playerId, now).label,
       rank: idx >= 0 ? idx + 1 : null,
       points: idx >= 0 ? rows[idx].points : 0,
       level: idx >= 0 ? rows[idx].level : 1,
