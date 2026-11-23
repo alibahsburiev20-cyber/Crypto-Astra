@@ -17,23 +17,26 @@
       <img src="/icons/currency/astra.png" alt="" width="40" height="40">
       <div>
         <h1>Crypto Astra</h1>
-        <p class="tagline">Astra Pay · магазин</p>
+        <p class="tagline" data-i18n="pay.tagline">Astra Pay · магазин</p>
       </div>
     </a>
     <nav class="landing-nav" aria-label="Навигация">
-      <a class="link" href="/">В игру</a>
-      <a class="link" href="/pool.html">Пул</a>
+      <a class="link" href="/" data-i18n="nav.game">В игру</a>
+      <a class="link" href="/pool.html" data-i18n="nav.pool">Пул</a>
+      <span class="lang-switch" role="group" aria-label="Language">
+        <button type="button" class="ghost lang-btn" data-lang="ru" aria-pressed="true">RU</button>
+        <button type="button" class="ghost lang-btn" data-lang="en" aria-pressed="false">EN</button>
+        <button type="button" class="ghost lang-btn" data-lang="de" aria-pressed="false">DE</button>
+      </span>
     </nav>
   </header>
 
   <main class="landing pay" aria-label="Магазин Astra Pay">
     <section class="hero pay-hero">
       <div class="hero-copy">
-        <span class="hero-kicker">Этап 7 · Косметика за USDT</span>
+        <span class="hero-kicker" data-i18n="pay.kicker">Магазин внешнего вида</span>
         <h2>Astra Pay</h2>
-        <p class="hero-lead">Здесь покупается <b>только внешний вид</b>: корпуса кораблей,
-          значки и разовые услуги. Купленное не влияет на баланс игры, не даёт преимуществ
-          и не превращается в деньги. ASTRA по-прежнему нельзя купить или вывести.</p>
+        <p class="hero-lead" data-i18n="pay.lead">Здесь покупается только внешний вид: корпуса кораблей, значки и разовые услуги. Купленное не даёт преимуществ и не превращается в деньги. ASTRA по-прежнему нельзя купить или вывести.</p>
         <div class="pay-flags" aria-live="polite">
           <span class="pay-flag" data-pay="network">Сеть: проверяем…</span>
           <span class="pay-flag" data-pay="purchases">Покупки: проверяем…</span>
@@ -41,34 +44,47 @@
       </div>
 
       <aside class="pay-wallet" aria-live="polite">
-        <h3>Кошелёк</h3>
+        <h3 data-i18n="wallet.title">Кошелёк</h3>
         <p class="pay-balance" data-pay="balance">—</p>
-        <p class="pay-hint" data-pay="wallet-hint">Войдите в игру, чтобы увидеть баланс.</p>
-        <a class="cta cta-small" href="/">Войти</a>
+        <p class="pay-hint" data-pay="wallet-hint" data-i18n="wallet.hint">Войдите в игру, чтобы увидеть баланс.</p>
+        <a class="cta cta-small" href="/" data-i18n="wallet.login">Войти</a>
       </aside>
     </section>
 
+    <section class="pay-section" aria-labelledby="pay-deposit-title">
+      <h3 id="pay-deposit-title" data-i18n="deposit.title">Пополнить баланс</h3>
+      <p class="pay-muted" data-i18n="deposit.lead">Пополнение идёт переводом USDT (TRC-20) на личный адрес игрока. Адрес выдаётся один раз и не меняется: по нему сервер узнаёт, чей это перевод. Другая сеть или монета не дойдут.</p>
+      <div class="pay-deposit">
+        <p class="pay-address" data-pay="address" data-i18n="deposit.address">Войдите в игру, чтобы получить адрес.</p>
+        <div class="pay-actions">
+          <button type="button" class="cta cta-small" data-pay="address-btn" data-i18n="deposit.get">Получить адрес</button>
+          <button type="button" class="ghost" data-pay="copy-btn" data-i18n="deposit.copy" hidden>Скопировать</button>
+        </div>
+        <p class="pay-muted" data-pay="deposit-note" data-i18n="deposit.note">Сеть: TRON (TRC-20). Зачисление — после подтверждения сети.</p>
+      </div>
+    </section>
+
     <section class="pay-section" aria-labelledby="pay-shop-title">
-      <h3 id="pay-shop-title">Витрина</h3>
+      <h3 id="pay-shop-title" data-i18n="shop.title">Витрина</h3>
       <div class="pay-grid" data-pay="products" aria-live="polite">
-        <p class="pay-muted">Загружаем каталог…</p>
+        <p class="pay-muted" data-i18n="shop.loading">Загружаем каталог…</p>
       </div>
     </section>
 
     <section class="pay-section" aria-labelledby="pay-history-title">
-      <h3 id="pay-history-title">Последние операции</h3>
+      <h3 id="pay-history-title" data-i18n="history.title">Последние операции</h3>
       <table class="pay-table">
         <thead>
-          <tr><th>Дата</th><th>Что</th><th>Сумма</th></tr>
+          <tr><th data-i18n="history.date">Дата</th><th data-i18n="history.what">Что</th><th data-i18n="history.amount">Сумма</th></tr>
         </thead>
         <tbody data-pay="history">
-          <tr><td colspan="3" class="pay-muted">Пока операций нет.</td></tr>
+          <tr><td colspan="3" class="pay-muted" data-i18n="history.empty">Пока операций нет.</td></tr>
         </tbody>
       </table>
     </section>
 
     <section class="pay-section" aria-labelledby="pay-skin-title">
-      <h3 id="pay-skin-title">На что покупаются скины</h3>
+      <h3 id="pay-skin-title" data-i18n="skins.title">На что покупаются скины</h3>
       <p class="pay-muted">Скин — это <b>окраска корпуса</b>. Купленная окраска применяется ко всем кораблям
         игрока и видна в «Мостике» и «Флоте». На скорость, добычу, бой и рейтинг она не влияет:
         внешний вид остаётся внешним видом.</p>
@@ -76,7 +92,7 @@
     </section>
 
     <section class="pay-section pay-rules" aria-labelledby="pay-rules-title">
-      <h3 id="pay-rules-title">Честно о деньгах</h3>
+      <h3 id="pay-rules-title" data-i18n="rules.title">Честно о деньгах</h3>
       <ul>
         <li><b>Это не инвестиция.</b> USDT на балансе — предоплата за косметику, а не вклад и не обещание дохода.</li>
         <li><b>ASTRA — не деньги.</b> Это внутриигровая валюта: купить её нельзя, вывести тоже.</li>
@@ -85,6 +101,8 @@
         <li><b>Повтор не спишет дважды.</b> Каждая покупка несёт ключ идемпотентности: двойной клик и обрыв связи не создают вторую покупку.</li>
       </ul>
     </section>
+    <p class="pay-muted">Правовые документы (на немецком, язык страны размещения):
+    <a class="link" href="/legal.html" hreflang="de" lang="de">Impressum · Datenschutz · AGB</a></p>
   </main>
 
   <script type="module" src="/pay.js"></script>

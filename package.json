@@ -22,11 +22,14 @@
     "db:migrate:preview": "wrangler d1 migrations apply DB --remote --preview",
     "build": "node scripts/embed-client.mjs",
     "ads-forecast": "tsx scripts/ads-forecast.ts",
-    "pay:loadtest": "tsx scripts/pay-loadtest.ts"
+    "pay:loadtest": "tsx scripts/pay-loadtest.ts",
+    "health": "tsx scripts/health-check.ts",
+    "restore:drill": "bash scripts/restore-drill.sh"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261110.1",
     "@types/node": "^22.20.5",
+    "jsdom": "^25.0.1",
     "tsx": "^4.23.15",
     "typescript": "^5.6.0",
     "vitest": "^5.1.0",

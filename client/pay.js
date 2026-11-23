@@ -7,10 +7,25 @@
 // Токен берём обновлением сессии: refresh-cookie помечена HttpOnly, поэтому
 // чужой скрипт её не прочитает и украсть вход не сможет.
 
+import { applyI18n, pickLang, t } from '/i18n.js';
+
 const $ = (selector) => document.querySelector(selector);
 const $all = (selector) => Array.from(document.querySelectorAll(selector));
 
 let token = '';
+let lang = 'ru';
+
+/** Язык интерфейса: выбор игрока важнее языка браузера. */
+function setLang(next) {
+  lang = applyI18n(document, next);
+  try { localStorage.setItem('astra:lang', lang); } catch { /* приватный режим */ }
+}
+
+function initialLang() {
+  let saved = null;
+  try { saved = localStorage.getItem('astra:lang'); } catch { /* приватный режим */ }
+  return pickLang(saved, navigator.language);
+}
 
 function setText(selector, text) {
   for (const node of $all(selector)) node.textContent = text;
@@ -201,6 +216,80 @@ async function buy(product, button) {
   setText('[data-pay="wallet-hint"]', message);
 }
 
+// Адрес пополнения. До этого экрана игрок физически не мог пополнить баланс:
+// маршрут на сервере был, а кнопки не было.
+const DEPOSIT_ERRORS = {
+  signer_not_configured: 'Адрес выдаётся после настройки Signer. Пока кошелёк не готов — пополнение недоступно.',
+  signer_unavailable: 'Сервис подписи недоступен. Попробуйте позже.',
+  deposits_disabled: 'Приём USDT выключен в этой сборке.',
+  pay_unavailable: 'Платёжная база недоступна. Попробуйте позже.',
+  no_session: 'Войдите в игру, чтобы получить адрес.',
+};
+
+function addressBlock(state) {
+  const node = $('[data-pay="address"]');
+  if (node) {
+    node.textContent = state.address;
+    node.classList.toggle('is-ready', state.ready);
+  }
+  const copy = $('[data-pay="copy-btn"]');
+  if (copy) copy.hidden = !state.ready;
+  const note = $('[data-pay="deposit-note"]');
+  if (note && state.note) note.textContent = state.note;
+  const button = $('[data-pay="address-btn"]');
+  if (button) {
+    button.disabled = !state.canAsk;
+    button.textContent = state.ready ? 'Адрес получен' : t(lang, 'deposit.get');
+  }
+}
+
+async function loadDeposit() {
+  if (!token) {
+    addressBlock({
+      address: t(lang, 'deposit.address'),
+      ready: false, canAsk: false,
+      note: t(lang, 'deposit.note'),
+    });
+    return;
+  }
+  const res = await api('/pay/address.json');
+  if (res.ok) {
+    addressBlock({
+      address: res.data.address,
+      ready: true,
+      canAsk: false,
+      note: lang === 'en'
+        ? `Network: ${res.data.network}. Token: USDT (${res.data.contract}).`
+        : `Сеть: ${res.data.network === 'mainnet' ? 'TRON mainnet' : res.data.network}. Токен: USDT (${res.data.contract}).`,
+    });
+    return;
+  }
+  addressBlock({
+    address: lang === 'en' ? 'Address is not available yet.' : 'Адрес пока недоступен.',
+    ready: false,
+    canAsk: true,
+    note: DEPOSIT_ERRORS[res.data?.error] || (lang === 'en' ? 'No response. Try again later.' : 'Сервис не ответил. Попробуйте позже.'),
+  });
+}
+
+function wireDeposit() {
+  const button = $('[data-pay="address-btn"]');
+  if (button) button.addEventListener('click', () => { button.disabled = true; loadDeposit(); });
+  const copy = $('[data-pay="copy-btn"]');
+  if (copy) copy.addEventListener('click', async () => {
+    const node = $('[data-pay="address"]');
+    const text = node ? node.textContent.trim() : '';
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      copy.textContent = t(lang, 'deposit.copied');
+      setTimeout(() => { copy.textContent = t(lang, 'deposit.copy'); }, 1600);
+    } catch {
+      copy.textContent = 'Выделите адрес вручную';
+    }
+  });
+}
+
 async function boot() {
   const [catalog, session] = await Promise.all([api('/pay/products.json'), bootSession()]);
 
@@ -223,6 +312,12 @@ async function boot() {
     renderProducts({ products: [] }, false, false);
   }
 
+  setLang(initialLang());
+  for (const b of $all('[data-lang]')) {
+    b.addEventListener('click', () => { setLang(b.dataset.lang); loadDeposit(); });
+  }
+  wireDeposit();
+  await loadDeposit();
   if (session) await loadAccount();
   else {
     setText('[data-pay="wallet-hint"]', 'Войдите в игру, чтобы увидеть баланс.');

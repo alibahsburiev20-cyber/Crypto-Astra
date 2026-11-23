@@ -1,0 +1,127 @@
+// Мини-i18n для страниц без сборщика.
+//
+// Полный перевод игры — отдельная работа: там сотни строк внутри рендера. Здесь
+// закрыт витринный контур (pay.html), потому что именно его видит новый игрок и
+// покупатель. Ключи живут в data-i18n, выбор языка — в localStorage.
+//
+// Правила: не переводим юридические страницы (они на немецком по закону) и не
+// подменяем серверные тексты — только статическую разметку.
+
+export const LANGS = ['ru', 'en', 'de'];
+
+const DICT = {
+  ru: {
+    'nav.game': 'В игру',
+    'nav.pool': 'Пул',
+    'pay.tagline': 'Astra Pay · магазин',
+    'pay.kicker': 'Магазин внешнего вида',
+    'pay.lead': 'Здесь покупается только внешний вид: корпуса кораблей, значки и разовые услуги. Купленное не даёт преимуществ и не превращается в деньги. ASTRA по-прежнему нельзя купить или вывести.',
+    'wallet.title': 'Кошелёк',
+    'wallet.hint': 'Войдите в игру, чтобы увидеть баланс.',
+    'wallet.login': 'Войти',
+    'deposit.title': 'Пополнить баланс',
+    'deposit.lead': 'Пополнение идёт переводом USDT (TRC-20) на личный адрес игрока. Адрес выдаётся один раз и не меняется: по нему сервер узнаёт, чей это перевод. Другая сеть или монета не дойдут.',
+    'deposit.address': 'Войдите в игру, чтобы получить адрес.',
+    'deposit.get': 'Получить адрес',
+    'deposit.copy': 'Скопировать',
+    'deposit.copied': 'Скопировано',
+    'deposit.note': 'Сеть: TRON (TRC-20). Зачисление — после подтверждения сети.',
+    'shop.title': 'Витрина',
+    'shop.loading': 'Загружаем каталог…',
+    'history.title': 'Последние операции',
+    'history.date': 'Дата',
+    'history.what': 'Что',
+    'history.amount': 'Сумма',
+    'history.empty': 'Пока операций нет.',
+    'skins.title': 'На что покупаются скины',
+    'rules.title': 'Честно о деньгах',
+  },
+  en: {
+    'nav.game': 'Play',
+    'nav.pool': 'Pool',
+    'pay.tagline': 'Astra Pay · shop',
+    'pay.kicker': 'Cosmetics store',
+    'pay.lead': 'Only appearance is sold here: ship hulls, badges and one-off services. Purchases give no advantage and never turn into money. ASTRA still cannot be bought or withdrawn.',
+    'wallet.title': 'Wallet',
+    'wallet.hint': 'Sign in to see your balance.',
+    'wallet.login': 'Sign in',
+    'deposit.title': 'Top up balance',
+    'deposit.lead': 'Top-ups are USDT (TRC-20) transfers to your personal address. The address is issued once and never changes: it is how the server knows whose transfer it is. A different network or coin will not arrive.',
+    'deposit.address': 'Sign in to get your address.',
+    'deposit.get': 'Get address',
+    'deposit.copy': 'Copy',
+    'deposit.copied': 'Copied',
+    'deposit.note': 'Network: TRON (TRC-20). Credited after network confirmation.',
+    'shop.title': 'Store',
+    'shop.loading': 'Loading catalogue…',
+    'history.title': 'Recent transactions',
+    'history.date': 'Date',
+    'history.what': 'Item',
+    'history.amount': 'Amount',
+    'history.empty': 'No transactions yet.',
+    'skins.title': 'What skins affect',
+    'rules.title': 'Honest about money',
+  },
+  de: {
+    'nav.game': 'Spielen',
+    'nav.pool': 'Pool',
+    'pay.tagline': 'Astra Pay · Shop',
+    'pay.kicker': 'Kosmetik-Shop',
+    'pay.lead': 'Hier wird nur Aussehen verkauft: Schiffshüllen, Abzeichen und einmalige Dienste. Käufe bringen keinen Vorteil und werden nie zu Geld. ASTRA kann weiterhin weder gekauft noch ausgezahlt werden.',
+    'wallet.title': 'Guthaben',
+    'wallet.hint': 'Melde dich an, um dein Guthaben zu sehen.',
+    'wallet.login': 'Anmelden',
+    'deposit.title': 'Guthaben aufladen',
+    'deposit.lead': 'Aufgeladen wird per USDT-Überweisung (TRC-20) an deine persönliche Adresse. Die Adresse wird einmal vergeben und bleibt gleich: daran erkennt der Server, wessen Überweisung es ist. Ein anderes Netz oder eine andere Münze kommt nicht an.',
+    'deposit.address': 'Melde dich an, um die Adresse zu erhalten.',
+    'deposit.get': 'Adresse anfordern',
+    'deposit.copy': 'Kopieren',
+    'deposit.copied': 'Kopiert',
+    'deposit.note': 'Netz: TRON (TRC-20). Gutschrift nach Bestätigung im Netz.',
+    'shop.title': 'Shop',
+    'shop.loading': 'Katalog wird geladen…',
+    'history.title': 'Letzte Transaktionen',
+    'history.date': 'Datum',
+    'history.what': 'Position',
+    'history.amount': 'Betrag',
+    'history.empty': 'Noch keine Transaktionen.',
+    'skins.title': 'Was Skins bewirken',
+    'rules.title': 'Ehrlich über Geld',
+  },
+};
+
+/** Язык из localStorage, иначе из браузера, иначе русский. */
+export function pickLang(saved, navigatorLang) {
+  if (LANGS.includes(saved)) return saved;
+  const base = String(navigatorLang || '').toLowerCase().slice(0, 2);
+  return LANGS.includes(base) ? base : 'ru';
+}
+
+/** Перевод по ключу; неизвестный ключ возвращает сам ключ, а не пустоту. */
+export function t(lang, key) {
+  const table = DICT[LANGS.includes(lang) ? lang : 'ru'];
+  return table[key] ?? DICT.ru[key] ?? key;
+}
+
+/**
+ * Проставляет переводы в документ.
+ * @param {Document} doc
+ * @param {string} lang
+ */
+export function applyI18n(doc, lang) {
+  doc.documentElement.lang = lang;
+  for (const node of doc.querySelectorAll('[data-i18n]')) {
+    const key = node.getAttribute('data-i18n');
+    if (key) node.textContent = t(lang, key);
+  }
+  for (const node of doc.querySelectorAll('[data-i18n-placeholder]')) {
+    const key = node.getAttribute('data-i18n-placeholder');
+    if (key) node.setAttribute('placeholder', t(lang, key));
+  }
+  for (const node of doc.querySelectorAll('[data-lang]')) {
+    const active = node.getAttribute('data-lang') === lang;
+    node.classList.toggle('is-active', active);
+    node.setAttribute('aria-pressed', active ? 'true' : 'false');
+  }
+  return lang;
+}

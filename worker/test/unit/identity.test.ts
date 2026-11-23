@@ -9,10 +9,10 @@ import {
   ownIdentity, publicIdentity, setCallsign, setStyle, syncPremium,
 } from '../../src/world/modules/identity';
 import { createGuild, joinGuild } from '../../src/world/modules/guilds';
-import { arenaLeaderboard, finishRun, startRun } from '../../src/world/modules/minigame';
+import { arenaLeaderboard } from '../../src/world/modules/minigame';
 import { createPlayer } from '../../src/world/modules/players';
 import { applyDelta, getBalance } from '../../src/world/balances';
-import { RUN_MS, makeField, MAX_SPEED } from '../../src/shared/minigame';
+import { RUN_MS } from '../../src/shared/minigame';
 import { buildState } from '../../src/world/modules/state';
 import { makeWorld } from '../helpers/sqlShim';
 
@@ -111,21 +111,12 @@ describe('имена и порядок видны другим', () => {
     tx(() => setCallsign(sql, 'p1', 'Комета', T0));
     tx(() => setStyle(sql, 'p1', { frame: 'nebula', trail: 'nebula' }, { frames: ['nebula'], trails: ['nebula'] }, T0));
 
-    const start = tx(() => startRun(sql, 'p1', 'start-1', T0, false)) as { runId: string; seed: number };
-    const field = makeField(start.seed);
-    const xs: number[] = [];
-    let x = 500;
-    let ci = 0;
-    const step = (MAX_SPEED * 40) / 1000;
-    for (let t = 0; t <= 1125; t += 1) {
-      const time = t * 40;
-      while (ci < field.crystals.length && field.crystals[ci].t <= time) ci += 1;
-      const target = ci < field.crystals.length ? field.crystals[ci].x : x;
-      x += Math.max(-step, Math.min(step, target - x));
-      xs.push(Math.round(x * 10));
-    }
-    const trace = xs.map((v, i) => ({ t: i * 40, x: v / 10 }));
-    tx(() => finishRun(sql, 'p1', 'fin-1', { runId: start.runId, trace }, T0 + RUN_MS, false));
+    // Синтетический забег зависит от зерна трассы: записываем победу напрямую.
+    sql.exec(
+      `INSERT INTO minigame_runs (id, player_id, seed, started_at, ends_at, status, score, hits, picks, win, astra)
+       VALUES ('board-win', 'p1', 1, ?, ?, 'finished', 180, 1, 19, 1, 150)`,
+      T0, T0 + RUN_MS,
+    );
 
     const board = arenaLeaderboard(sql, 'p1', T0 + RUN_MS);
     expect(board[0].label).toBe('Комета');

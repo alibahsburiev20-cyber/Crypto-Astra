@@ -1,3 +1,5 @@
+import { offlineSummary } from '/welcome.js';
+
 // Признак «JS работает»: без него CSS не прячет секции перед анимацией появления.
 document.documentElement.classList.add('js');
 
@@ -842,6 +844,12 @@ function garagePanel() {
       }),
       el('span', { class: 'garage-label' }, ship ? ship.name : 'свободно')));
   }
+  // Недоступные ячейки показываем призраком: видно, сколько ещё можно купить.
+  for (let i = g.slots; i < g.max; i += 1) {
+    cells.push(el('div', { class: 'garage-slot is-locked' },
+      el('img', { src: '/sprites/garage/slot_locked.png', alt: '', width: '96', height: '96', class: 'garage-cell', loading: 'lazy' }),
+      el('span', { class: 'garage-label' }, 'закрыто')));
+  }
   return el('div', { class: 'block garage-block' },
     el('h3', {}, 'Гараж',
       el('span', { class: 'badge' }, `${g.used}/${g.slots}`),
@@ -897,7 +905,9 @@ function renderFleet() {
         type: 'button',
         disabled: state.frozen || tooLow || c.price == null || noMoney || garageFull ? '' : null,
         onClick: () => doBuyShip(c.type),
-      }, label),
+      },
+      c.price != null && !tooLow ? el('img', { src: '/icons/ui/buy.png', alt: '', width: '18', height: '18', class: 'btn-ico', loading: 'lazy' }) : null,
+      label),
     );
   });
   return el('div', { class: 'screen' },
@@ -1459,7 +1469,8 @@ function renderArena() {
           : el('p', { class: 'muted' }, 'Пока никто не побеждал. Первое место свободно.')),
       el('div', { class: 'block' },
         el('h3', {}, 'Неделя в поясе',
-          el('span', { class: 'badge' }, a.weekly?.awarded ? 'получено' : `${a.weekly?.wins ?? 0}/${a.weekly?.target ?? 20}`)),
+          el('img', { src: '/sprites/profile/medal_week.png', alt: 'Недельная медаль', width: '22', height: '22', class: 'icon-sm', loading: 'lazy' }),
+        el('span', { class: 'badge' }, a.weekly?.awarded ? 'получено' : `${a.weekly?.wins ?? 0}/${a.weekly?.target ?? 20}`)),
         el('p', { class: 'muted' }, `20 побед за календарную неделю — ${a.weekly?.reward ?? 150} ASTRA разово. Счёт сбрасывается в понедельник.`),
         el('div', { class: 'level-bar' }, (() => {
           const fill = el('div', { class: 'level-bar-fill' });
@@ -1623,6 +1634,10 @@ function arenaDrawStatic(canvas) {
     ctx.fill();
   }
 }
+
+const ARENA_REDUCE = (() => {
+  try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; }
+})();
 
 function arenaFrame(canvas) {
   const run = arenaRun;
@@ -1843,7 +1858,8 @@ function renderMissions() {
       el('b', {}, a.title),
       el('span', { class: 'rating-sub' }, a.unlocked ? 'получено' : a.hint)))),
     el('div', { class: 'btn-row' },
-      el('button', { type: 'button', class: 'ghost', onClick: () => { socialData = null; render(); loadSocial(); } }, 'Обновить')),
+      el('button', { type: 'button', class: 'ghost', onClick: () => { socialData = null; render(); loadSocial(); } },
+      el('img', { src: '/icons/ui/refresh.png', alt: '', width: '18', height: '18', class: 'btn-ico', loading: 'lazy' }), 'Обновить')),
     note ? el('p', { class: note.startsWith('Ошибка') ? 'error' : 'ok' }, note) : null,
   );
 }
@@ -1933,8 +1949,18 @@ function renderGuild() {
     : null;
 
   const guildActions = guild.mine
-    ? el('div', { class: 'btn-row' },
-      el('button', { type: 'button', class: 'ghost danger', onClick: () => doGuildLeave() }, 'Покинуть гильдию'))
+    ? el('div', { class: 'block' },
+      el('h3', {}, 'Управление'),
+      guild.role === 'leader'
+        ? (() => {
+          const name = el('input', { type: 'text', maxlength: '24', value: guild.mine.name, 'aria-label': 'Новое название гильдии' });
+          const tag = el('input', { type: 'text', maxlength: '5', value: guild.mine.tag, 'aria-label': 'Новый тег гильдии' });
+          return el('div', { class: 'form' }, name, tag,
+            el('button', { type: 'button', class: 'primary', onClick: () => doGuildRename(name.value, tag.value) }, 'Переименовать'));
+        })()
+        : null,
+      el('div', { class: 'btn-row' },
+        el('button', { type: 'button', class: 'ghost danger', onClick: () => doGuildLeave() }, 'Покинуть гильдию')))
     : null;
 
   const referralsBlock = el('div', { class: 'block' },
@@ -2118,6 +2144,24 @@ async function loadPayAccount() {
   if (view === 'bonus' || view === 'bridge' || view === 'fleet') render();
 }
 
+/**
+ * Сводка за время отсутствия. Метка «когда были» хранится на устройстве:
+ * серверу для этого не нужны новые таблицы, а игрок видит понятный текст.
+ */
+function welcomeNote(data) {
+  let lastSeen = 0;
+  try { lastSeen = Number(localStorage.getItem('astra:lastSeen') || 0); } catch { /* приватный режим */ }
+  const now = Date.now() + serverOffset;
+  try { localStorage.setItem('astra:lastSeen', String(now)); } catch { /* приватный режим */ }
+  return offlineSummary({
+    lastSeen,
+    now,
+    expeditions: data.expeditions,
+    fuel: data.fuel,
+    season: data.season,
+  });
+}
+
 async function loadGame() {
   const { status, data } = await authed('/me');
   if (status === 401) { openAuth('login'); return; }
@@ -2129,6 +2173,8 @@ async function loadGame() {
   }
   state = data;
   syncServerTime(data.server_time);
+  const welcome = welcomeNote(data);
+  if (welcome && !note) note = welcome;
   if (view === 'ledger') {
     const led = await authed('/ledger');
     ledger = led.status === 200 ? led.data.entries : [];
@@ -2176,6 +2222,7 @@ function doCreateGuild(name, tag) { return act(`guild-create:${name}:${tag}`, '/
 function doJoinGuild(code) { return act(`guild-join:${code}`, '/guild/join', { code }).then(loadGuild); }
 function doGuildLeave() { return act('guild-leave', '/guild/leave', {}).then(loadGuild); }
 function doGuildKick(playerId) { return act(`guild-kick:${playerId}`, '/guild/kick', { playerId }).then(loadGuild); }
+function doGuildRename(name, tag) { return act(`guild-rename:${name}:${tag}`, '/guild/rename', { name, tag }).then(loadGuild); }
 function doGuildRole(playerId, role) { return act(`guild-role:${playerId}:${role}`, '/guild/role', { playerId, role }).then(loadGuild); }
 function doApplyReferral(code) { return act(`ref:${code}`, '/referrals/apply', { code }).then(loadGuild); }
 

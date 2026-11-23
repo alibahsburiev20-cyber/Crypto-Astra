@@ -5,6 +5,8 @@
 // не должен двигать деньги.
 //
 // Запуск: npm run pay:loadtest -- --base https://example.workers.dev --requests 300 --concurrency 20
+// С токеном игрока добавляется /pay/account.json — так в замер попадает D1:
+//   npm run pay:loadtest -- --base … --token "$TOKEN" 
 //
 // Код выхода 1, если ошибок больше 1 % или p95 дольше 500 мс.
 
@@ -12,6 +14,8 @@ interface Args {
   base: string;
   requests: number;
   concurrency: number;
+  /** Токен игрока: добавляет чтение /pay/account.json — это запрос в D1. */
+  token: string | null;
 }
 
 const PATH = ['/health', '/pay/status.json', '/pool.json', '/pay/products.json'];
@@ -25,6 +29,7 @@ function parseArgs(argv: string[]): Args {
     base: get('base', 'http://127.0.0.1:8787').replace(/\/$/, ''),
     requests: Number(get('requests', '200')),
     concurrency: Number(get('concurrency', '10')),
+    token: get('token', '') || null,
   };
 }
 
@@ -39,6 +44,8 @@ async function main(): Promise<void> {
   if (!Number.isFinite(args.requests) || args.requests <= 0) throw new Error('bad requests');
   if (!Number.isFinite(args.concurrency) || args.concurrency <= 0) throw new Error('bad concurrency');
 
+  const paths = args.token ? [...PATH, '/pay/account.json'] : PATH;
+  const headers: Record<string, string> = args.token ? { Authorization: `Bearer ${args.token}` } : {};
   const timings: number[] = [];
   const statuses = new Map<number, number>();
   let errors = 0;
@@ -49,10 +56,10 @@ async function main(): Promise<void> {
       const index = next;
       next += 1;
       if (index >= args.requests) return;
-      const path = PATH[index % PATH.length];
+      const path = paths[index % paths.length];
       const started = performance.now();
       try {
-        const res = await fetch(`${args.base}${path}`);
+        const res = await fetch(`${args.base}${path}`, { headers });
         await res.arrayBuffer();
         statuses.set(res.status, (statuses.get(res.status) ?? 0) + 1);
         if (!res.ok) errors += 1;
@@ -78,6 +85,7 @@ async function main(): Promise<void> {
     base: args.base,
     requests: args.requests,
     concurrency: args.concurrency,
+    paths,
     errorRate: Number(errorRate.toFixed(4)),
     rps: Number(rps.toFixed(1)),
     ms: {

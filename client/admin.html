@@ -50,6 +50,35 @@
       <table class="arena-table" id="players"></table>
     </section>
 
+    <section class="block" id="pool-block" hidden>
+      <h2>Пул</h2>
+      <p class="muted">Только учёт: приём взносов выключен флагом <code>POOL_ENABLED</code>. Суммы вводятся в валюте пула (евро/доллары), в базе лежат в центах.</p>
+      <div id="pool-totals" class="admin-totals"></div>
+      <div class="admin-form">
+        <label>Тип <select id="pool-kind"><option value="in">взнос</option><option value="out">приз</option><option value="ops">операции</option></select></label>
+        <label>Сумма <input id="pool-amount" type="number" min="0.01" step="0.01" value="10"></label>
+        <label>Валюта <select id="pool-currency"><option>EUR</option><option>USD</option></select></label>
+        <label>Ссылка <input id="pool-ref" size="18" placeholder="уникальный номер"></label>
+        <label>Заметка <input id="pool-note" size="28" placeholder="публичное пояснение"></label>
+        <button type="button" id="pool-add"><img src="/icons/ui/grant.png" alt="" width="18" height="18"> Добавить</button>
+      </div>
+      <p id="pool-status" class="muted"></p>
+      <table class="arena-table" id="pool-entries"></table>
+    </section>
+
+    <section class="block" id="pay-block" hidden>
+      <h2>Деньги</h2>
+      <p class="muted">Сверка журнала платежей, очередь выплат и стоп-флаг. Выплаты выключены флагом; кнопки ниже не включают их.</p>
+      <div id="pay-totals" class="admin-totals"></div>
+      <p id="pay-verify"></p>
+      <div class="admin-actions">
+        <button type="button" id="pay-stop"><img src="/icons/ui/freeze.png" alt="" width="18" height="18"> Стоп выплат</button>
+        <button type="button" id="pay-resume" class="ghost"><img src="/icons/ui/play.png" alt="" width="18" height="18"> Снять стоп</button>
+      </div>
+      <p id="pay-status" class="muted"></p>
+      <table class="arena-table" id="pay-queue"></table>
+    </section>
+
     <section class="block" id="grant-block" hidden>
       <h2>Ручное начисление</h2>
       <p class="muted">Каждая выдача пишется в журнал мира с причиной и попадает в <code>admin_log</code>.</p>

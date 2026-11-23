@@ -72,6 +72,25 @@ npm run verify-snapshot -- --file snap.json --sha256 <sha256 из D1>
 восстановления сверяем `head_seq`/`head_hash` из снимка с `/me` (`verify`) и
 гоняем `check-ledger` по экспорту Ledger.
 
+## Репетиция восстановления (17.11.2026)
+
+```bash
+bash scripts/restore-drill.sh                 # локальная D1: экспорт → импорт → сверка
+DUMP=astra.sql bash scripts/restore-drill.sh  # заранее снятый продовый дамп
+```
+
+Скрипт разворачивает дамп в чистую SQLite в памяти, проверяет
+`PRAGMA integrity_check` и сравнивает количество строк по таблицам D1
+(`users`, `world_seats`, `pay_operations`, `pool_entries`, `pay_withdrawals`,
+`pay_addresses`, `pay_ledger`, `sessions`). Ничего не пишет в рабочую базу.
+
+Результат локального прогона: дамп 12 669 байт, импорт 3 мс, `integrity: ok`,
+расхождений 0. Продовый прогон делается тем же скриптом и должен дать
+`mismatches: []`.
+
+Игровое состояние (ledger, корабли, гильдии, сезоны) живёт в Durable Object и в
+дамп D1 не попадает — его восстановление отдельный шаг, см. раздел «Мир».
+
 ## Регламент проверки
 
 - Ежедневно: `check-ledger` по снимку, статус `last_verify_ok = 1`.

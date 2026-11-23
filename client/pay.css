@@ -145,3 +145,23 @@
 @media (max-width: 720px) {
   .pay-hero { grid-template-columns: 1fr; }
 }
+
+/* Адрес пополнения: моноширинный, чтобы его можно было продиктовать. */
+.pay-deposit { display: flex; flex-direction: column; gap: 10px; }
+.pay-address {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(8, 14, 28, 0.75);
+  border: 1px dashed rgba(140, 170, 255, 0.35);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.95rem;
+  word-break: break-all;
+}
+.pay-address.is-ready { border-style: solid; border-color: rgba(143, 230, 255, 0.55); color: #bff3ff; }
+.pay-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+
+/* Переключатель языка: маленький, но с нормальной площадью нажатия. */
+.lang-switch { display: inline-flex; gap: 4px; margin-left: 6px; }
+.lang-btn { padding: 4px 8px; min-height: 32px; font-size: 11px; letter-spacing: .04em; }
+.lang-btn.is-active { border-color: rgba(143, 230, 255, .6); color: #bff3ff; }
