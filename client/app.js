@@ -73,6 +73,9 @@ const ERRORS = {
   ship_not_for_sale: 'Этот корабль не продаётся за ASTRA',
   ship_locked: 'Уровень ещё мал для этого корабля',
   ship_owned: 'Такой корабль уже в ангаре',
+  garage_full: 'Гараж полон: купите ещё одну ячейку',
+  garage_max: 'Больше ячеек не бывает: максимум 8',
+  bad_world: 'Неверный идентификатор мира',
   bad_resource: 'Этот ресурс не торгуется',
   bad_amount: 'Количество от 1 до 1000',
   bad_price: 'Цена должна быть больше нуля',
@@ -398,6 +401,29 @@ function fmtDur(ms) {
   return m < 120 ? `${m} мин` : `${Math.round(m / 60)} ч`;
 }
 
+// Скин — это не только окраска корпуса: он даёт цвет позывного, рамку профиля
+// и след двигателя. Всё это видно другим игрокам (гильдия, рейтинг), поэтому
+// скин имеет смысл покупать. На экономику он не влияет никак.
+const SKIN_STYLE = {
+  nebula: { cls: 'cs-nebula', frame: '/sprites/profile/frame_nebula.png', trail: '/sprites/profile/trail_nebula.png' },
+  ember: { cls: 'cs-ember', frame: '/sprites/profile/frame_ember.png', trail: '/sprites/profile/trail_ember.png' },
+  premium: { cls: 'cs-premium', frame: '/sprites/profile/frame_premium.png', trail: '/sprites/profile/trail_premium.png' },
+};
+
+function cosmeticsOwned() {
+  const list = Array.isArray(account?.entitlements) ? account.entitlements : [];
+  return new Set(list.map((item) => String(item.cosmetic || '')));
+}
+
+/** Что надето сейчас: последний купленный скин, иначе Premium, иначе ничего. */
+function activeStyle() {
+  const owned = cosmeticsOwned();
+  if (owned.has('skin:ember')) return SKIN_STYLE.ember;
+  if (owned.has('skin:nebula')) return SKIN_STYLE.nebula;
+  if (owned.has('premium')) return SKIN_STYLE.premium;
+  return null;
+}
+
 // Что даёт скин: внешний вид корпуса. Купленная окраска применяется ко всем
 // кораблям игрока — на бой, скорость и добычу она не влияет.
 const SKIN_SPRITES = {
@@ -469,6 +495,29 @@ function levelBar(compact) {
   );
 }
 
+// Карточка командира: рамка профиля и цвет позывного — то, что видно другим.
+function profileCard() {
+  const style = activeStyle();
+  const owned = cosmeticsOwned();
+  return el('div', { class: 'profile-card' },
+    el('div', { class: 'profile-avatar' },
+      el('img', { src: '/avatars/commander.png', alt: '', width: '64', height: '64', class: 'avatar' }),
+      style ? el('img', { src: style.frame, alt: '', width: '96', height: '96', class: 'profile-frame' }) : null),
+    el('div', { class: 'profile-info' },
+      el('b', { class: `profile-name ${style ? style.cls : ''}` }, callsign()),
+      el('p', { class: 'muted' },
+        style === SKIN_STYLE.premium ? 'Astra Premium: рамка, след и второй слот крафта.'
+          : style ? 'Купленный скин: цвет позывного, рамка и след двигателя.'
+            : 'Косметики нет — купите скин или Premium в магазине.'),
+      el('div', { class: 'profile-medals' },
+        owned.has('badge:pioneer') ? el('img', { src: '/sprites/cosmetics/badge_pioneer.png', alt: 'Значок первопроходца', width: '28', height: '28' }) : null,
+        ...(state.minigame?.wins >= 25 ? [el('img', { src: '/sprites/profile/medal_25.png', alt: '25 побед на арене', width: '32', height: '32' })] : []),
+        ...(state.minigame?.wins >= 50 ? [el('img', { src: '/sprites/profile/medal_50.png', alt: '50 побед на арене', width: '32', height: '32' })] : []),
+        ...(state.minigame?.wins >= 100 ? [el('img', { src: '/sprites/profile/medal_100.png', alt: '100 побед на арене', width: '32', height: '32' })] : [])),
+      el('a', { class: 'cta cta-small', href: '/pay.html' }, 'Магазин')),
+  );
+}
+
 function cards() {
   const b = state.balances;
   const label = (icon, text) => el('span', { class: 'label' },
@@ -504,6 +553,7 @@ function renderBridge() {
       ),
     ),
     levelBar(),
+    profileCard(),
     el('div', { class: 'panel-grid' },
       el('div', { class: 'block' },
         el('h3', {}, 'Бонус каждые 15 минут'),
@@ -667,6 +717,41 @@ function rewardBlock(reward, title = 'Результат уже начислен
   );
 }
 
+// Гараж: ячейки решают, сколько кораблей может быть одновременно. Без ячейки
+// верфь не продаёт корпус — об этом честно говорит кнопка.
+function garagePanel() {
+  const g = state.garage;
+  if (!g) return null;
+  const cells = [];
+  for (let i = 0; i < g.slots; i += 1) {
+    const ship = state.ships[i];
+    cells.push(el('div', { class: `garage-slot${ship ? ' is-filled' : ''}` },
+      el('img', {
+        src: ship ? '/sprites/garage/slot_filled.png' : '/sprites/garage/slot_empty.png',
+        alt: '', width: '96', height: '96', class: 'garage-cell',
+      }),
+      el('span', { class: 'garage-label' }, ship ? ship.name : 'свободно')));
+  }
+  return el('div', { class: 'block garage-block' },
+    el('h3', {}, 'Гараж',
+      el('span', { class: 'badge' }, `${g.used}/${g.slots}`),
+      g.premiumBonus ? el('span', { class: 'badge' }, '+1 Premium') : null),
+    el('p', { class: 'muted' },
+      `Ячеек ${g.slots} из ${g.max}. Свободно: ${g.free}. Купить корабль можно только при свободной ячейке.`),
+    el('div', { class: 'garage-grid' }, ...cells),
+    g.canBuy
+      ? el('button', {
+        type: 'button', disabled: state.frozen || state.balances.astra < g.price ? '' : null,
+        onClick: doBuySlot,
+      },
+      el('img', { src: '/icons/ui/garage.png', alt: '', width: '18', height: '18', class: 'icon-sm' }),
+      `Ещё ячейка за ${astraNum(g.price)} ASTRA`)
+      : el('p', { class: 'muted' }, `Больше ${g.max} ячеек не бывает.`),
+  );
+}
+
+function doBuySlot() { return act('garage-slot', '/garage/buy', {}); }
+
 function renderFleet() {
   const owned = state.ships.map((s) => el('div', { class: 'block' },
     shipArt(s.type),
@@ -681,13 +766,16 @@ function renderFleet() {
     s.durability <= 70 && s.durability >= 50 ? el('p', { class: 'muted' }, 'Почините до следующего рейса, иначе можно просесть ниже 50%.') : null,
   ));
   // Покупка корабля: цена в ASTRA, уровень ворот, один корпус каждого типа.
+  // Полнота гаража считается до верфи: кнопка обязана знать ответ заранее.
+  const garageFull = state.garage ? state.garage.free <= 0 : false;
   const shop = state.catalog.filter((c) => !c.owned).map((c) => {
     const tooLow = state.level < c.unlockLevel;
     const noMoney = c.price != null && state.balances.astra < c.price;
     const label = c.price == null ? 'Чертёж: крафт позже'
       : tooLow ? `Нужен уровень ${c.unlockLevel}`
         : noMoney ? `Не хватает ${astraNum(c.price - state.balances.astra)} ASTRA`
-          : `Купить за ${astraNum(c.price)} ASTRA`;
+          : garageFull ? 'Гараж полон: купите ячейку'
+            : `Купить за ${astraNum(c.price)} ASTRA`;
     return el('div', { class: `block${tooLow || c.price == null ? ' locked' : ''}` },
       el('img', { src: `/sprites/ships/${c.type}.png`, alt: '', width: '96', class: 'sprite-thumb' }),
       el('h3', {},
@@ -697,13 +785,14 @@ function renderFleet() {
         `Груз ${c.cargo} · бак ${c.tank} · добыча ×${c.mining} · уровень ${c.unlockLevel}`),
       el('button', {
         type: 'button',
-        disabled: state.frozen || tooLow || c.price == null || noMoney ? '' : null,
+        disabled: state.frozen || tooLow || c.price == null || noMoney || garageFull ? '' : null,
         onClick: () => doBuyShip(c.type),
       }, label),
     );
   });
   return el('div', { class: 'screen' },
     el('div', { class: 'screen-title' }, el('h2', {}, 'Флот'), el('span', { class: 'badge' }, `${state.ships.length} в строю`)),
+    garagePanel(),
     ...owned,
     el('div', { class: 'screen-title' }, el('h2', {}, 'Верфь'), el('span', { class: 'badge' }, `${astraNum(state.balances.astra)} ASTRA`)),
     el('p', { class: 'muted' }, 'Один корпус каждого типа. Новый корабль расширяет бак флота и открывает дальние сектора.'),
@@ -785,24 +874,47 @@ function moduleCard(ship, entry) {
   );
 }
 
+// Модули: у каждого корабля свои слоты и свои эффекты. Раньше все корабли
+// показывались одной простынёй, и казалось, что модули «общие». Теперь выбран
+// один корабль — его слоты, его бонусы, его цены.
+let moduleShipId = null;
+
 function renderModules() {
   const m = state.modules;
-  if (!m) return el('div', { class: 'screen' }, el('p', { class: 'muted' }, 'Сервер ещё не отдаёт модули.'));
-  const blocks = [];
-  for (const ship of m.ships) {
-    blocks.push(el('div', { class: 'screen-title' },
-      el('h2', {}, ship.name),
-      el('span', { class: 'badge' }, `слоты ${ship.used}/${ship.slots}`),
-    ));
-    blocks.push(ship.modules.length
-      ? el('p', { class: 'muted' }, ship.modules.map((x) => `${x.name} L${x.level}: ${x.effectText}`).join(' · '))
-      : el('p', { class: 'muted' }, 'Модулей нет. Слоты пустые.'));
-    blocks.push(el('div', { class: 'module-grid' }, ...m.catalog.map((entry) => moduleCard(ship, entry))));
+  if (!m || !m.ships?.length) return el('div', { class: 'screen' }, el('p', { class: 'muted' }, 'Сервер ещё не отдаёт модули.'));
+  if (!moduleShipId || !m.ships.some((ship) => ship.id === moduleShipId)) moduleShipId = m.ships[0].id;
+  const ship = m.ships.find((x) => x.id === moduleShipId);
+
+  const tabs = m.ships.map((x) => el('button', {
+    type: 'button',
+    class: x.id === moduleShipId ? '' : 'ghost',
+    onClick: () => { moduleShipId = x.id; render(); },
+  },
+  el('img', { src: `/sprites/ships/${x.type}.png`, alt: '', width: '28', height: '20', class: 'icon-sm', loading: 'lazy' }),
+  `${x.name} ${x.used}/${x.slots}`));
+
+  const cells = [];
+  for (let i = 0; i < ship.slots; i += 1) {
+    const mod = ship.modules[i];
+    cells.push(el('div', { class: `slot-cell${mod ? ' is-filled' : ''}` },
+      el('img', {
+        src: mod ? `/sprites/modules/${mod.id}.png` : '/sprites/garage/slot_empty.png',
+        alt: '', width: '64', height: '64', class: 'slot-art', loading: 'lazy',
+      }),
+      el('span', { class: 'slot-label' }, mod ? `${mod.name} L${mod.level}` : 'пусто')));
   }
+
   return el('div', { class: 'screen' },
     el('div', { class: 'screen-title' }, el('h2', {}, 'Модули'), el('span', { class: 'badge' }, `до L${m.maxLevel}`)),
-    el('p', { class: 'muted' }, 'Модуль ставится на корабль и занимает слот. Снять его нельзя — только улучшить: поэтому вложенные ASTRA не возвращаются.'),
-    ...blocks,
+    el('p', { class: 'muted' }, 'Модуль ставится на конкретный корабль и занимает его слот. Снять нельзя — только улучшить: вложенные ASTRA не возвращаются.'),
+    el('div', { class: 'ship-tabs' }, ...tabs),
+    el('div', { class: 'block' },
+      el('h3', {}, ship.name, el('span', { class: 'badge' }, `слоты ${ship.used}/${ship.slots}`)),
+      el('div', { class: 'slot-row' }, ...cells),
+      el('p', { class: 'muted' }, ship.modules.length
+        ? ship.modules.map((x) => `${x.name} L${x.level}: ${x.effectText}`).join(' · ')
+        : 'Модулей нет: все слоты этого корабля свободны.')),
+    el('div', { class: 'module-grid' }, ...m.catalog.map((entry) => moduleCard(ship, entry))),
     note ? el('p', { class: note.startsWith('Ошибка') ? 'error' : 'ok' }, note) : null,
   );
 }
@@ -1096,12 +1208,74 @@ function arenaTier(tier) {
     el('p', { class: 'muted' }, `${tier.title} · +${tier.astra} ASTRA`));
 }
 
+// Звук арены: короткие синтезированные сигналы. Файлов нет — значит, нет и
+// лишних запросов; правило «весь арт — PNG» про картинки, звук живёт отдельно.
+let arenaSoundOn = (() => {
+  try { return localStorage.getItem('astra:sound') !== 'off'; } catch { return true; }
+})();
+let arenaAudio = null;
+
+function soundToggle() {
+  return el('button', {
+    type: 'button',
+    class: `sound-btn${arenaSoundOn ? '' : ' is-off'}`,
+    'aria-pressed': arenaSoundOn ? 'true' : 'false',
+    title: arenaSoundOn ? 'Звук включён' : 'Звук выключен',
+    onClick: (e) => {
+      e.stopPropagation();
+      arenaSoundOn = !arenaSoundOn;
+      try { localStorage.setItem('astra:sound', arenaSoundOn ? 'on' : 'off'); } catch { /* приватный режим */ }
+      const btn = e.currentTarget;
+      btn.classList.toggle('is-off', !arenaSoundOn);
+      btn.setAttribute('aria-pressed', arenaSoundOn ? 'true' : 'false');
+      btn.title = arenaSoundOn ? 'Звук включён' : 'Звук выключен';
+      if (arenaSoundOn) sfx('pick');
+    },
+  }, el('img', { src: '/icons/ui/volume.png', alt: '', width: '20', height: '20', class: 'icon-sm' }));
+}
+
+function audioCtx() {
+  if (arenaAudio) return arenaAudio;
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return null;
+  try { arenaAudio = new Ctx(); } catch { arenaAudio = null; }
+  return arenaAudio;
+}
+
+/** Один короткий сигнал: частота от/до, тип волны, длина и громкость. */
+function tone(from, to, kind = 'sine', dur = 0.09, volume = 0.05) {
+  const ctx = audioCtx();
+  if (!ctx) return;
+  if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = kind;
+  osc.frequency.setValueAtTime(from, ctx.currentTime);
+  osc.frequency.exponentialRampToValueAtTime(Math.max(40, to), ctx.currentTime + dur);
+  gain.gain.setValueAtTime(volume, ctx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + dur);
+  osc.connect(gain).connect(ctx.destination);
+  osc.start();
+  osc.stop(ctx.currentTime + dur + 0.02);
+}
+
+function sfx(kind) {
+  if (!arenaSoundOn) return;
+  try {
+    if (kind === 'pick') tone(880, 1320, 'sine', 0.08, 0.05);
+    else if (kind === 'hit') tone(190, 55, 'sawtooth', 0.18, 0.07);
+    else if (kind === 'win') { tone(660, 660, 'triangle', 0.12, 0.06); setTimeout(() => tone(990, 990, 'triangle', 0.16, 0.06), 120); }
+    else if (kind === 'lose') tone(330, 180, 'triangle', 0.22, 0.05);
+  } catch { /* звук — украшение, а не условие игры */ }
+}
+
 function arenaHud() {
   return el('div', { class: 'arena-hud' },
     el('span', {}, el('b', { 'data-arena-time': '' }, '0:45')),
     el('span', {}, 'очки: ', el('b', { 'data-arena-score': '' }, '0')),
     el('span', {}, 'кристаллы: ', el('b', { 'data-arena-picks': '' }, '0')),
-    el('span', {}, 'пробоины: ', el('b', { 'data-arena-hits': '' }, '0')));
+    el('span', {}, 'пробоины: ', el('b', { 'data-arena-hits': '' }, '0')),
+    soundToggle());
 }
 
 function renderArena() {
@@ -1160,6 +1334,26 @@ function renderArena() {
               el('td', {}, r.win ? 'победа' : `${r.picks} крист. / ${r.hits} пробоин`),
               el('td', {}, `+${r.astra}`)))))
           : el('p', { class: 'muted' }, 'Ещё ни одного забега. Первый — самый важный.')),
+      el('div', { class: 'block' },
+        el('h3', {}, 'Лидерборд арены'),
+        a.leaderboard?.length
+          ? el('table', { class: 'arena-table' },
+            el('thead', {}, el('tr', {}, el('th', {}, '#'), el('th', {}, 'Пилот'), el('th', {}, 'Побед'), el('th', {}, 'Лучший'))),
+            el('tbody', {}, ...a.leaderboard.map((row) => el('tr', { class: row.isMe ? 'is-me' : '' },
+              el('td', {}, String(row.rank)),
+              el('td', {}, row.label),
+              el('td', {}, String(row.wins)),
+              el('td', {}, String(row.best))))))
+          : el('p', { class: 'muted' }, 'Пока никто не побеждал. Первое место свободно.')),
+      el('div', { class: 'block' },
+        el('h3', {}, 'Неделя в поясе',
+          el('span', { class: 'badge' }, a.weekly?.awarded ? 'получено' : `${a.weekly?.wins ?? 0}/${a.weekly?.target ?? 20}`)),
+        el('p', { class: 'muted' }, `20 побед за календарную неделю — ${a.weekly?.reward ?? 150} ASTRA разово. Счёт сбрасывается в понедельник.`),
+        el('div', { class: 'level-bar' }, (() => {
+          const fill = el('div', { class: 'level-bar-fill' });
+          fill.style.width = `${Math.min(100, Math.round(((a.weekly?.wins ?? 0) / (a.weekly?.target ?? 20)) * 100))}%`;
+          return fill;
+        })())),
       el('div', { class: 'block' },
         el('h3', {}, 'Правила'),
         el('ul', { class: 'bonus-rules' },
@@ -1234,6 +1428,7 @@ async function arenaStart() {
 
 // Спрайты арены — PNG, как и весь интерфейс. Грузим один раз и держим в памяти.
 let arenaArt = null;
+const arenaTrailCache = {};
 let arenaArtPromise = null;
 function arenaAssets() {
   if (!arenaArtPromise) {
@@ -1339,13 +1534,14 @@ function arenaFrame(canvas) {
     const a = run.field.asteroids[run.nextAsteroid];
     if (Math.abs(run.x - a.x) < a.r + 30) {
       run.hits += 1;
+      sfx('hit');
       run.booms.push({ x: a.x, y: ARENA_Y, at: t });
     }
     run.nextAsteroid += 1;
   }
   while (run.nextCrystal < run.field.crystals.length && run.field.crystals[run.nextCrystal].t <= t) {
     const c = run.field.crystals[run.nextCrystal];
-    if (Math.abs(run.x - c.x) < c.r + 30) run.picks += 1;
+    if (Math.abs(run.x - c.x) < c.r + 30) { run.picks += 1; sfx('pick'); }
     run.nextCrystal += 1;
   }
 
@@ -1409,6 +1605,22 @@ function arenaFrame(canvas) {
     ctx.drawImage(arenaArt.boom, boom.x - size / 2, ARENA_Y - size / 2, size, size);
     ctx.restore();
   }
+  // След двигателя: цвет зависит от купленного скина или Premium.
+  const trailSrc = activeStyle()?.trail;
+  if (trailSrc) {
+    if (!arenaTrailCache[trailSrc]) {
+      const img = new Image();
+      img.src = trailSrc;
+      arenaTrailCache[trailSrc] = img;
+    }
+    const trail = arenaTrailCache[trailSrc];
+    if (trail.complete) {
+      ctx.save();
+      ctx.globalAlpha = 0.75;
+      ctx.drawImage(trail, run.x - 22, ARENA_Y + 30, 44, 110);
+      ctx.restore();
+    }
+  }
   // Корабль.
   ctx.save();
   ctx.translate(run.x, ARENA_Y + 10);
@@ -1455,6 +1667,7 @@ async function arenaFinish() {
   // Ключ нужен только для повтора при обрыве связи — после ответа он не нужен.
   if (res.status === 200) idemDone(scope);
   arenaResult = res.status === 200 ? res.data : { error: res.data?.error || 'bad_trace' };
+  if (res.status === 200) sfx(res.data?.result?.win ? 'win' : 'lose');
   arenaRun = null;
   arenaData = null;
   if (state) state = { ...state, minigame: res.data?.attempts ? { attempts: res.data.attempts, wins: res.data.wins } : state.minigame };
@@ -1713,8 +1926,13 @@ function render() {
   if (!state) return;
   const b = state.balances;
   setText('#world', `Мир ${state.world_id}`);
+  const style = activeStyle();
   setText('#commander', callsign());
   setText('#commander-mobile', callsign());
+  for (const sel of ['#commander', '#commander-mobile']) {
+    const node = document.querySelector(sel);
+    if (node) node.className = `profile-name ${style ? style.cls : ''}`;
+  }
   setText('#top-astra', b.astra);
   setText('#top-fuel', `${b.fuel}/${state.fuel.cap}`);
   setText('#top-points', b.points);

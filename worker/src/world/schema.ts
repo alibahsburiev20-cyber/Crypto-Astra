@@ -77,6 +77,18 @@ export const WORLD_SCHEMA: string[] = [
      id TEXT PRIMARY KEY, lot_id TEXT NOT NULL, seller_id TEXT NOT NULL, buyer_id TEXT NOT NULL,
      resource TEXT NOT NULL, amount INTEGER NOT NULL, unit_price INTEGER NOT NULL,
      gross INTEGER NOT NULL, tax INTEGER NOT NULL, at INTEGER NOT NULL)`,
+  // Ручные операции оператора (этап 15): кто, что и когда сделал в админке.
+  // Таблица не про деньги, а про «кто нажал кнопку»: без неё компенсации
+  // невозможно отличить от подарка.
+  `CREATE TABLE IF NOT EXISTS admin_log (
+     id TEXT PRIMARY KEY, actor TEXT NOT NULL, action TEXT NOT NULL,
+     target TEXT, payload TEXT NOT NULL, created_at INTEGER NOT NULL)`,
+  `CREATE INDEX IF NOT EXISTS idx_admin_log_at ON admin_log (created_at)`,
+  // Гараж (этап 14): купленные ячейки сверх базовых трёх. Одна строка на игрока.
+  `CREATE TABLE IF NOT EXISTS garage_slots (
+     player_id TEXT PRIMARY KEY REFERENCES players (id),
+     extra INTEGER NOT NULL DEFAULT 0 CHECK (extra >= 0),
+     updated_at INTEGER NOT NULL)`,
   // Мини-игра (этап 13). Забег живёт от старта до приёма трассы; если его не
   // прислали вовремя — статус expired, попытка не возвращается.
   `CREATE TABLE IF NOT EXISTS minigame_runs (

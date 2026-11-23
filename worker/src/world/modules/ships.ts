@@ -4,6 +4,7 @@ import { ApiError } from '../errors';
 import { withIdempotency } from '../idempotency';
 import { assertPlayable } from './maintenance';
 import { applyDurability } from './progress';
+import { garageSlots } from './garage';
 
 // Покупка корабля (этап 2, срез 5). Один корпус каждого типа: флот растёт по
 // уровням, а не по количеству одинаковых Scout'ов. Flagship не продаётся за
@@ -15,7 +16,9 @@ export interface BuyResult {
   astra: number;
 }
 
-export function buyShip(sql: SqlStorage, playerId: string, idemKey: string, type: string, now: number): BuyResult {
+export function buyShip(
+  sql: SqlStorage, playerId: string, idemKey: string, type: string, now: number, premium = false,
+): BuyResult {
   return withIdempotency(sql, playerId, 'ship_buy', idemKey, { type }, now, () => {
     assertPlayable(sql);
     const def = SHIPS[type as ShipType];
@@ -28,6 +31,11 @@ export function buyShip(sql: SqlStorage, playerId: string, idemKey: string, type
 
     const owned = sql.exec('SELECT 1 FROM ships WHERE player_id = ? AND type = ? LIMIT 1', playerId, def.type).toArray();
     if (owned.length) throw new ApiError(409, 'ship_owned');
+
+    // Гараж: без свободной ячейки новый корпус купить нельзя. Проверка стоит до
+    // списания ASTRA, чтобы отказ не стоил игроку денег.
+    const fleet = sql.exec('SELECT COUNT(*) AS n FROM ships WHERE player_id = ?', playerId).toArray()[0];
+    if (Number(fleet?.n ?? 0) >= garageSlots(sql, playerId, premium)) throw new ApiError(409, 'garage_full');
 
     if (getBalance(sql, playerId, 'astra') < def.price) throw new ApiError(409, 'insufficient_funds');
     const price = def.price;

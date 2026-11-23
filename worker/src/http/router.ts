@@ -3,7 +3,7 @@ import type { Env } from '../env';
 import { config, login, logout, refresh, register } from '../routes/auth';
 import {
   buyFuel, cancelExpedition, chooseEvent, claim, craftStart, guild, guildCreate, guildJoin, guildKick, guildLeave,
-  minigame, minigameFinish, minigameStart,
+  garage, garageBuy, minigame, minigameFinish, minigameStart,
   guildRename, guildRole, ledger, market, marketBuy, marketCancel, marketLot, me, missionClaim, moduleInstall, passClaim,
   referralApply, repair, season, shipBuy, social, startExpedition,
 } from '../routes/game';
@@ -12,6 +12,7 @@ import {
   payStatus, payWithdraw, payWithdrawals,
 } from '../routes/pay';
 import { adminPool, adminPoolEntry, poolPublic } from '../routes/pool';
+import { adminFreeze, adminGrant, adminWorld } from '../routes/admin';
 import { errorResponse, json } from './response';
 
 export async function route(request: Request, env: Env): Promise<Response> {
@@ -43,6 +44,12 @@ export async function route(request: Request, env: Env): Promise<Response> {
       if (m === 'POST' && p === '/admin/pay/send') return await adminPaySend(request, env);
       return json({ error: 'not_found' }, 404);
     }
+    if (p === '/admin/world' || p === '/admin/world/freeze' || p === '/admin/world/grant') {
+      if (m === 'GET' && p === '/admin/world') return await adminWorld(request, env);
+      if (m === 'POST' && p === '/admin/world/freeze') return await adminFreeze(request, env);
+      if (m === 'POST' && p === '/admin/world/grant') return await adminGrant(request, env);
+      return json({ error: 'not_found' }, 404);
+    }
     if (p === '/admin/pool' || p === '/admin/pool/entry') {
       if (m === 'GET' && p === '/admin/pool') return await adminPool(request, env);
       if (m === 'POST' && p === '/admin/pool/entry') return await adminPoolEntry(request, env);
@@ -54,11 +61,13 @@ export async function route(request: Request, env: Env): Promise<Response> {
     if (m === 'POST' && p === '/auth/refresh') return await refresh(request, env);
     if (m === 'POST' && p === '/auth/logout') return await logout(request, env);
 
-    if (p === '/me' || p === '/minigame' || p === '/minigame/start' || p === '/minigame/finish' || p === '/season' || p === '/claim' || p === '/ledger' || p === '/expeditions/start' || p === '/expeditions/cancel' || p === '/expeditions/choose' || p === '/expeditions/choose-event' || p === '/ships/repair' || p === '/fuel/buy' || p === '/craft/start' || p === '/modules/install' || p === '/ships/buy' || p === '/market' || p === '/market/lot' || p === '/market/buy' || p === '/market/cancel' || p === '/social' || p === '/missions/claim' || p === '/pass/claim' || p === '/guild' || p === '/guild/create' || p === '/guild/join' || p === '/guild/leave' || p === '/guild/kick' || p === '/guild/role' || p === '/guild/rename' || p === '/referrals/apply') {
+    if (p === '/me' || p === '/garage' || p === '/garage/buy' || p === '/minigame' || p === '/minigame/start' || p === '/minigame/finish' || p === '/season' || p === '/claim' || p === '/ledger' || p === '/expeditions/start' || p === '/expeditions/cancel' || p === '/expeditions/choose' || p === '/expeditions/choose-event' || p === '/ships/repair' || p === '/fuel/buy' || p === '/craft/start' || p === '/modules/install' || p === '/ships/buy' || p === '/market' || p === '/market/lot' || p === '/market/buy' || p === '/market/cancel' || p === '/social' || p === '/missions/claim' || p === '/pass/claim' || p === '/guild' || p === '/guild/create' || p === '/guild/join' || p === '/guild/leave' || p === '/guild/kick' || p === '/guild/role' || p === '/guild/rename' || p === '/referrals/apply') {
       const a = await requireAuth(request, env);
       if (m === 'GET' && p === '/me') return await me(env, a);
       if (m === 'GET' && p === '/ledger') return await ledger(url, env, a);
       if (m === 'GET' && p === '/season') return await season(env, a);
+      if (m === 'GET' && p === '/garage') return await garage(env, a);
+      if (m === 'POST' && p === '/garage/buy') return await garageBuy(request, env, a);
       if (m === 'GET' && p === '/minigame') return await minigame(env, a);
       if (m === 'POST' && p === '/minigame/start') return await minigameStart(request, env, a);
       if (m === 'POST' && p === '/minigame/finish') return await minigameFinish(request, env, a);

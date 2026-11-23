@@ -15,6 +15,7 @@ import { marketView } from './market';
 import { getPlayerState } from './players';
 import { seasonBrief } from './season';
 import { minigameBrief } from './minigame';
+import { garageView } from './garage';
 
 export function buildState(sql: SqlStorage, playerId: string, now: number, premium = false) {
   const base = getPlayerState(sql, playerId);
@@ -95,6 +96,8 @@ export function buildState(sql: SqlStorage, playerId: string, now: number, premi
     craft: { slots: craftSlotsFor(sql, playerId), running: listCraftJobs(sql, playerId), recipes: craftCatalog() },
     // Модули: каталог с ценами по уровням и состояние каждого корабля.
     modules: moduleStateFor(sql, playerId),
+    // Гараж: сколько ячеек, сколько занято и почём следующая.
+    garage: garageView(sql, playerId, premium),
     catalog: SHIP_ORDER.map((type) => {
       const def = SHIPS[type];
       return {

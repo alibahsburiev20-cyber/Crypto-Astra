@@ -176,3 +176,94 @@ cp "$BG/space.png" "$BG/hero.png"
 
 echo "спрайты собраны:"
 find client/icons/ui client/icons/nav client/sprites/arena client/sprites/bg -name '*.png' -newer package.json | head -40
+
+# ── Гараж, скины, медали, админка (этапы 14–15) ────────────────────────────
+mkdir -p client/sprites/garage client/sprites/profile
+
+# Ячейка гаража: рамка под корабль. Пустая — тёмная, занятая — светится.
+slot() {
+  local out=$1 ring=$2 inner=$3
+  convert -size 192x192 xc:none \
+    -stroke "$ring" -strokewidth 10 -fill "$inner" \
+    -draw "roundrectangle 12,12 180,180 26,26" \
+    -stroke "rgba(255,255,255,0.25)" -strokewidth 3 \
+    -draw "roundrectangle 26,26 166,166 18,18" \
+    -resize 128x128 -depth 8 "$out"
+}
+slot "$ARENA/../garage/slot_empty.png" 'rgba(120,150,220,0.55)' 'rgba(18,28,52,0.75)'
+slot "$ARENA/../garage/slot_filled.png" 'rgba(120,220,255,0.85)' 'rgba(28,52,90,0.85)'
+slot "$ARENA/../garage/slot_locked.png" 'rgba(120,130,160,0.35)' 'rgba(12,18,32,0.8)'
+
+# Фон ангара: тот же космос, но с решёткой пола.
+convert client/sprites/bg/arena.png \
+  -fill 'rgba(90,150,255,0.06)' \
+  -draw "rectangle 0,430 1000,620" \
+  -stroke 'rgba(140,180,255,0.10)' -strokewidth 2 \
+  -draw "line 0,470 1000,470" -draw "line 0,520 1000,520" -draw "line 0,570 1000,570" \
+  -depth 8 client/sprites/garage/hangar_bg.png
+
+# След двигателя: три цвета под скины. Кладётся под корабль в арене.
+trail() {
+  local out=$1 color=$2
+  convert -size 64x160 xc:none \
+    -fill "rgba($color,0.55)" -draw "polygon 32,0 52,120 32,160 12,120" \
+    -blur 0x12 -depth 8 "$out"
+}
+trail "client/sprites/profile/trail_nebula.png" '110,220,255'
+trail "client/sprites/profile/trail_ember.png" '255,150,90'
+trail "client/sprites/profile/trail_premium.png" '210,170,255'
+
+# Рамка профиля: кольцо вокруг аватара.
+frame() {
+  local out=$1 color=$2 width=$3
+  convert -size 192x192 xc:none \
+    -stroke "$color" -strokewidth "$width" -fill none \
+    -draw "circle 96,96 96,10" \
+    -blur 0x1 -resize 128x128 -depth 8 "$out"
+}
+frame "client/sprites/profile/frame_nebula.png" '#6fd3ff' 10
+frame "client/sprites/profile/frame_ember.png" '#ff9a5a' 10
+frame "client/sprites/profile/frame_premium.png" '#c9a6ff' 8
+
+# Медали арены: 25 / 50 / 100 побед и недельная.
+medal() {
+  local out=$1 ring=$2 label=$3
+  convert -size 192x192 xc:none \
+    -fill 'rgba(20,30,55,0.9)' -stroke "$ring" -strokewidth 9 -draw "circle 96,96 96,18" \
+    -stroke "$ring" -strokewidth 6 \
+    -draw "polygon 96,44 108,80 148,80 116,102 128,140 96,118 64,140 76,102 44,80 84,80" \
+    -depth 8 -resize 128x128 "$out"
+  convert "$out" -gravity south -background none -splice 0x0 -fill "$ring" \
+    -font DejaVu-Sans-Bold -pointsize 26 -annotate +0+6 "$label" "$out" 2>/dev/null || true
+}
+medal client/sprites/profile/medal_25.png '#8fd3ff' '25'
+medal client/sprites/profile/medal_50.png '#ffd479' '50'
+medal client/sprites/profile/medal_100.png '#c9a6ff' '100'
+medal client/sprites/profile/medal_week.png '#7de2b0' 'W'
+
+# Иконки админки и гаража.
+convert -size ${S}x${S} xc:none \
+  -stroke '#a9c4ff' -strokewidth 10 -fill none \
+  -draw "roundrectangle 24,40 168,150 16,16" \
+  -draw "line 24,76 168,76" -fill '#7de2b0' -stroke none \
+  -draw "circle 52,106 52,96" -draw "circle 96,106 96,96" -draw "circle 140,106 140,96" \
+  -resize 48x48 -depth 8 "$UI/admin.png"
+
+convert -size ${S}x${S} xc:none \
+  -stroke '#8fd3ff' -strokewidth 10 -fill none \
+  -draw "line 96,20 96,172" -draw "line 30,60 162,132" -draw "line 162,60 30,132" \
+  -draw "circle 96,96 96,70" -resize 48x48 -depth 8 "$UI/freeze.png"
+
+convert -size ${S}x${S} xc:none \
+  -stroke '#7de2b0' -strokewidth 12 -fill none \
+  -draw "circle 96,96 96,24" -draw "line 96,58 96,134" -draw "line 58,96 134,96" \
+  -resize 48x48 -depth 8 "$UI/grant.png"
+
+convert -size ${S}x${S} xc:none \
+  -stroke '#ffcf6b' -strokewidth 10 -fill none \
+  -draw "roundrectangle 24,64 168,150 14,14" \
+  -draw "line 24,96 168,96" -fill '#ffcf6b' -stroke none \
+  -draw "roundrectangle 44,36 148,64 8,8" \
+  -resize 48x48 -depth 8 "$UI/garage.png"
+
+echo "дополнительные спрайты: гараж, скины, медали, админка"
