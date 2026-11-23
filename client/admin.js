@@ -6,13 +6,19 @@ const $ = (sel) => document.querySelector(sel);
 const setText = (sel, text) => { const n = $(sel); if (n) n.textContent = text; };
 
 function token() { return sessionStorage.getItem('astra:admin') || ''; }
+function email() { return sessionStorage.getItem('astra:admin-email') || ''; }
 function world() { return ($('#world').value || 'w1').trim(); }
 
 async function call(path, options = {}) {
   const url = `${path}${path.includes('?') ? '&' : '?'}world=${encodeURIComponent(world())}`;
   const res = await fetch(url, {
     ...options,
-    headers: { 'X-Admin-Token': token(), 'Content-Type': 'application/json', ...(options.headers || {}) },
+    headers: {
+      'X-Admin-Token': token(),
+      'X-Admin-Email': email(),
+      'Content-Type': 'application/json',
+      ...(options.headers || {}),
+    },
   });
   const data = await res.json().catch(() => ({}));
   return { status: res.status, data };
@@ -62,7 +68,13 @@ function renderSummary(data) {
 async function load() {
   const { status, data } = await call('/admin/world');
   if (status !== 200) {
-    setText('#status', `Отказ: ${data.error || status}. Проверьте токен и мир.`);
+    const reason = data.error === 'admin_disabled' ? 'ADMIN_TOKEN не задан в секретах Worker — добавьте секрет и задеплойте.'
+      : data.error === 'admin_forbidden' ? 'Токен не совпал с ADMIN_TOKEN.'
+        : data.error === 'admin_email_forbidden' ? 'Эта почта не привязана: нужен email из секрета ADMIN_EMAIL.'
+          : data.error === 'admin_token_required' ? 'Введите токен.'
+            : data.error === 'bad_world' ? 'Мир пишется латиницей: w1.'
+              : `Отказ: ${data.error || status}.`;
+    setText('#status', reason);
     return;
   }
   setText('#status', `Загружено. Мир ${data.world}.`);
@@ -71,6 +83,7 @@ async function load() {
 
 $('#connect').addEventListener('click', () => {
   sessionStorage.setItem('astra:admin', $('#token').value.trim());
+  sessionStorage.setItem('astra:admin-email', $('#email').value.trim());
   load();
 });
 
@@ -99,4 +112,6 @@ $('#grant').addEventListener('click', async () => {
   load();
 });
 
+// Email подставляем из прошлой вкладки: токен придётся ввести заново.
+$('#email').value = email();
 if (token()) load();

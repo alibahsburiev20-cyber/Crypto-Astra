@@ -11,15 +11,28 @@
 <body class="admin-body">
   <main class="admin-shell">
     <h1><img src="/icons/ui/admin.png" alt="" width="28" height="28"> Админка мира</h1>
-    <p class="muted">Служебная страница. Доступ — токен оператора (<code>ADMIN_TOKEN</code> в секретах Worker).
-      Токен хранится только в этой вкладке (sessionStorage) и уходит заголовком <code>X-Admin-Token</code>.</p>
+    <p class="muted">Служебная страница. Вход — email оператора и токен (<code>ADMIN_TOKEN</code> в
+      секретах Worker). Оба значения хранятся только в этой вкладке (sessionStorage) и уходят
+      заголовками <code>X-Admin-Email</code> и <code>X-Admin-Token</code>. Пароли игроков здесь не
+      принимаются и нигде не хранятся.</p>
 
     <section class="block">
-      <h2>Подключение</h2>
+      <h2>Вход</h2>
       <label>Мир <input id="world" value="w1" size="6" autocomplete="off"></label>
-      <label>Токен <input id="token" type="password" size="32" autocomplete="off" placeholder="ADMIN_TOKEN"></label>
-      <button type="button" id="connect"><img src="/icons/ui/login.png" alt="" width="18" height="18"> Загрузить</button>
+      <label>Email <input id="email" type="email" size="28" autocomplete="username" placeholder="you@example.com"></label>
+      <label>Токен <input id="token" type="password" size="32" autocomplete="current-password" placeholder="ADMIN_TOKEN"></label>
+      <button type="button" id="connect"><img src="/icons/ui/login.png" alt="" width="18" height="18"> Войти</button>
       <p id="status" class="muted"></p>
+      <details class="admin-help">
+        <summary>Где взять токен</summary>
+        <ol>
+          <li>Cloudflare Dashboard → Workers &amp; Pages → <b>crypto-astra</b> → Settings.</li>
+          <li>Variables and Secrets → Add: секрет <code>ADMIN_TOKEN</code> (длинная случайная строка).</li>
+          <li>Там же при желании секрет <code>ADMIN_EMAIL</code> — тогда вход только с этой почты.</li>
+          <li>Save and deploy, затем вернитесь сюда и войдите.</li>
+        </ol>
+        <p class="muted">Пароль от почты и от игры здесь не работает: админка — отдельный контур.</p>
+      </details>
     </section>
 
     <section class="block" id="summary-block" hidden>
