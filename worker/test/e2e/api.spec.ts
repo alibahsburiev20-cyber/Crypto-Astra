@@ -344,6 +344,40 @@ if (!BASE) {
       expect((await api('/admin/pool', { auth: false, admin: true })).status).toBe(200);
     });
 
+    it('пачка действий: несколько операций одним запросом', async () => {
+      const key = `batch-${Date.now()}`;
+      const r = await api('/batch', {
+        method: 'POST',
+        body: {
+          ops: [
+            { op: '/claim', idem: `${key}-a`, body: {} },
+            { op: '/fuel/buy', idem: `${key}-b`, body: {} },
+          ],
+        },
+      });
+      expect(r.status).toBe(200);
+      expect(Array.isArray(r.data.results)).toBe(true);
+      expect(r.data.results).toHaveLength(2);
+      // Статус каждой операции свой: 200 — выполнено, 4xx — отказано по правилам
+      // игры (например, лимит топлива). Главное — это не 5xx и не падение.
+      for (const item of r.data.results as Array<{ status: number }>) {
+        expect(item.status).toBeLessThan(500);
+      }
+      expect(r.data.blockedAt).toBeNull();
+    });
+
+    it('пачка не пускает деньги и админку', async () => {
+      const r = await api('/batch', {
+        method: 'POST',
+        body: { ops: [{ op: '/pay/purchase', idem: 'batch-pay-001', body: {} }] },
+      });
+      expect(r.status).toBe(400);
+      expect(r.data.error).toBe('op_not_allowed');
+
+      const guest = await api('/batch', { method: 'POST', auth: false, body: { ops: [{ op: '/claim', idem: 'batch-guest-1' }] } });
+      expect(guest.status).toBe(401);
+    });
+
     it('/social и /guild закрыты для гостя', async () => {
       expect((await api('/social', { auth: false })).status).toBe(401);
       expect((await api('/guild', { auth: false })).status).toBe(401);

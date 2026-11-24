@@ -266,6 +266,76 @@ function idemKey(scope) {
 }
 function idemDone(scope) { sessionStorage.removeItem(`idem:${scope}`); }
 
+// --- Очередь действий -------------------------------------------------------
+//
+// Если связь пропала или сервер в режиме экономии, действие не теряется: оно
+// ложится в localStorage и уходит пачкой, когда сервер снова отвечает.
+// Ключ идемпотентности постоянный (тот же, что у одиночного запроса), поэтому
+// повтор безопасен: сервер узнает операцию и не начислит дважды.
+const QUEUE_KEY = 'astra:queue:v1';
+const QUEUE_MAX = 20;
+
+function readQueue() {
+  try {
+    const raw = localStorage.getItem(QUEUE_KEY);
+    const list = raw ? JSON.parse(raw) : [];
+    return Array.isArray(list) ? list.filter((x) => x && x.path && x.idem) : [];
+  } catch { return []; }
+}
+
+function writeQueue(list) {
+  try { localStorage.setItem(QUEUE_KEY, JSON.stringify(list.slice(0, QUEUE_MAX))); } catch { /* приватный режим */ }
+}
+
+function enqueueOp(item) {
+  const list = readQueue();
+  // Тот же ключ — та же операция: второй раз не кладём.
+  if (list.some((x) => x.idem === item.idem)) return false;
+  list.push(item);
+  writeQueue(list);
+  return true;
+}
+
+function queueSize() { return readQueue().length; }
+
+/** Отправить накопленное пачками по 10. Возвращает, сколько ушло. */
+let flushing = false;
+async function flushQueue() {
+  if (flushing || !token) return 0;
+  let list = readQueue();
+  if (!list.length) return 0;
+  flushing = true;
+  let sent = 0;
+  try {
+    while (list.length) {
+      const chunk = list.slice(0, 10);
+      const res = await authed('/batch', {
+        method: 'POST',
+        body: { ops: chunk.map((x) => ({ op: x.path, idem: x.idem, body: x.body || {} })) },
+      });
+      // Сервер занят или в режиме экономии — не выбрасываем, попробуем позже.
+      if (res.status !== 200) break;
+      const results = Array.isArray(res.data.results) ? res.data.results : [];
+      if (!results.length) break;
+
+      const left = [];
+      results.forEach((r, i) => {
+        // 5xx — вина сервера: операция могла не примениться, оставляем в очереди.
+        if (i < chunk.length && r.status >= 500) left.push(chunk[i]);
+        else sent += 1;
+      });
+      // Всё, что не попало в ответ (сервер остановился на бюджете), сохраняем.
+      for (let i = results.length; i < chunk.length; i += 1) left.push(chunk[i]);
+
+      list = [...left, ...list.slice(chunk.length)];
+      writeQueue(list);
+      if (res.data.blockedAt !== null && res.data.blockedAt !== undefined) break;
+    }
+  } catch { /* сеть — оставим на следующий раз */ }
+  finally { flushing = false; }
+  return sent;
+}
+
 // Три состояния страницы: лендинг, лендинг + модалка входа, игра.
 // `auth` — это модальное окно над лендингом, поэтому сам лендинг остаётся видимым.
 function show(which) {
@@ -2188,6 +2258,17 @@ async function loadGame() {
       : 'Высокая нагрузка: часть разделов может быть недоступна до конца дня.';
   }
   if (welcome && !note) note = welcome;
+
+  // Отложенные действия отправляем сразу после успешной загрузки: сервер жив.
+  if (queueSize()) {
+    const sent = await flushQueue();
+    if (sent) {
+      note = `Отправлено отложенных действий: ${sent}`;
+      const again = await authed('/me');
+      if (again.status === 200) state = again.data;
+    }
+  }
+
   if (view === 'ledger') {
     const led = await authed('/ledger');
     ledger = led.status === 200 ? led.data.entries : [];
@@ -2202,6 +2283,19 @@ async function act(scope, path, body) {
   note = '';
   const key = idemKey(scope);
   const { status, data } = await authed(path, { method: 'POST', headers: { 'Idempotency-Key': key }, body });
+
+  // Связь пропала или сервер экономит: сохраняем действие, а не теряем его.
+  const offline = status === 0;
+  const saving = status === 503 && String(data?.error || '').startsWith('server_');
+  if (offline || saving) {
+    const queued = enqueueOp({ path, body: body || {}, idem: key });
+    note = queued
+      ? 'Связь пропала: действие сохранено и отправится само'
+      : 'Действие уже в очереди, отправим при связи';
+    render();
+    return;
+  }
+
   idemDone(scope);
   if (status >= 400) note = `Ошибка: ${errText(data.error)}`;
   else note = 'Готово';

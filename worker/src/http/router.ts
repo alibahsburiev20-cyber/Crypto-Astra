@@ -17,8 +17,10 @@ import { adminPool, adminPoolEntry, poolPublic } from '../routes/pool';
 import { adminFreeze, adminGrant, adminWorld } from '../routes/admin';
 import { accountDelete, accountExport } from '../routes/account';
 import { enforceUserLimit } from './userLimit';
-import { errorResponse, json } from './response';
-import { dailyBudget, peekBudget, secondsUntilReset } from '../ops/budget';
+import { errorResponse, json, readJson } from './response';
+import { ApiError } from '../world/errors';
+import { consumeRequest, dailyBudget, isBlocked, peekBudget, secondsUntilReset } from '../ops/budget';
+import { BATCH_MAX_BODY, BATCH_MAX_OPS, parseBatchOps, runBatch } from './batch';
 
 export async function route(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
@@ -37,6 +39,41 @@ export async function route(request: Request, env: Env): Promise<Response> {
         blocked: state.mode === 'lite' ? ['heavy'] : state.mode === 'sleep' ? ['heavy', 'normal'] : [],
         now,
       }, 200, { 'Cache-Control': 'no-store' });
+    }
+    // Пачка игровых действий: один запрос вместо пяти. Деньги, вход, админка и
+    // сам /batch в пачку не складываются (см. http/batch.ts).
+    if (p === '/batch' && m === 'POST') {
+      await requireAuth(request, env);
+      const length = Number(request.headers.get('Content-Length') ?? '0');
+      if (Number.isFinite(length) && length > BATCH_MAX_BODY) throw new ApiError(413, 'payload_too_large');
+      const parsed = parseBatchOps(await readJson(request));
+      if (!parsed.ok) throw new ApiError(400, parsed.error);
+
+      const now = Date.now();
+      const limit = dailyBudget(env.REQUEST_BUDGET);
+      const outcome = await runBatch({
+        ops: parsed.ops,
+        headers: request.headers,
+        dispatch: (sub) => route(sub, env),
+        origin: url.origin,
+        consume: async () => {
+          // Каждая операция пачки — отдельный запрос в бюджете: иначе пачка
+          // стала бы способом обойти суточный лимит.
+          const state = await consumeRequest(env.DB, Date.now(), limit);
+          if (isBlocked(state.mode, 'normal')) {
+            return { allowed: false, error: state.mode, retryAfter: secondsUntilReset(now) };
+          }
+          return { allowed: true };
+        },
+      });
+
+      return json({
+        ok: outcome.blockedAt === null,
+        maxOps: BATCH_MAX_OPS,
+        results: outcome.results,
+        blockedAt: outcome.blockedAt,
+        retryAfter: outcome.retryAfter,
+      }, 200);
     }
     if (p === '/health') {
       // build — метка из [vars]: по ней видно, какая сборка отвечает.
