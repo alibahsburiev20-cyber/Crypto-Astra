@@ -12,14 +12,24 @@ export function fuelCost(consumption: number, kind: ExpeditionKind): number {
   return Math.ceil(consumption * EXPEDITION_TYPES[kind].fuelMult - 1e-9);
 }
 
+/**
+ * Порог уровня. Степень 1.3 вместо 1.5: на старой кривой «уровень 5» стоил 800 XP,
+ * то есть 27 рейсов, и игрок с сотнями очков сидел на первом уровне — уровень
+ * ведь ещё и замок верфи. Сейчас: L2 = 40, L5 = 242, L12 = 903, L20 = 1838,
+ * L30 = 3185. Активный игрок (плюс опыт за Claim, арену, миссии, боксы и модули)
+ * догоняет пятый корпус за пару дней, двенадцатый — за неделю, а «Флагман» на
+ * 30-м остаётся делом сезона.
+ */
 export function xpThreshold(level: number): number {
   if (level <= 1) return 0;
-  return Math.floor(100 * Math.pow(level - 1, 1.5));
+  return Math.floor(40 * Math.pow(level - 1, 1.3));
 }
 
+/** Уровень игрока. Единственный источник правды — опыт, колонка level только кэш. */
 export function levelFromXp(xp: number): number {
   let level = 1;
-  while (level < 60 && xp >= xpThreshold(level + 1)) level++;
+  const cap = Math.max(0, Math.floor(xp));
+  while (level < 60 && cap >= xpThreshold(level + 1)) level++;
   return level;
 }
 

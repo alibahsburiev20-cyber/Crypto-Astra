@@ -1,12 +1,15 @@
+import { XP } from '../../shared/gameData';
 import { applyDelta } from '../balances';
 import { ApiError } from '../errors';
 import { withIdempotency } from '../idempotency';
 import { assertPlayable } from './maintenance';
 import { decideClaim, type ClaimState } from './claimMath';
+import { applyXp } from './progress';
+import { levelFromXp } from './expeditionMath';
 import { playerExists } from './players';
 
 export type ClaimResult =
-  | { ok: true; reward: number; balance: number; nextClaimAt: number }
+  | { ok: true; reward: number; balance: number; nextClaimAt: number; xp: number }
   | { ok: false; code: 'too_early' | 'daily_limit'; nextClaimAt: number };
 
 // Вызывать внутри транзакции мира. Время — только серверное (now приходит из мира).
@@ -25,7 +28,12 @@ export function claim(sql: SqlStorage, playerId: string, idemKey: string, now: n
       playerId, d.next.lastClaimAt, d.next.day, d.next.count,
     );
     const balance = applyDelta(sql, { playerId, asset: 'astra', delta: d.reward, reason: 'claim', idemKey }, now);
-    return { value: { ok: true, reward: d.reward, balance, nextClaimAt: d.nextClaimAt }, store: true };
+    // Claim теперь даёт опыт: даже на суточном максимуме (96 клеймов) это +96 XP,
+    // то есть «заходить по таймеру» видно по уровню, но рейсы оно не перебивает.
+    // В ответе — начисленный опыт (дельта), а не суммарный: клиент показывает
+    // «+1 XP» над кнопкой, и число должно быть про это действие.
+    applyXp(sql, { playerId, delta: XP.claim, reason: 'claim', idemKey }, now, levelFromXp);
+    return { value: { ok: true, reward: d.reward, balance, nextClaimAt: d.nextClaimAt, xp: XP.claim }, store: true };
   });
 }
 

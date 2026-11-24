@@ -30,7 +30,9 @@ import {
   finishRun, minigameBrief, minigameView, startRun, type FinishResult, type StartResult,
 } from './modules/minigame';
 import { verifyLedger, type LedgerReport } from './ledger';
-import { backfillProgressLedger, backfillResourceLedger, migrateLegacyExpeditions, migratePassClaimsSeason } from './migrate';
+import {
+  backfillProgressLedger, backfillResourceLedger, catchUpXpFromPoints, migrateLegacyExpeditions, migratePassClaimsSeason,
+} from './migrate';
 import { decideWakeAt, nextCriticalAt, nextMaintenanceAt } from './scheduler';
 import { WORLD_SCHEMA } from './schema';
 
@@ -58,6 +60,8 @@ export class World extends DurableObject<Env> {
         migratePassClaimsSeason(this.sql);
         backfillResourceLedger(this.sql, Date.now());
         backfillProgressLedger(this.sql, Date.now());
+        // Опыт за все активности + пересборка кэша уровня (этап 6, правка баланса).
+        catchUpXpFromPoints(this.sql, Date.now());
       });
     });
   }

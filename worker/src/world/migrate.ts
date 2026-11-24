@@ -1,4 +1,6 @@
+import { XP } from '../shared/gameData';
 import { applyDelta } from './balances';
+import { levelFromXp } from './modules/expeditionMath';
 import { appendLedger } from './ledger';
 
 // Короткая версия рейса (status active/collected, колонка sector) уже могла создаться в живом мире.
@@ -103,4 +105,44 @@ export function migratePassClaimsSeason(sql: SqlStorage): void {
     SELECT player_id, level, '', claimed_at FROM pass_claims`);
   sql.exec('DROP TABLE pass_claims');
   sql.exec('ALTER TABLE pass_claims_season RENAME TO pass_claims');
+}
+
+// Опыт (уровень игрока). Раньше XP капал только за завершённый рейс, поэтому
+// игрок с сотнями очков сезона — Claim, арена, миссии — оставался 1-го уровня, а
+// уровень это замок верфи и секторов. Разово догоняем пропущенное: 1 XP за каждые
+// `XP.pointsPerXp` заработанных когда-либо очков. Сумму пишем в журнал как обычную
+// операцию: опыт — актив наравне с ASTRA, и сверка обязана увидеть тот же рост,
+// иначе мир замёрзнет на «расхождении», которого нет.
+export function catchUpXpFromPoints(sql: SqlStorage, now: number): void {
+  const done = sql.exec(`SELECT value FROM meta WHERE key = 'mig_xp_catchup'`).toArray();
+  if (!done.length || String(done[0].value) !== '1') {
+    const rows = sql.exec(
+      `SELECT p.id AS id, p.xp AS xp,
+              COALESCE((SELECT SUM(l.delta) FROM ledger l
+                         WHERE l.player_id = p.id AND l.asset = 'points' AND l.delta > 0), 0) AS earned
+         FROM players p`,
+    ).toArray();
+    for (const row of rows) {
+      const playerId = String(row.id);
+      const current = Number(row.xp);
+      const target = Math.floor(Number(row.earned) / XP.pointsPerXp);
+      if (!(target > current)) continue;
+      const delta = target - current;
+      appendLedger(sql, { playerId, asset: 'xp', delta, reason: 'migration', sourceRef: 'xp_catchup' }, now);
+      sql.exec('UPDATE players SET xp = ?, level = ? WHERE id = ?', target, levelFromXp(target), playerId);
+    }
+    sql.exec(
+      `INSERT INTO meta (key, value) VALUES ('mig_xp_catchup', '1')
+       ON CONFLICT (key) DO UPDATE SET value = '1'`,
+    );
+  }
+
+  // Кривая уровня тоже изменилась (L2 = 40 XP вместо 100), поэтому колонку level
+  // пересобираем из опыта. Level — только кэш: читаем его там, где важна цена
+  // (сортировка гильдии, админка), а «пора ли уже» всегда считается по XP.
+  const stale = sql.exec('SELECT id, xp, level FROM players').toArray()
+    .filter((r) => Number(r.level) !== levelFromXp(Number(r.xp)));
+  for (const row of stale) {
+    sql.exec('UPDATE players SET level = ? WHERE id = ?', levelFromXp(Number(row.xp)), String(row.id));
+  }
 }

@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { DAY_MS, REPAIR_ASTRA_PER_PERCENT } from '../../src/shared/constants';
-import { MODULES, MODULE_MAX_LEVEL, moduleParts, modulePrice } from '../../src/shared/gameData';
+import { MODULES, MODULE_MAX_LEVEL, XP, moduleParts, modulePrice } from '../../src/shared/gameData';
 import { applyDelta, getBalance } from '../../src/world/balances';
 import { verifyLedger } from '../../src/world/ledger';
 import { computeReward, durationOf, repairCost } from '../../src/world/modules/expeditionMath';
 import { startExpedition } from '../../src/world/modules/expeditions';
 import { addResource, getResource, fuelCap } from '../../src/world/modules/maintenance';
 import { createPlayer } from '../../src/world/modules/players';
-import { applyDurability } from '../../src/world/modules/progress';
+import { applyDurability, getXp } from '../../src/world/modules/progress';
 import { fxOfShip, installModule, moduleStateFor } from '../../src/world/modules/shipModules';
 import { repairShip } from '../../src/world/modules/upkeep';
 import { makeWorld } from '../helpers/sqlShim';
@@ -66,14 +66,21 @@ describe('модули (срез 4 этапа 2)', () => {
     expect(fxOfShip(sql, ship).duration).toBe(1);
   });
 
-  it('лимит слотов держится: у Scout один слот', () => {
+  it('лимит слотов держится: у Scout два слота, третий не влезает', () => {
+    // Сcout получил второй слот — «малыш» теперь вмещает и движок, и навигатор.
+    // Но потолок есть: на третьем модуле install обязан встать колом.
     const { sql, tx } = world();
     const ship = shipId(sql);
-    giveParts(sql, tx, 'engine', 1);
-    giveParts(sql, tx, 'scanner', 1);
+    for (const m of ['engine', 'scanner', 'shield'] as const) giveParts(sql, tx, m, 1);
     tx(() => installModule(sql, 'p1', 'k1', { shipId: ship, module: 'engine' }, T0 + 100));
-    expect(() => tx(() => installModule(sql, 'p1', 'k2', { shipId: ship, module: 'scanner' }, T0 + 200)))
+    tx(() => installModule(sql, 'p1', 'k2', { shipId: ship, module: 'scanner' }, T0 + 200));
+    expect(() => tx(() => installModule(sql, 'p1', 'k3', { shipId: ship, module: 'shield' }, T0 + 300)))
       .toThrow(/module_slots_full/);
+    // И каталог это тоже отражает: слоты читаются из таблицы кораблей.
+    const view = moduleStateFor(sql, 'p1');
+    expect(view.ships[0].slots).toBe(2);
+    expect(view.ships[0].used).toBe(2);
+    expect(view.catalog.length).toBe(11);
   });
 
   it('уровень растёт до максимума и дальше не продаётся', () => {
@@ -96,7 +103,11 @@ describe('модули (срез 4 этапа 2)', () => {
     const first = tx(() => installModule(sql, 'p1', 'same', { shipId: ship, module: 'engine' }, T0 + 100));
     const second = tx(() => installModule(sql, 'p1', 'same', { shipId: ship, module: 'engine' }, T0 + 100));
     expect(second.level).toBe(first.level);
-    expect(sql.exec(`SELECT COUNT(*) AS c FROM ledger WHERE reason = 'module_buy'`).toArray()[0].c).toBe(1);
+    expect(sql.exec(`SELECT COUNT(*) AS c FROM ledger WHERE reason = 'module_buy' AND asset = 'astra'`).toArray()[0].c).toBe(1);
+    // Опыт за уровень модуля — тоже под тем же ключом: одна запись, не две.
+    expect(sql.exec(`SELECT COUNT(*) AS c FROM ledger WHERE reason = 'module_buy' AND asset = 'xp'`).toArray()[0].c).toBe(1);
+    expect(getXp(sql, 'p1')).toBe(XP.moduleLevel);
+    expect(verifyLedger(sql).ok).toBe(true);
   });
 
   it('в полёте модуль не ставится', () => {

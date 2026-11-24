@@ -7,11 +7,12 @@ import { RUN_MS, makeField, MAX_SPEED } from '../../src/shared/minigame';
 import { applyDelta, getBalance } from '../../src/world/balances';
 import { adminSummary, grantAstra, setFrozen } from '../../src/world/modules/adminWorld';
 import {
-  GARAGE_BASE, GARAGE_MAX, SLOT_PRICE, buySlot, garageSlots, garageView,
+  GARAGE_BASE, GARAGE_MAX, SLOT_LEVEL_STEP, SLOT_PRICE, SLOT_STEP, buySlot, garageSlots, garageView, slotPrice,
 } from '../../src/world/modules/garage';
 import { WEEKLY_ASTRA, WEEKLY_WINS, finishRun, minigameView, startRun, weekStartOf } from '../../src/world/modules/minigame';
 import { createPlayer } from '../../src/world/modules/players';
 import { buyShip } from '../../src/world/modules/ships';
+import { setLevel } from '../helpers/level';
 import { makeWorld } from '../helpers/sqlShim';
 
 const T0 = DAY_MS * 30 + 3_600_000;
@@ -22,8 +23,8 @@ function world(astra = 5000) {
     createPlayer(w.sql, 'p1', T0);
     applyDelta(w.sql, { playerId: 'p1', asset: 'astra', delta: astra, reason: 'seed' }, T0);
     // Уровень нужен, чтобы верфь продавала корпуса: гейт по уровню не предмет
-    // этого набора тестов.
-    w.sql.exec('UPDATE players SET level = 30 WHERE id = ?', 'p1');
+    // этого набора тестов. Ставим через опыт — level без xp сервер не видит.
+    setLevel(w.sql, 'p1', 30);
   });
   return w;
 }
@@ -40,18 +41,41 @@ describe('гараж: ячейки и покупка кораблей', () => {
     expect(view.max).toBe(GARAGE_MAX);
   });
 
+  it('цена ячейки растёт и с каждой следующей, и с уровнем', () => {
+    // Первая — базовая, дальше ×1.8; сверху надбавка 5 % за каждый уровень выше
+    // первого. Округление до 10 — чтобы в интерфейсе не было дробных ASTRA.
+    expect(slotPrice(0, 1)).toBe(SLOT_PRICE);
+    expect(slotPrice(1, 1)).toBe(Math.round((SLOT_PRICE * SLOT_STEP) / 10) * 10);
+    expect(slotPrice(3, 1)).toBeGreaterThan(slotPrice(2, 1));
+    expect(slotPrice(0, 20)).toBe(Math.round((SLOT_PRICE * (1 + SLOT_LEVEL_STEP * 19)) / 10) * 10);
+    // Игрок обязан видеть всю лестницу до первой покупки: «ещё одна за 200»
+    // было бы обещанием, а не ценой.
+    const view = garageView(world().sql, 'p1', false);
+    expect(view.nextPrices.length).toBe(GARAGE_MAX - GARAGE_BASE);
+    for (let i = 1; i < view.nextPrices.length; i++) {
+      expect(view.nextPrices[i]).toBeGreaterThan(view.nextPrices[i - 1]);
+    }
+    expect(view.price).toBe(view.nextPrices[0]);
+  });
+
   it('ячейка покупается за ASTRA и не даёт бесплатных кораблей', () => {
     const { sql, tx } = world();
     const before = getBalance(sql, 'p1', 'astra');
+    const price = slotPrice(0, 30);
     const res = tx(() => buySlot(sql, 'p1', 'slot-1', T0));
     expect(res.extra).toBe(1);
-    expect(getBalance(sql, 'p1', 'astra')).toBe(before - SLOT_PRICE);
+    expect(res.price).toBe(price);
+    expect(getBalance(sql, 'p1', 'astra')).toBe(before - price);
     expect(garageSlots(sql, 'p1', false)).toBe(GARAGE_BASE + 1);
 
     // Повтор с тем же ключом не списывает второй раз.
     const again = tx(() => buySlot(sql, 'p1', 'slot-1', T0 + 1));
     expect(again.extra).toBe(1);
-    expect(getBalance(sql, 'p1', 'astra')).toBe(before - SLOT_PRICE);
+    expect(getBalance(sql, 'p1', 'astra')).toBe(before - price);
+    // А вот следующая ячейка уже дороже: цена считается в момент покупки.
+    const next = tx(() => buySlot(sql, 'p1', 'slot-2', T0 + 2));
+    expect(next.price).toBe(slotPrice(1, 30));
+    expect(next.price).toBeGreaterThan(price);
   });
 
   it('без денег ячейка не продаётся', () => {
@@ -59,6 +83,11 @@ describe('гараж: ячейки и покупка кораблей', () => {
     // Обнуляем баланс напрямую: так проверяем именно отказ по деньгам.
     sql.exec(`UPDATE balances SET amount = 10 WHERE player_id = 'p1' AND asset = 'astra'`);
     expect(() => tx(() => buySlot(sql, 'p1', 'slot-broke', T0))).toThrow(/insufficient_funds/);
+    // Денег ровно на первую ячейку — и вторая уже недоступна: цена выросла.
+    const price = slotPrice(0, 30);
+    sql.exec(`UPDATE balances SET amount = ? WHERE player_id = 'p1' AND asset = 'astra'`, price);
+    tx(() => buySlot(sql, 'p1', 'slot-first', T0 + 1));
+    expect(() => tx(() => buySlot(sql, 'p1', 'slot-second', T0 + 2))).toThrow(/insufficient_funds/);
   });
 
   it('потолок ячеек держится', () => {

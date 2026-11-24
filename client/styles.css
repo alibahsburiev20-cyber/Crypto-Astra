@@ -1033,9 +1033,50 @@ body {
 .garage-block { margin-bottom: 16px; }
 .garage-grid { display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0; }
 .garage-slot { display: flex; flex-direction: column; align-items: center; gap: 4px; width: 104px; }
-.garage-cell { width: 96px; height: 96px; }
+/* Рамка ячейки — фон, чтобы внутрь можно было положить сам корабль. */
+.garage-cell {
+  position: relative; width: 96px; height: 96px; display: grid; place-items: center;
+  background: center / contain no-repeat url('/sprites/garage/slot_empty.png');
+}
+.garage-slot.is-filled .garage-cell { background-image: url('/sprites/garage/slot_filled.png'); }
+.garage-slot.is-locked .garage-cell { background-image: url('/sprites/garage/slot_locked.png'); }
+.garage-ship {
+  width: 72px; height: 36px; object-fit: contain; image-rendering: pixelated;
+  filter: drop-shadow(0 1px 0 rgba(0, 0, 0, .5));
+}
+.garage-slot.is-hurt .garage-ship { filter: drop-shadow(0 0 4px rgba(255, 99, 99, .75)); }
+.garage-dur {
+  position: absolute; right: 8px; top: 8px; font-size: 9px; line-height: 1;
+  padding: 2px 4px; border-radius: 4px; background: rgba(11, 18, 32, .8); color: #c9ced6;
+}
+.garage-slot.is-hurt .garage-dur { color: #ff8b8b; }
 .garage-label { font-size: 0.75rem; opacity: 0.8; }
+.garage-sub { font-size: 0.66rem; opacity: 0.62; }
 .garage-slot.is-filled .garage-label { opacity: 1; font-weight: 600; }
+.garage-buy { display: flex; flex-direction: column; gap: 4px; }
+.garage-ladder { font-size: 0.68rem; }
+
+/* Полоса слотов: общий элемент гаража, флота и экрана модулей. */
+.rig-pips { display: flex; flex-wrap: wrap; gap: 2px; justify-content: center; position: absolute; left: 4px; right: 4px; bottom: 7px; }
+.rig-pip {
+  position: relative; width: 18px; height: 18px; border-radius: 4px; display: grid; place-items: center;
+  background: rgba(11, 18, 32, .72); box-shadow: inset 0 0 0 1px rgba(201, 206, 214, .22);
+}
+.rig-pip img { width: 14px; height: 14px; image-rendering: pixelated; }
+.rig-pip.is-on { background: rgba(53, 214, 232, .16); box-shadow: inset 0 0 0 1px rgba(53, 214, 232, .7); }
+.rig-dots { position: absolute; bottom: 1px; display: flex; gap: 1px; }
+.rig-dots i { width: 2px; height: 2px; border-radius: 50%; background: rgba(201, 206, 214, .3); }
+.rig-dots i.on { background: #35d6e8; }
+.rig-summary { margin: 4px 0 0; font-size: 0.72rem; opacity: .78; }
+.module-rig { position: relative; display: grid; place-items: center; margin: 8px 0; }
+.module-rig .rig-pips { position: static; margin-top: -6px; }
+.module-ship { width: 192px; max-width: 100%; height: 96px; object-fit: contain; image-rendering: pixelated; }
+.module-rig .rig-pip { width: 26px; height: 26px; }
+.module-rig .rig-pip img { width: 20px; height: 20px; }
+.lv-dots { display: inline-flex; gap: 2px; margin-left: 6px; vertical-align: middle; }
+.lv-dots i { width: 5px; height: 5px; border-radius: 50%; background: rgba(201, 206, 214, .28); }
+.lv-dots i.on { background: #35d6e8; }
+.slot-effect { font-size: 0.64rem; opacity: .66; text-align: center; }
 
 .ship-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
 .ship-tabs button { display: inline-flex; align-items: center; gap: 6px; }
@@ -1120,6 +1161,9 @@ button.ghost, .cta-small { min-height: 36px; }
 @media (max-width: 420px) {
   .garage-slot { width: 88px; }
   .garage-cell { width: 80px; height: 80px; }
+  .garage-ship { width: 60px; height: 30px; }
+  .rig-pip { width: 16px; height: 16px; }
+  .module-ship { width: 150px; height: 76px; }
   .slot-cell { width: 72px; }
 }
 
@@ -1136,6 +1180,8 @@ button.ghost, .cta-small { min-height: 36px; }
 /* Закрытая ячейка гаража: видно, что её можно купить, но она не мешает. */
 .garage-slot.is-locked { opacity: 0.45; }
 .garage-slot.is-locked .garage-label { font-style: italic; }
+/* Картинка ячейки больше не <img>: рамка живёт фоном, корабль лежит сверху. */
+.garage-cell img.garage-cell { display: none; }
 .garage-block { background-image: url('/sprites/garage/hangar_bg.png'); background-size: cover; background-position: center; }
 
 /* Боксы (этап 5): карточки контейнеров и результат открытия. */

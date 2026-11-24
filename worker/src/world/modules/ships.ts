@@ -3,7 +3,8 @@ import { applyDelta, getBalance } from '../balances';
 import { ApiError } from '../errors';
 import { withIdempotency } from '../idempotency';
 import { assertPlayable } from './maintenance';
-import { applyDurability } from './progress';
+import { applyDurability, playerLevel } from './progress';
+import { playerExists } from './players';
 import { garageSlots } from './garage';
 
 // Покупка корабля (этап 2, срез 5). Один корпус каждого типа: флот растёт по
@@ -25,9 +26,10 @@ export function buyShip(
     if (!def) throw new ApiError(400, 'bad_ship_type');
     if (def.price == null) throw new ApiError(400, 'ship_not_for_sale');
 
-    const player = sql.exec('SELECT level FROM players WHERE id = ?', playerId).toArray();
-    if (!player.length) throw new ApiError(404, 'player_not_found');
-    if (Number(player[0].level) < def.unlockLevel) throw new ApiError(403, 'ship_locked');
+    if (!playerExists(sql, playerId)) throw new ApiError(404, 'player_not_found');
+    // Гейт по опыту, а не по колонке level: у набегавших раньше игроков она
+    // отставала, и верфь держала замок при уже пройденном уровне.
+    if (playerLevel(sql, playerId) < def.unlockLevel) throw new ApiError(403, 'ship_locked');
 
     const owned = sql.exec('SELECT 1 FROM ships WHERE player_id = ? AND type = ? LIMIT 1', playerId, def.type).toArray();
     if (owned.length) throw new ApiError(409, 'ship_owned');

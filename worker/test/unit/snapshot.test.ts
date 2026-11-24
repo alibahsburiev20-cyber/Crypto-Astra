@@ -35,9 +35,10 @@ describe('проверка снимка мира', () => {
     tx(() => claim(sql, 'p1', 'k1', T0));
     const report = verifySnapshot(snapshotOf(sql));
     expect(report.ok).toBe(true);
-    // start_bonus ASTRA, start_bonus топливо, ship_delivery прочность, Claim
-    expect(report.rows).toBe(4);
-    expect(report.head?.seq).toBe(4);
+    // start_bonus ASTRA, start_bonus топливо, ship_delivery прочность, Claim,
+    // и Claim теперь пишет ещё и опыт — пятая запись.
+    expect(report.rows).toBe(5);
+    expect(report.head?.seq).toBe(5);
   });
 
   it('находит подмену записи', () => {

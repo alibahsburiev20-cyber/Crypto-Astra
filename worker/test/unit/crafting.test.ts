@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { DAY_MS } from '../../src/shared/constants';
 import {
   MODULES, MODULE_LATE_LEVEL, MODULE_ORDER, PLANETS, RECIPES, RECIPE_ORDER, RESOURCE_BASE_PRICES,
-  SECTORS, STARTER_RECIPES, moduleParts,
+  SECTORS, STARTER_RECIPES, XP, moduleParts,
 } from '../../src/shared/gameData';
 import { applyDelta, getBalance } from '../../src/world/balances';
 import { verifyLedger } from '../../src/world/ledger';
@@ -94,9 +94,14 @@ describe('крафт (срез 3 этапа 2)', () => {
     tx(() => finishCraft(sql, res.job.id, T0 + 1000 + RECIPES.alloy_plate.ms + 1));
     expect(getResource(sql, 'p1', 'alloy_plate')).toBe(1);
     expect(listCraftJobs(sql, 'p1').length).toBe(0);
-    const out = sql.exec(`SELECT delta FROM ledger WHERE reason = 'craft_output'`).toArray();
+    const out = sql.exec(`SELECT delta FROM ledger WHERE reason = 'craft_output' AND asset = 'res:alloy_plate'`).toArray();
     expect(out.length).toBe(1);
     expect(Number(out[0].delta)).toBe(1);
+    // Готовая вещь даёт и опыт: одна запись xp на тот же reason (как очки и ASTRA
+    // в миссиях) — и она обязана быть ровно одной, иначе повтор доначислит уровень.
+    const xp = sql.exec(`SELECT delta FROM ledger WHERE reason = 'craft_output' AND asset = 'xp'`).toArray();
+    expect(xp.length).toBe(1);
+    expect(Number(xp[0].delta)).toBe(XP.craft);
     expect(verifyLedger(sql).ok).toBe(true);
   });
 

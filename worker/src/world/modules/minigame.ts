@@ -2,12 +2,15 @@ import { DAY_MS, utcDay } from '../../shared/constants';
 import {
   RUN_MS, WIN_TIERS, evaluate, makeField, rewardFor, sanitizeTrace, type RunResult, type TracePoint,
 } from '../../shared/minigame';
+import { XP } from '../../shared/gameData';
 import { applyDelta, getBalance } from '../balances';
 import { ApiError } from '../errors';
 import { withIdempotency } from '../idempotency';
 import { assertPlayable } from './maintenance';
 import { playerExists } from './players';
 import { publicIdentity } from './identity';
+import { applyXp } from './progress';
+import { levelFromXp } from './expeditionMath';
 
 // Мини-игра (этап 13). Правила простые и проверяемые:
 //   • попытки — по 5 в сутки, Premium добавляет +2 (маршрут спрашивает его у D1);
@@ -231,6 +234,10 @@ export function finishRun(
     );
     if (astra > 0) applyDelta(sql, { playerId, asset: 'astra', delta: astra, reason: 'minigame', sourceRef: input.runId, idemKey }, now);
     if (points > 0) applyDelta(sql, { playerId, asset: 'points', delta: points, reason: 'minigame', sourceRef: input.runId, idemKey }, now);
+    // Забеж даёт опыт всегда, даже когда дневной потолок ASTRA и очков уже выбран:
+    // иначе «арена» переставала что-то значить для уровня. Опыт — не валюта.
+    const xp = XP.minigameRun + (result.win ? XP.minigameWin : 0);
+    applyXp(sql, { playerId, delta: xp, reason: 'minigame', sourceRef: input.runId, idemKey }, now, levelFromXp);
     sql.exec(
       `INSERT INTO minigame_daily (player_id, day, runs, wins, astra, points) VALUES (?, ?, 0, ?, ?, ?)
        ON CONFLICT (player_id, day) DO UPDATE SET wins = wins + excluded.wins,
@@ -274,7 +281,7 @@ export function finishRun(
       value: {
         ok: true,
         result,
-        rewards: { astra, points, capped },
+        rewards: { astra, points, xp, capped },
         awards,
         attempts: attemptsView(sql, playerId, now, premium),
         wins,

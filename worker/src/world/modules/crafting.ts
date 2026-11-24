@@ -1,10 +1,12 @@
-import { RECIPES, RECIPE_ORDER, isRecipeId, type RecipeId } from '../../shared/gameData';
+import { RECIPES, RECIPE_ORDER, XP, isRecipeId, type RecipeId } from '../../shared/gameData';
 import { applyDelta, getBalance } from '../balances';
 import { ApiError } from '../errors';
 import { withIdempotency } from '../idempotency';
 import { enqueue } from '../scheduler';
 import { assertPlayable, applyResourceDelta, getResource, isFrozen } from './maintenance';
 import { craftSlotsFor } from './pass';
+import { applyXp } from './progress';
+import { levelFromXp } from './expeditionMath';
 
 // Крафт (этап 2, срез 3). Запуск списывает ресурсы и плату в ASTRA одной
 // транзакцией и ставит задачу craft_finish; готовый компонент начисляет сервер,
@@ -111,4 +113,6 @@ export function finishCraft(sql: SqlStorage, jobId: string, now: number): void {
     playerId, resource: recipe, delta: 1, reason: 'craft_output', sourceRef: jobId,
   }, now);
   sql.exec(`UPDATE craft_jobs SET status = 'done' WHERE id = ?`, jobId);
+  // Готовая вещь даёт опыт: мастерская — тоже прогресс, а не только трата льда.
+  applyXp(sql, { playerId, delta: XP.craft, reason: 'craft_output', sourceRef: jobId }, now, levelFromXp);
 }

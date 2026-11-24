@@ -5,6 +5,9 @@ import { applyDelta } from '../balances';
 import { ApiError } from '../errors';
 import { withIdempotency } from '../idempotency';
 import { assertPlayable } from './maintenance';
+import { XP } from '../../shared/gameData';
+import { applyXp } from './progress';
+import { levelFromXp } from './expeditionMath';
 
 // Миссии (этап 4). Прогресс считается по фактам игры — завершённым рейсам,
 // готовому крафту, сделкам рынка и записям журнала, — а не по счётчику, который
@@ -98,7 +101,9 @@ function countOf(sql: SqlStorage, playerId: string, metric: Metric, since: numbe
     case 'purchases':
       return one(`SELECT COUNT(*) AS c FROM market_sales WHERE buyer_id = ? AND at >= ?`);
     case 'claims':
-      return one(`SELECT COUNT(*) AS c FROM ledger WHERE player_id = ? AND reason = 'claim' AND delta > 0 AND created_at >= ?`);
+      // Считаем строки ASTRA: у Claim теперь две записи на действие (валюта и
+      // опыт), без фильтра по активу миссия «Ритм» закрывалась бы за пару кликов.
+      return one(`SELECT COUNT(*) AS c FROM ledger WHERE player_id = ? AND asset = 'astra' AND reason = 'claim' AND delta > 0 AND created_at >= ?`);
     case 'repairs':
       return one(`SELECT COUNT(*) AS c FROM ledger WHERE player_id = ? AND reason = 'repair' AND asset = 'astra' AND created_at >= ?`);
     default:
@@ -177,8 +182,14 @@ export function claimMission(
     );
     if (def.astra > 0) applyDelta(sql, { playerId, asset: 'astra', delta: def.astra, reason: 'mission_reward', sourceRef: `${period}:${def.id}` }, now);
     if (def.points > 0) applyDelta(sql, { playerId, asset: 'points', delta: def.points, reason: 'mission_reward', sourceRef: `${period}:${def.id}` }, now);
+    // Миссии всегда давали очки, но не давали опыта — из-за этого «дневной рот»
+    // не двигал уровень. Недельная миссия ценнее, поэтому и опыта за неё больше.
+    const xp = isDaily
+      ? (def.points === MISSION_DAILY_HARD_REWARD.points ? XP.missionHard : XP.mission)
+      : XP.missionWeekly;
+    applyXp(sql, { playerId, delta: xp, reason: 'mission_reward', sourceRef: `${period}:${def.id}` }, now, levelFromXp);
     const balance = Number(sql.exec('SELECT amount FROM balances WHERE player_id = ? AND asset = ?', playerId, 'astra').toArray()[0]?.amount ?? 0);
-    return { value: { missionId: def.id, astra: def.astra, points: def.points, balance }, store: true };
+    return { value: { missionId: def.id, astra: def.astra, points: def.points, xp, balance }, store: true };
   });
 }
 

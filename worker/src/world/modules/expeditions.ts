@@ -117,10 +117,10 @@ export function startExpedition(
       ship.id,
     ).toArray();
     if (busy.length) throw new ApiError(409, 'ship_busy');
-    const player = sql.exec('SELECT level FROM players WHERE id = ?', playerId).toArray();
+    const player = sql.exec('SELECT xp FROM players WHERE id = ?', playerId).toArray();
     if (!player.length) throw new ApiError(404, 'player_not_found');
     const sector = sectorById(planet.sector);
-    if (Number(player[0].level) < sector.level) throw new ApiError(403, 'sector_locked');
+    if (levelFromXp(Number(player[0].xp)) < sector.level) throw new ApiError(403, 'sector_locked');
     if (def.maxSector < planet.sector) throw new ApiError(403, 'ship_range');
     const cost = fuelCost(def.consumption, body.kind);
     if (getBalance(sql, playerId, 'fuel') < cost) throw new ApiError(409, 'not_enough_fuel');

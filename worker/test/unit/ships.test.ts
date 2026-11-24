@@ -6,6 +6,7 @@ import { verifyLedger } from '../../src/world/ledger';
 import { fuelCap } from '../../src/world/modules/maintenance';
 import { createPlayer } from '../../src/world/modules/players';
 import { buyShip } from '../../src/world/modules/ships';
+import { setLevel } from '../helpers/level';
 import { makeWorld } from '../helpers/sqlShim';
 
 const T0 = DAY_MS * 10;
@@ -14,7 +15,7 @@ function world(astra = 50000, level = 1) {
   const w = makeWorld();
   w.tx(() => createPlayer(w.sql, 'p1', T0));
   if (astra > 0) w.tx(() => applyDelta(w.sql, { playerId: 'p1', asset: 'astra', delta: astra, reason: 'claim' }, T0 + 1));
-  if (level > 1) w.sql.exec('UPDATE players SET level = ? WHERE id = ?', level, 'p1');
+  if (level > 1) setLevel(w.sql, 'p1', level);
   return w;
 }
 

@@ -24,12 +24,12 @@ export interface ShipDef {
 }
 
 export const SHIPS: Record<ShipType, ShipDef> = {
-  scout: { type: 'scout', name: 'Scout', rarity: 'Common', cargo: 10, maxSector: 2, tank: 5, consumption: 1, speed: 1, mining: 1, slots: 1, price: null, unlockLevel: 1, repairCoef: 1 },
-  hauler: { type: 'hauler', name: 'Hauler', rarity: 'Uncommon', cargo: 40, maxSector: 2, tank: 8, consumption: 1.2, speed: 0.9, mining: 1, slots: 2, price: 1500, unlockLevel: 5, repairCoef: 1.5 },
-  miner: { type: 'miner', name: 'Miner', rarity: 'Uncommon', cargo: 25, maxSector: 2, tank: 7, consumption: 1.1, speed: 1, mining: 1.5, slots: 2, price: 2000, unlockLevel: 5, repairCoef: 1.5 },
-  explorer: { type: 'explorer', name: 'Explorer', rarity: 'Rare', cargo: 20, maxSector: 4, tank: 12, consumption: 1, speed: 1.3, mining: 1.1, slots: 3, price: 6000, unlockLevel: 12, repairCoef: 2 },
-  cruiser: { type: 'cruiser', name: 'Cruiser', rarity: 'Epic', cargo: 60, maxSector: 4, tank: 15, consumption: 1.5, speed: 1.2, mining: 1.3, slots: 4, price: 20000, unlockLevel: 20, repairCoef: 2 },
-  flagship: { type: 'flagship', name: 'Flagship', rarity: 'Legendary', cargo: 120, maxSector: 5, tank: 25, consumption: 2, speed: 1.5, mining: 1.6, slots: 6, price: null, unlockLevel: 30, repairCoef: 3 },
+  scout: { type: 'scout', name: 'Scout', rarity: 'Common', cargo: 10, maxSector: 2, tank: 5, consumption: 1, speed: 1, mining: 1, slots: 2, price: null, unlockLevel: 1, repairCoef: 1 },
+  hauler: { type: 'hauler', name: 'Hauler', rarity: 'Uncommon', cargo: 40, maxSector: 2, tank: 8, consumption: 1.2, speed: 0.9, mining: 1, slots: 3, price: 1500, unlockLevel: 5, repairCoef: 1.5 },
+  miner: { type: 'miner', name: 'Miner', rarity: 'Uncommon', cargo: 25, maxSector: 2, tank: 7, consumption: 1.1, speed: 1, mining: 1.5, slots: 3, price: 2000, unlockLevel: 5, repairCoef: 1.5 },
+  explorer: { type: 'explorer', name: 'Explorer', rarity: 'Rare', cargo: 20, maxSector: 4, tank: 12, consumption: 1, speed: 1.3, mining: 1.1, slots: 5, price: 6000, unlockLevel: 12, repairCoef: 2 },
+  cruiser: { type: 'cruiser', name: 'Cruiser', rarity: 'Epic', cargo: 60, maxSector: 4, tank: 15, consumption: 1.5, speed: 1.2, mining: 1.3, slots: 6, price: 20000, unlockLevel: 20, repairCoef: 2 },
+  flagship: { type: 'flagship', name: 'Flagship', rarity: 'Legendary', cargo: 120, maxSector: 5, tank: 25, consumption: 2, speed: 1.5, mining: 1.6, slots: 8, price: null, unlockLevel: 30, repairCoef: 3 },
 };
 
 export const SHIP_ORDER: ShipType[] = ['scout', 'hauler', 'miner', 'explorer', 'cruiser', 'flagship'];
@@ -378,6 +378,8 @@ export interface BoxDef {
    * коллекция должна быть длинным охотничьим треком, а не вечерним лутом.
    */
   plane?: { common?: number; rare?: number; legendary?: number };
+  /** Опыт за одно открытие. Открыл бокс — подрос; ASTRA при этом не печатается. */
+  xp?: number;
 }
 
 /** Компоненты, которые могут выпасть из бокса. */
@@ -390,6 +392,7 @@ export const BOXES: Record<BoxId, BoxDef> = {
     pool: ['iron_ore', 'copper_ore', 'silicon', 'ice'],
     components: { count: 1, chance: 0.1 },
     plane: { common: 0.008 },
+    xp: 2,
   },
   weekly: {
     id: 'weekly', name: 'Недельный бокс', hint: 'Раз в неделю, бесплатно',
@@ -400,6 +403,7 @@ export const BOXES: Record<BoxId, BoxDef> = {
     // Недельный — шанс на редкую машину бесплатно. Легендарной здесь нет: она
     // только в дорогом контейнере и в патруле с редкой машины.
     plane: { common: 0.04, rare: 0.008 },
+    xp: 8,
   },
   crate_supply: {
     id: 'crate_supply', name: 'Ящик снабжения', hint: 'Ресурсы первого сектора',
@@ -407,6 +411,7 @@ export const BOXES: Record<BoxId, BoxDef> = {
     pool: ['iron_ore', 'copper_ore', 'silicon', 'ice'],
     components: { count: 1, chance: 0.3 },
     plane: { common: 0.015 },
+    xp: 3,
   },
   crate_pro: {
     id: 'crate_pro', name: 'Грузовой контейнер', hint: 'Ресурсы, компоненты и шанс на астралит',
@@ -415,6 +420,7 @@ export const BOXES: Record<BoxId, BoxDef> = {
     components: { count: 2, chance: 0.55 },
     rare: { resource: 'astralite', chance: 0.2 },
     plane: { common: 0.03, rare: 0.008, legendary: 0.004 },
+    xp: 10,
   },
 };
 
@@ -434,7 +440,9 @@ export function isRecipeId(value: string): value is RecipeId {
 // Уровень 1..5, цена уровня L = basePrice × 2^(L−1), компоненты × L.
 // Снять модуль нельзя: только поставить или улучшить. Это сознательно — иначе
 // слоты обходились бы перестановкой, а вложенная ASTRA возвращалась бы игроку.
-export type ModuleId = 'engine' | 'fuel_system' | 'scanner' | 'cargo_bay' | 'mining_drill' | 'shield' | 'repair_kit';
+export type ModuleId =
+  | 'engine' | 'nav_computer' | 'fuel_system' | 'coolant_loop' | 'scanner'
+  | 'cargo_bay' | 'drone_bay' | 'mining_drill' | 'shield' | 'armor_plating' | 'repair_kit';
 export type ModuleEffect = 'duration' | 'tank' | 'scanner' | 'cargo' | 'mining' | 'wear' | 'repair';
 
 export const MODULE_MAX_LEVEL = 5;
@@ -461,6 +469,36 @@ export interface ModuleDef {
 /** С какого уровня модулю нужны компоненты второго круга. */
 export const MODULE_LATE_LEVEL = 4;
 
+// ── Опыт (уровень игрока) ────────────────────────────────────────────────────
+/**
+ * Опыт капает за всё, чем игрок занимается, — а не только за рейсы.
+ *
+ * До этой правки XP начислялся лишь за завершённый рейс, и активный игрок с
+ * сотнями очков сезона оставался 1-го уровня. Уровень — это замок верфи и
+ * секторов, поэтому прогресс выглядел сломанным. Правило теперь простое:
+ * любое действие, которое даёт очки или ASTRA, даёт и опыт.
+ *
+ * Опыт ничего не стоит в экономике (уровень не выдаёт ASTRA), поэтому эти числа
+ * не двигают поглощение — они только снимают искусственный замок.
+ */
+export const XP = {
+  /** За один Claim. Их до 96 в сутки, поэтому тут единица, а не пятёрка. */
+  claim: 1,
+  /** За дневные миссии: обычная и посложнее. */
+  mission: 10,
+  missionHard: 16,
+  missionWeekly: 60,
+  /** За засчитанный забег на арене и сверху за победу. */
+  minigameRun: 4,
+  minigameWin: 8,
+  /** За каждый купленный уровень модуля: вложился — получил. */
+  moduleLevel: 2,
+  /** За готовый крафт (выдача, а не постановка в очередь). */
+  craft: 3,
+  /** Догоняющий пересчёт: сколько очков сезона считается за 1 XP. */
+  pointsPerXp: 4,
+} as const;
+
 export const MODULES: Record<ModuleId, ModuleDef> = {
   engine: {
     id: 'engine', name: 'Двигатель', effect: 'duration', perLevel: 0.03, basePrice: 1200,
@@ -481,9 +519,25 @@ export const MODULES: Record<ModuleId, ModuleDef> = {
     parts: [{ resource: 'circuit', amount: 2 }, { resource: 'silicon', amount: 4 }],
     lateParts: [{ resource: 'crystal_lens', amount: 1 }],
   },
+  // Навигатор и двигатель режут одно и то же число, но считаются по-разному:
+  // движок дешёвый и качается рано, навигатор дорогой и выигрывает на длинных
+  // рейсах. Множители effects складываются, поэтому «быстрый» корабль собирается
+  // из обоих — это и есть смысл нескольких слотов.
+  nav_computer: {
+    id: 'nav_computer', name: 'Навигатор', effect: 'duration', perLevel: 0.04, basePrice: 1700,
+    parts: [{ resource: 'circuit', amount: 1 }, { resource: 'silicon', amount: 3 }],
+    lateParts: [{ resource: 'crystal_lens', amount: 1 }],
+  },
   cargo_bay: {
     id: 'cargo_bay', name: 'Грузовой отсек', effect: 'cargo', perLevel: 0.1, basePrice: 2000,
     parts: [{ resource: 'alloy_plate', amount: 2 }],
+    lateParts: [{ resource: 'titanium_frame', amount: 1 }],
+  },
+  // Дроны дешевле цельного трюма и просятся на маленький корпус: −1 слот против
+  // cargo_bay на large hull'ах решает игрок, а не таблица.
+  drone_bay: {
+    id: 'drone_bay', name: 'Дрон-ангар', effect: 'cargo', perLevel: 0.07, basePrice: 1400,
+    parts: [{ resource: 'energy_cell', amount: 1 }, { resource: 'circuit', amount: 1 }],
     lateParts: [{ resource: 'titanium_frame', amount: 1 }],
   },
   mining_drill: {
@@ -496,6 +550,20 @@ export const MODULES: Record<ModuleId, ModuleDef> = {
     parts: [{ resource: 'alloy_plate', amount: 3 }, { resource: 'energy_cell', amount: 1 }],
     lateParts: [{ resource: 'void_weave', amount: 1 }, { resource: 'quantum_matrix', amount: 1 }],
   },
+  // Пассивная броня: дешевле щита, берёт медью и железом, поэтому доступна там,
+  // где щит ещё не собран. Тот же эффект, другие деньги и другие слоты.
+  armor_plating: {
+    id: 'armor_plating', name: 'Бронеплиты', effect: 'wear', perLevel: 0.05, basePrice: 1600,
+    parts: [{ resource: 'alloy_plate', amount: 2 }, { resource: 'copper_ore', amount: 6 }],
+    lateParts: [{ resource: 'titanium_frame', amount: 1 }],
+  },
+  // Охлаждение — второй источник топлива: бак складывается из двух модулей, и на
+  // большом корпусе можно поставить оба.
+  coolant_loop: {
+    id: 'coolant_loop', name: 'Контур охлаждения', effect: 'tank', perLevel: 1, basePrice: 1300,
+    parts: [{ resource: 'energy_cell', amount: 2 }],
+    lateParts: [{ resource: 'helium_coolant', amount: 1 }],
+  },
   repair_kit: {
     id: 'repair_kit', name: 'Ремкомплект', effect: 'repair', perLevel: 0.1, basePrice: 600,
     parts: [{ resource: 'circuit', amount: 1 }, { resource: 'alloy_plate', amount: 1 }],
@@ -503,7 +571,15 @@ export const MODULES: Record<ModuleId, ModuleDef> = {
   },
 };
 
-export const MODULE_ORDER: ModuleId[] = ['engine', 'fuel_system', 'scanner', 'cargo_bay', 'mining_drill', 'shield', 'repair_kit'];
+// Порядок = порядок слотов в интерфейсе: сначала скорость и топливо, потом груз
+// и добыча, в конце защита и ремонт.
+export const MODULE_ORDER: ModuleId[] = [
+  'engine', 'nav_computer', 'fuel_system', 'coolant_loop', 'scanner',
+  'cargo_bay', 'drone_bay', 'mining_drill', 'shield', 'armor_plating', 'repair_kit',
+];
+
+/** Модули, которые дают прибавку к баку: их два, и бак считается суммой. */
+export const TANK_MODULES: ModuleId[] = MODULE_ORDER.filter((id) => MODULES[id].effect === 'tank');
 
 export function isModuleId(value: string): value is ModuleId {
   return (MODULE_ORDER as string[]).includes(value);
