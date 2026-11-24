@@ -10,6 +10,7 @@ application/json; charset=utf-8`. Ответы не кэшируются (`Cache
 |---|---|---|
 | GET | `/health` | `{ ok, service, build, now }` — `build` из `[vars].APP_BUILD`, `now` в миллисекундах |
 | GET | `/config` | `{ turnstile_site_key, login_turnstile_after, server_time }` |
+| POST | `/batch` | пачка игровых действий (до 10): `{ops:[{op, idem, body}]}` → `{results:[{op, status, data}], blockedAt, retryAfter}`; деньги, вход, админка и сам `/batch` в пачку не входят |
 | GET | `/ops/status` | `{ ok, mode, used, limit, remaining, day, retryAfter, blocked }` — режим бережливости: `full` / `thrifty` / `lite` / `sleep` |
 | POST | `/auth/register` | `{ access_token, user: { id, world_id } }` + refresh-cookie |
 | POST | `/auth/login` | то же; может вернуть `turnstile_required` |
