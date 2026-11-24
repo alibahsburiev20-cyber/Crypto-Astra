@@ -2,10 +2,12 @@ import type { AuthContext } from '../auth/guards';
 import type { Env } from '../env';
 import { json, readJson } from '../http/response';
 import { ApiError } from '../world/errors';
+import { checkTurnstile } from '../auth/turnstile';
 import { premiumStatus } from '../pay/shop';
 import { ownedCosmetics } from '../pay/cosmetics';
 import type { StyleValue } from '../world/modules/identity';
 import { RUN_MS, expandTrace } from '../shared/minigame';
+import { BOXES, isBoxId } from '../shared/gameData';
 
 function world(env: Env, a: AuthContext) {
   return env.WORLD.get(env.WORLD.idFromName(a.worldId));
@@ -134,7 +136,13 @@ export async function season(env: Env, a: AuthContext): Promise<Response> {
 }
 
 // Idempotency-Key создаёт клиент один раз на действие и хранит до ответа. Суммы клиент не передаёт.
+// Claim — бесплатный кран, поэтому перед начислением игрок подтверждает, что он
+// человек (Turnstile, если секрет настроен). Тело читаем мягко: старые клиенты
+// умели слать пустой POST, и отсутствие токена они должны увидеть как
+// turnstile_required, а не как 400 на парсинге.
 export async function claim(request: Request, env: Env, a: AuthContext): Promise<Response> {
+  const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+  await checkTurnstile(env, request, body);
   const key = idemKey(request);
   const r = await world(env, a).claim(a.userId, key);
   // Никаких полей, меняющихся от вызова к вызову: повтор с тем же ключом должен вернуть байт-в-байт тот же ответ.
@@ -314,6 +322,10 @@ export async function boxOpen(request: Request, env: Env, a: AuthContext): Promi
   const body = await readJson(request);
   const box = typeof body.box === 'string' ? body.box : '';
   if (!box) throw new ApiError(400, 'bad_box');
+  // Проверка на «человека» нужна только бесплатным боксам: платный и так
+  // отбирает ASTRA, а скрипту незачем платить. Неизвестный id проверяет мир —
+  // здесь он просто не попадает под шлюз.
+  if (isBoxId(box) && BOXES[box].price === 0) await checkTurnstile(env, request, body);
   return json(await world(env, a).openBox(a.userId, idemKey(request), box));
 }
 

@@ -528,12 +528,15 @@ button .icon-sm { margin-right: 8px; }
 .planet-detail .res-list span { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); }
 .planet-detail-info { min-width: 0; }
 
-.screen-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 2px; }
-.screen-title h2 { margin: 0; }
+.screen-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 2px; flex-wrap: wrap; }
+.screen-title h2 { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .badge {
   font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--accent);
   padding: 4px 8px; border-radius: 999px; border: 1px solid rgba(53, 214, 232, .35);
   background: rgba(53, 214, 232, .08); white-space: nowrap;
+  /* Бейдж не сжимается, но и не лезет за контур: лишний переносится на вторую
+     строку — там, где заголовок позволил flex-wrap. */
+  flex: 0 0 auto;
 }
 
 .kinds { margin: 0; }
@@ -699,7 +702,8 @@ footer { max-width: 1180px; margin: 0 auto; padding: 0 22px 26px; color: var(--m
   background: rgba(10, 18, 36, .55);
 }
 .mission.is-done { border-color: rgba(61, 220, 132, .35); background: rgba(61, 220, 132, .06); }
-.mission-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.mission-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.mission-head b { min-width: 0; overflow-wrap: anywhere; }
 .mission-head b { font-size: 14px; }
 .mission p { margin: 4px 0 8px; font-size: 12px; }
 .mission-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; font-size: 12px; }
@@ -1184,6 +1188,20 @@ button.ghost, .cta-small { min-height: 36px; }
 .garage-cell img.garage-cell { display: none; }
 .garage-block { background-image: url('/sprites/garage/hangar_bg.png'); background-size: cover; background-position: center; }
 
+/* Подтверждение «я человек» перед бонусом (Claim и бесплатные боксы).
+   Пунктирная рамка — не кнопка и не награда, это пропуск на выдачу. */
+.bonus-check {
+  display: flex; flex-direction: column; gap: 6px; margin-top: 8px;
+  padding: 8px 10px; border: 1px dashed rgba(53, 214, 232, .35); border-radius: 10px;
+  background: rgba(53, 214, 232, .05);
+}
+.bonus-check p { margin: 0; font-size: 12px; }
+/* Cloudflare рисует сюда iframe фиксированной высоты: держим место заранее,
+   иначе виджет прыгал бы по экрану и сдвигал кнопку. */
+.ts-host { min-height: 68px; max-width: 320px; }
+.ts-host iframe { display: block; }
+.bonus-check-block { margin-bottom: 4px; }
+
 /* Боксы (этап 5): карточки контейнеров и результат открытия. */
 .box-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
 .box-card {
@@ -1195,8 +1213,10 @@ button.ghost, .cta-small { min-height: 36px; }
 .box-card.is-locked { opacity: .72; }
 .box-art { image-rendering: pixelated; width: 128px; height: 128px; }
 .box-body { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.box-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.box-head h3 { margin: 0; font-size: 15px; }
+.box-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+/* Заголовок должен уметь сжиматься, иначе на узкой карточке он выталкивает
+   бейдж цены за рамку. Перенос строки вместо вылеза — то, что просили. */
+.box-head h3 { margin: 0; font-size: 15px; min-width: 0; overflow-wrap: anywhere; }
 .box-card p { margin: 0; font-size: 12px; }
 .box-timer { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--orange, #f08a24); }
 .box-opens { opacity: .8; }

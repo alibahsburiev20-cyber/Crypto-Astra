@@ -102,7 +102,7 @@ confirmed`, в сторону — только `failed` или `manual`. Рез�
 | Метод | Путь | Назначение |
 |---|---|---|
 | GET | `/me` | состояние игрока и мира, `server_time` |
-| POST | `/claim` | Claim; `Idempotency-Key` обязателен |
+| POST | `/claim` | Claim; `Idempotency-Key` обязателен; при настроенном Turnstile — `body.turnstileToken` |
 | GET | `/ledger?limit=N` | журнал игрока, N = 1…50 (по умолчанию 30) |
 | POST | `/expeditions/start` | `{ shipId, planet, kind }`, `Idempotency-Key` |
 | POST | `/expeditions/choose-event` | `{ expeditionId, choiceId }` (алиас `/expeditions/choose`) |
@@ -416,6 +416,18 @@ ASTRA из бокса не выпадает никогда.
 | POST | `/planes/patrol` | `{ plane }` + `Idempotency-Key` — отправить машину в патруль |
 | POST | `/planes/patrol/claim` | `Idempotency-Key` — забрать вернувшуюся машину |
 | POST | `/boxes/open` | `{ box }` + `Idempotency-Key` | `box`, `name`, `price`, `drops[]`, `units`, `rare`, `components`, `plane`, `astra`, `nextOpenAt`, `opens` |
+
+## Проверка «человек» на бесплатных наградах
+
+Claim и открытие бесплатных боксов (`daily`, `weekly`) закрыты шлюзом Turnstile:
+если на воркере задан `TURNSTILE_SECRET`, тело запроса обязано нести
+одноразовый `turnstileToken`, полученный виджетом на экране. Платные боксы не
+проверяются — там подтверждением служит списание ASTRA. Отказ приходит до
+обращения к миру, поэтому ошибка проверки ничего не списывает и не начисляет, а
+ключ идемпотентости остаётся свободным для повтора. Коды: `turnstile_required`
+(403, токена нет) и `turnstile_failed` (403, siteverify отклонил). Без секрета
+(разработка, тесты) шлюз пропускает запросы целиком, и клиент не показывает
+виджет: `config.turnstile_site_key` в этом случае `null`.
 
 `boxes[]` — по записи на бокс: `id` (`daily`, `weekly`, `crate_supply`, `crate_pro`),
 `name`, `hint`, `sprite`, `price` (0 у бесплатных), `cooldownMs`, `units` (`[min, max]`),
