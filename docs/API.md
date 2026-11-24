@@ -44,10 +44,18 @@ application/json; charset=utf-8`. Ответы не кэшируются (`Cache
 или вывести. Правила и запись — `docs/POOL.md`.
 
 `/pay/status.json` — единственный публичный маршрут Astra Pay на этапе 1. Он
-отдаёт `{ ok, service: "astra-pay", version, network, asset: "USDT", decimals: 6,
-contract, flags, schema, tables, now }`, где `flags` — шесть переключателей
-(`payments`, `deposits`, `purchases`, `pool`, `payouts`, `sweep`), а `schema` —
-`"off"` (база не проверялась, деньги выключены), `"ready"` или `"error"`.
+отдаёт `{ ok, service: "astra-pay", version, network, chain, networkLabel, asset:
+"USDT", decimals, contract, confirmations, rail, flags, schema, tables, now }`,
+где `flags` — шесть переключателей (`payments`, `deposits`, `purchases`, `pool`,
+`payouts`, `sweep`), а `schema` — `"off"` (база не проверялась, деньги выключены),
+`"ready"` или `"error"`.
+
+`chain` — активная цепь (`tron` | `bsc`), `decimals` — знаки USDT в ней (6 и 18
+соответственно), `networkLabel` — как сеть называть для игрока. `rail` —
+готовность рельса этой цепи в текущей сборке: `{ addresses, deposits, payouts,
+reason }`. Это не украшение: «сеть выбрана» и «код умеет» — разные вещи, и пока
+`rail.addresses` ложный, `/pay/address.json` отвечает `503` с тем же `reason`,
+а не выдаёт адрес, который никто не умеет смотреть.
 Ключей, адресов игроков и сумм в ответе нет. Пока все флаги `off`, денежных
 маршрутов не существует: запросы к ним вернут `404`.
 
@@ -56,7 +64,7 @@ contract, flags, schema, tables, now }`, где `flags` — шесть пере�
 | Метод | Путь | Ответ |
 |---|---|---|
 | GET | `/pay/account.json` | баланс USDT, история операций, купленная косметика |
-| GET | `/pay/address.json` | личный адрес пополнения USDT (TRC-20) |
+| GET | `/pay/address.json` | личный адрес пополнения USDT: `{ address, chain, networkLabel, contract, decimals, confirmations }` |
 | GET | `/pay/withdrawals` | свои заявки на вывод, лимиты и стоп-флаг |
 | POST | `/pay/withdraw` | заявка на вывод: `{ address, amountMicro }` + `Idempotency-Key` |
 | POST | `/pay/purchase` | покупка за баланс: `{ productId }` + заголовок `Idempotency-Key` |

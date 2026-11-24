@@ -220,6 +220,12 @@ async function buy(product, button) {
 // маршрут на сервере был, а кнопки не было.
 const DEPOSIT_ERRORS = {
   signer_not_configured: 'Адрес выдаётся после настройки Signer. Пока кошелёк не готов — пополнение недоступно.',
+  // Причины, по которым сервер принципиально не выдаёт адрес. Каждая из них
+  // значит «деньги уйдут в никуда», поэтому формулировка обязана быть человеческой.
+  bsc_rail_not_wired: 'Выплаты в этой сети ещё настраиваются: адрес пока не выдаётся.',
+  bsc_contract_missing: 'Для этой сети не задан контракт USDT — приём выключен намеренно.',
+  usdt_contract_missing: 'Сервер не знает, какой контракт считать USDT — приём выключен.',
+  pay_chain_unknown: 'В настройках указана неизвестная сеть, поэтому деньги не принимаются.',
   signer_unavailable: 'Сервис подписи недоступен. Попробуйте позже.',
   deposits_disabled: 'Приём USDT выключен в этой сборке.',
   pay_unavailable: 'Платёжная база недоступна. Попробуйте позже.',
@@ -258,9 +264,10 @@ async function loadDeposit() {
       address: res.data.address,
       ready: true,
       canAsk: false,
-      note: lang === 'en'
-        ? `Network: ${res.data.network}. Token: USDT (${res.data.contract}).`
-        : `Сеть: ${res.data.network === 'mainnet' ? 'TRON mainnet' : res.data.network}. Токен: USDT (${res.data.contract}).`,
+      // Сеть приходит с сервера. Раньше она выводилась из пути в URL и из
+      // зашитого «TRON mainnet» — при смене цепи это означало бы «на экране одна
+      // сеть, а деньги идут в другую».
+      note: networkNote(res.data, lang),
     });
     return;
   }
@@ -290,12 +297,24 @@ function wireDeposit() {
   });
 }
 
+/** Строка под адресом: сеть, контракт и предупреждение про дробную часть. */
+function networkNote(data, lang) {
+  const label = data.networkLabel || data.network || '—';
+  const contract = data.contract ? `, контракт ${data.contract}` : '';
+  // На 18-значной сети хвост отбрасывается: «1.0000000000005» зачислится как «1».
+  const rounding = Number(data.decimals) > 6
+    ? (lang === 'en' ? ' Send a whole number: the fraction is not credited.' : ' Отправляйте целое число USDT: дробная часть не зачислится.')
+    : '';
+  return lang === 'en'
+    ? `Network: ${label}. Token: USDT${contract}.${rounding}`
+    : `Сеть: ${label}. Токен: USDT${contract}.${rounding}`;
+}
+
 async function boot() {
   const [catalog, session] = await Promise.all([api('/pay/products.json'), bootSession()]);
 
   if (catalog.ok) {
-    const network = location.pathname.includes('nile') ? 'nile' : 'по данным сервера';
-    setText('[data-pay="network"]', `Сеть: ${network}`);
+    setText('[data-pay="network"]', `Сеть: ${catalog.data.networkLabel || 'по данным сервера'}`);
     const walletsReady = catalog.data.wallets === 'ready';
     setText(
       '[data-pay="purchases"]',

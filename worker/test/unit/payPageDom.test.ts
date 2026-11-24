@@ -80,6 +80,55 @@ describe('pay.html в браузерном DOM', () => {
     expect(calls.filter((u) => u.endsWith('/pay/address.json'))).toHaveLength(1);
   });
 
+  it('сеть берётся с сервера, а не из текста страницы', async () => {
+    const { window } = boot((url) => {
+      if (url.endsWith('/auth/refresh')) return { status: 200, body: { access_token: 'tok' } };
+      if (url.endsWith('/pay/address.json')) {
+        return {
+          status: 200,
+          body: {
+            ok: true, address: '0x2222222222222222222222222222222222222222', index: 3,
+            created: true, network: 'mainnet', chain: 'bsc', networkLabel: 'BNB Smart Chain (BEP-20)',
+            asset: 'USDT', contract: '0x55d398326f99059ff775485246999027b3197955',
+            decimals: 18, confirmations: 15,
+          },
+        };
+      }
+      if (url.endsWith('/pay/account.json')) return { status: 200, body: { ok: true, balanceMicro: 0, history: [], entitlements: [] } };
+      return { status: 404, body: { error: 'not_found' } };
+    }, 'ru');
+    await tick();
+    const note = window.document.querySelector('[data-pay="deposit-note"]')?.textContent ?? '';
+    // Название сети — с сервера: статичный текст «TRC-20» пережил бы переезд и соврал.
+    expect(note).toContain('BNB Smart Chain');
+    // И предупреждение про округление появляется только там, где знаки > 6.
+    expect(note).toContain('целое число');
+    expect(window.document.querySelector('[data-pay="address"]')?.textContent)
+      .toBe('0x2222222222222222222222222222222222222222');
+  });
+
+  it('на TRON про округление молчим: там хвост не теряется', async () => {
+    const { window } = boot((url) => {
+      if (url.endsWith('/auth/refresh')) return { status: 200, body: { access_token: 'tok' } };
+      if (url.endsWith('/pay/address.json')) {
+        return {
+          status: 200,
+          body: {
+            ok: true, address: 'TXyz111111111111111111111111111111111', index: 1, created: true,
+            network: 'mainnet', chain: 'tron', networkLabel: 'TRON (TRC-20)', asset: 'USDT',
+            contract: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t', decimals: 6, confirmations: 20,
+          },
+        };
+      }
+      if (url.endsWith('/pay/account.json')) return { status: 200, body: { ok: true, balanceMicro: 0, history: [], entitlements: [] } };
+      return { status: 404, body: { error: 'not_found' } };
+    }, 'ru');
+    await tick();
+    const note = window.document.querySelector('[data-pay="deposit-note"]')?.textContent ?? '';
+    expect(note).toContain('TRON (TRC-20)');
+    expect(note).not.toContain('дробная часть');
+  });
+
   it('переводятся заголовки и кнопки на выбранном языке', async () => {
     const { window } = boot(() => ({ status: 401, body: { error: 'no_session' } }), 'de');
     await tick();

@@ -15,6 +15,8 @@ import { ensurePaySchema, PAY_SCHEMA_VERSION, PAY_TABLES } from '../pay/schema';
 import { ShopError, catalogForClient, entitlements, premiumStatus, purchase } from '../pay/shop';
 import { formatMicroUsdt, isMicroAmount, parseUsdtToMicro } from '../pay/tron/amount';
 import { usdtContract } from '../pay/tron/contracts';
+import { chainSpec } from '../pay/chain';
+import { readCursor } from '../pay/evm/deposits';
 import { requireAdmin } from '../http/admin';
 import {
   DAILY_LIMIT_MICRO, MIN_WITHDRAW_MICRO, PayoutError, approveWithdrawal, confirmWithdrawal,
@@ -39,6 +41,10 @@ import { ApiError } from '../world/errors';
 
 export async function payStatus(env: Env): Promise<Response> {
   const flags = payFlags(env);
+  // Всё, что касается сети, — из одного места (`pay/chain.ts`). Раньше `decimals`
+  // и `contract` были записаны здесь руками, и при появлении второй сети это
+  // стало бы «показываем игроку одну сеть, а смотрим другую».
+  const spec = chainSpec(env, flags);
   // Базу трогаем только когда это осмысленно: при выключенных деньгах запрос не
   // должен стоить ни одного DDL-запроса к D1.
   const touchDb = flags.payments || flags.schemaCheck;
@@ -48,9 +54,15 @@ export async function payStatus(env: Env): Promise<Response> {
     service: 'astra-pay',
     version: PAY_SCHEMA_VERSION,
     network: flags.network,
+    chain: spec.chain,
+    networkLabel: spec.label,
     asset: 'USDT',
-    decimals: 6,
-    contract: usdtContract(env, flags.network),
+    decimals: spec.decimals,
+    contract: spec.contract,
+    // Что из денежного контура реально готово на этой цепи: «сеть выбрана» и
+    // «код умеет» — разные вещи, и игрок должен видеть вторую.
+    rail: spec.ready,
+    confirmations: spec.confirmations,
     flags: publicFlags(flags),
     // off — деньги выключены; signer_required — включены, но кошельки ещё не
     // выдаются (не настроен Signer); ready — можно покупать и принимать USDT.
@@ -69,7 +81,11 @@ export async function payProducts(env: Env): Promise<Response> {
     ok: true,
     purchasesEnabled: flags.purchases,
     wallets: walletState(env, flags),
+    // Витрина обязана назвать сеть: адрес `0x…` игрок может по ошибке выбрать в
+    // Ethereum или Polygon, и тогда деньги застрянут (ключ-то наш, а газа нет).
     asset: 'USDT',
+    chain: chainSpec(env, flags).chain,
+    networkLabel: chainSpec(env, flags).label,
     products: catalogForClient(),
     now: Date.now(),
   }, 200, { 'Cache-Control': 'public, max-age=300' });
@@ -85,13 +101,26 @@ export async function payProducts(env: Env): Promise<Response> {
 export async function payAddress(env: Env, auth: AuthContext): Promise<Response> {
   const flags = payFlags(env);
   if (!flags.deposits) throw new ApiError(503, 'deposits_disabled');
+  // Сеть «похожа на неизвестную» — это не «возьмём первую»: игрок может увидеть
+  // адрес одной сети, а монитор будет смотреть другую. Молчать дороже.
+  if (flags.chainConfigError) throw new ApiError(503, 'pay_chain_unknown');
+  // Адрес выдаём только когда рельс этой цепи дописан от конца до конца:
+  // выдать адрес в сети, где монитор ещё не умеет искать переводы, — это
+  // означает «игрок прислал деньги, а мы их не нашли».
+  const spec = chainSpec(env, flags);
+  if (!spec.ready.addresses) throw new ApiError(503, spec.ready.reason || 'rail_not_ready');
+  if (!spec.contract) throw new ApiError(503, 'usdt_contract_missing');
   if (!(await ensurePaySchema(env.DB))) throw new ApiError(503, 'pay_unavailable');
 
   const existing = await findAddress(env.DB, auth.userId);
   if (existing) {
     return json({
       ok: true, address: existing.address, index: existing.index, created: false,
-      network: flags.network, asset: 'USDT', contract: usdtContract(env, flags.network),
+      network: flags.network, chain: spec.chain, networkLabel: spec.label,
+      asset: 'USDT', contract: spec.contract,
+      // Витрина печатает предупреждение про дробную часть только там, где она
+      // правда отбрасывается, — поэтому знаки и подтверждения едут вместе с адресом.
+      decimals: spec.decimals, confirmations: spec.confirmations,
     });
   }
 
@@ -106,7 +135,8 @@ export async function payAddress(env: Env, auth: AuthContext): Promise<Response>
 
   return json({
     ok: true, address: address.address, index: address.index, created: address.created,
-    network: flags.network, asset: 'USDT', contract: usdtContract(env, flags.network),
+    network: flags.network, chain: spec.chain, networkLabel: spec.label,
+    asset: 'USDT', contract: spec.contract, decimals: spec.decimals, confirmations: spec.confirmations,
   }, 201);
 }
 
@@ -256,12 +286,22 @@ export async function adminPay(request: Request, env: Env): Promise<Response> {
   await requireAdmin(request, env);
   if (!(await ensurePaySchema(env.DB))) throw new ApiError(503, 'pay_unavailable');
   const now = Date.now();
-  const [report, queue, poolBlock] = await Promise.all([
+  const flags = payFlags(env);
+  const spec = chainSpec(env, flags);
+  const [report, queue, poolBlock, cursor] = await Promise.all([
     reconcile(env.DB, now), withdrawalQueue(env.DB, 50), usdtPoolBlock(env.DB, now),
+    // Где стоит сканер: по курсору видно, что приём встал (нода молчит, сеть
+    // выросла, а мы всё ещё на старом блоке).
+    readCursor(env.DB, spec.chain, spec.contract).catch(() => 0),
   ]);
   return json({
     ok: true,
-    flags: publicFlags(payFlags(env)),
+    flags: publicFlags(flags),
+    chain: {
+      name: spec.chain, label: spec.label, network: spec.network,
+      decimals: spec.decimals, contract: spec.contract, confirmations: spec.confirmations,
+      cursor, ready: spec.ready,
+    },
     reconcile: report,
     queue,
     // Призовой фонд сезона: доля выручки магазина (POOL_PRIZE_SHARE), не взносы.
@@ -336,6 +376,10 @@ export async function adminPaySend(request: Request, env: Env): Promise<Response
   if (row.status !== 'reserved') throw new ApiError(409, 'not_reserved');
 
   const flags = payFlags(env);
+  // Сборщик транзакций умеет пока только TRON. Отдавать команду «отправить» на
+  // другой цепи нельзя даже по ошибке: транзакция-то ушла бы в TRON.
+  const sendSpec = chainSpec(env, flags);
+  if (!sendSpec.ready.payouts) throw new ApiError(503, sendSpec.ready.reason || 'payouts_unavailable');
   const owner = String(env.PAY_HOT_ADDRESS ?? '');
   if (!owner) throw new ApiError(503, 'hot_wallet_missing');
   if (!env.SIGNER) throw new ApiError(503, 'signer_not_configured');

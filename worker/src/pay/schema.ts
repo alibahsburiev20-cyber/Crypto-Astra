@@ -1,4 +1,4 @@
-// Схема Astra Pay Core: 14 таблиц `pay_*`.
+// Схема Astra Pay Core: 15 таблиц `pay_*`.
 //
 // Канон — миграция `worker/migrations/d1/0007_astra_pay.sql`. Здесь тот же DDL,
 // но идемпотентный (`IF NOT EXISTS`), потому что прод деплоится из браузера:
@@ -34,6 +34,7 @@ export const PAY_TABLES = [
   'pay_treasury',
   'pay_operations',
   'pay_audit_log',
+  'pay_chain_cursor',
 ] as const;
 
 export const PAY_STATEMENTS: string[] = [
@@ -65,6 +66,16 @@ export const PAY_STATEMENTS: string[] = [
      deposit_txid TEXT)`,
 
   // 3. Обработанные блоки: курсор монитора. Пропуск высоты — авария, а не норма.
+  // 4а. Курсоры сканеров: с какого блока смотреть дальше. Отдельно от адресов,
+  // потому что EVM-сканер идёт диапазоном блоков и сразу по всем адресам, а не
+  // «по одному адресу по времени».
+  `CREATE TABLE IF NOT EXISTS pay_chain_cursor (
+     chain TEXT NOT NULL,
+     contract TEXT NOT NULL,
+     height INTEGER NOT NULL DEFAULT 0,
+     updated_at INTEGER NOT NULL,
+     PRIMARY KEY (chain, contract))`,
+
   `CREATE TABLE IF NOT EXISTS pay_chain_blocks (
      height INTEGER PRIMARY KEY,
      block_id TEXT NOT NULL,

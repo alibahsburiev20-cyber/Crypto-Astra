@@ -2,6 +2,9 @@ import { syncArchive } from './archive';
 import { cleanupAuthLimits } from './auth/rateLimit';
 import { ensureArchiveSchema } from './db/bootstrap';
 import { payFlags } from './pay/flags';
+import { chainSpec } from './pay/chain';
+import { applyEvmDeposits, bscActiveAddresses, scanEvmBlocks } from './pay/evm/deposits';
+import { createEvmRpc } from './pay/evm/rpc';
 import { applyDeposits, scanAll, trongridFetcher } from './pay/monitor';
 import { tronApiBase } from './pay/tron/contracts';
 import { ensurePaySchema } from './pay/schema';
@@ -89,21 +92,65 @@ export default {
     if (pay.payments) await ensurePaySchema(env.DB);
     // Приём денег: смотрим блокчейн и превращаем найденное в баланс. Только при
     // включённом флаге и только подтверждённые переводы. Ошибка сети не валит cron.
-    if (pay.deposits) {
+    if (pay.deposits && pay.chainConfigError) {
+      // `PAY_CHAIN` с опечаткой: деньги не ищем вообще, но и не молчим — иначе
+      // «депозиты не пришли» будет выглядеть как проблема игрока.
+      console.error('pay deposits paused: неизвестное PAY_CHAIN', { value: String(env.PAY_CHAIN ?? '') });
+    } else if (pay.deposits) {
+      // Сканер выбирается по цепи, а не «оба сразу»: смотреть обе сети можно, но
+      // тогда одна из них крутит сеть впустую, и в логах непонятно, где деньги.
+      const spec = chainSpec(env, pay);
+      if (spec.chain === 'tron') {
+        try {
+          const summary = await scanAll(env.DB, {
+            fetchJson: trongridFetcher(env.TRONGRID_API_KEY),
+            contracts: usdtContracts(env, pay.network),
+            apiBase: tronApiBase(pay.network),
+          }, Date.now(), 20);
+          const applied = await applyDeposits(env.DB, Date.now(), 100);
+          if (summary.stored || summary.errors.length || applied.credited) {
+            console.log('pay monitor', summary, applied);
+          }
+        } catch (e) {
+          console.error('pay monitor failed', e);
+        }
+      } else if (spec.ready.deposits && spec.contract) {
+        try {
+          const addresses = await bscActiveAddresses(env.DB);
+          const scanned = await scanEvmBlocks(env.DB, {
+            rpc: createEvmRpc({ url: spec.apiBase, fetchImpl: fetch }),
+            contract: spec.contract,
+            chain: 'bsc',
+            confirmations: spec.confirmations,
+            addresses,
+          }, Date.now());
+          const applied = await applyEvmDeposits(env.DB, spec.contract, Date.now(), 100);
+          if (scanned.stored || scanned.error || applied.credited || applied.orphan) {
+            console.log('pay monitor bsc', scanned, applied);
+          }
+        } catch (e) {
+          console.error('pay monitor bsc failed', e);
+        }
+      } else {
+        // Рельс выбран, но не дописан: молча молчать нельзя, иначе «депозиты не
+        // пришли» будет выглядеть как проблема игрока.
+        console.error('pay deposits paused', { chain: spec.chain, reason: spec.ready.reason });
+      }
+      // Отдельная страховка на случай переезда: активные адреса старой цепи,
+      // которые новый сканер никогда не найдёт. Деньги на них не потеряны, но
+      // сами они не зачтутся — об этом надо узнать до анонса, а не после.
       try {
-        const summary = await scanAll(env.DB, {
-          fetchJson: trongridFetcher(env.TRONGRID_API_KEY),
-          contracts: usdtContracts(env, pay.network),
-          apiBase: tronApiBase(pay.network),
-        }, Date.now(), 20);
-        const applied = await applyDeposits(env.DB, Date.now(), 100);
-        if (summary.stored || summary.errors.length || applied.credited) {
-          console.log('pay monitor', summary, applied);
+        const stranded = await env.DB.prepare(
+          "SELECT COUNT(*) AS n FROM pay_addresses WHERE active = 1 AND address LIKE 'T%'",
+        ).first<number>('n');
+        if (Number(stranded ?? 0) > 0 && spec.chain !== 'tron') {
+          console.error('pay: активные TRON-адреса при другой цепи', { count: Number(stranded), chain: spec.chain });
         }
       } catch (e) {
-        console.error('pay monitor failed', e);
+        console.error('pay stranded check failed', e);
       }
     }
+
     // Сверка — раз в сутки ночью. Расхождение само поднимает стоп-флаг выплат:
     // лучше остановиться и разобраться, чем продолжать платить по битым данным.
     if (pay.payments && String(controller.cron ?? '') === '0 3 * * *') {

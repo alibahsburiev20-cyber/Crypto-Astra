@@ -47,6 +47,15 @@ CREATE TABLE IF NOT EXISTS pay_invoices (
 -- Один активный счёт на игрока: два открытых счёта — путь к двойной оплате.
 CREATE UNIQUE INDEX IF NOT EXISTS ux_pay_invoices_open ON pay_invoices (user_id) WHERE status = 'open';
 
+-- Курсор сканера: с какого блока смотреть дальше (одна строка на цепь+контракт).
+CREATE TABLE IF NOT EXISTS pay_chain_cursor (
+  chain      TEXT NOT NULL,
+  contract   TEXT NOT NULL,
+  height     INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (chain, contract)
+);
+
 CREATE TABLE IF NOT EXISTS pay_chain_blocks (
   height         INTEGER PRIMARY KEY,
   block_id       TEXT NOT NULL,

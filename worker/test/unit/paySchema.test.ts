@@ -42,7 +42,7 @@ function columns(db: DatabaseSync, table: string): string[] {
 const T0 = 1_700_000_000_000;
 
 describe('схема pay_*', () => {
-  it('миграция создаёт ровно 14 таблиц', () => {
+  it('миграция создаёт ровно 15 таблиц', () => {
     const db = fromMigration();
     expect(tables(db)).toEqual([...PAY_TABLES].sort());
     expect(PAY_SCHEMA_VERSION).toBe(1);
