@@ -22,6 +22,7 @@ import { readRefreshCookie, refreshCookie } from '../../src/http/cookies';
 import { checkUserLimit } from '../../src/http/userLimit';
 import { sameToken } from '../../src/http/admin';
 import { isCountableTable, adminSummary } from '../../src/world/modules/adminWorld';
+import { canonicalEmail } from '../../src/auth/emailGuard';
 import { callsignProblem, normalizeCallsign } from '../../src/world/modules/identity';
 import { createLot, buyLot, cancelLot } from '../../src/world/modules/market';
 import { createPlayer } from '../../src/world/modules/players';
@@ -54,6 +55,10 @@ function env(overrides: Partial<Env> = {}): Env {
     DB: db,
     JWT_SECRET: SECRET,
     TURNSTILE_SECRET: '',
+    // DNS из теста недоступен, а проверка почты — отдельный модуль со своими
+    // тестами (emailGuard.test.ts). Здесь важно поведение доступа и лимитов.
+    // Формат адреса и список помоек при этом остаются включёнными.
+    SIGNUP_GUARD: 'off',
     __raw: raw,
     ...overrides,
   } as unknown as Env;
@@ -208,53 +213,65 @@ describe('токены и сессии', () => {
     expect(readRefreshCookie(real)).toBe('tok-1');
   });
 
-  it('перебор паролей: 3 попытки — шлюз, 10 — блокировка IP', async () => {
+  it('перебор паролей: пять неудач — и IP заперт на 15 минут, без капчи', async () => {
     const e = env({ TURNSTILE_SECRET: 'turnstile-secret-value' });
     const stored = await hashPassword('correct horse battery staple');
     e.DB.prepare("INSERT INTO users (id, email, password_hash, status, world_id, created_at) VALUES ('u1', 'a@b.cc', ?, 'active', 'w1', 1)")
       .bind(stored).run();
-    // siteverify подменяем на «ок»: нам важно поведение счётчиков, а не сеть.
-    const verify = vi.fn(async () => new Response(JSON.stringify({ success: true })));
-    vi.stubGlobal('fetch', verify);
+    // На входе шлюза быть не вовсе: «я человек» остался только на бонусах. Любой
+    // запрос к siteverify уронил бы этот тест — fetch недоступен намеренно.
+    const noNetwork = vi.fn(async () => { throw new Error('siteverify must not be called'); });
+    vi.stubGlobal('fetch', noNetwork);
     try {
       const attempt = (password: string, ip: string) => login2(
-        post('/auth/login', { email: 'a@b.cc', password, turnstileToken: 'tok-0001' }, { 'CF-Connecting-IP': ip }), e,
+        post('/auth/login', { email: 'a@b.cc', password }, { 'CF-Connecting-IP': ip }), e,
       );
-      const seen: { status: number; gate: boolean }[] = [];
-      for (let i = 0; i < 8; i++) {
+      for (let i = 0; i < 4; i++) {
         const res = await attempt(`wrong password ${i}`, '203.0.113.11');
-        const body = await res.json() as { error?: string; turnstile_required?: boolean };
-        seen.push({ status: res.status, gate: body.turnstile_required === true });
-        expect(body.error, `попытка ${i}`).toBe('invalid_credentials');
+        expect(res.status, `попытка ${i}`).toBe(401);
+        // Ответ ровно «не та пара»: ни подсказки про капчу, ни имени аккаунта.
+        expect(await res.json()).toEqual({ error: 'invalid_credentials' });
       }
-      // Все восемь — «не тот пароль», без 500 и без лишних подсказок в ответе.
-      expect(seen.every((x) => x.status === 401)).toBe(true);
-      // Третья неудача уже приносит подсказку «нужен токен», а с четвёртой токен
-      // требуют до проверки пароля: дешёвый перебор упирается в капчу, а не в pbkdf2.
-      expect(seen.map((x) => x.gate)).toEqual([false, false, true, true, true, true, true, true]);
-      const noToken = await login2(post('/auth/login', { email: 'a@b.cc', password: 'wrong password x' },
-        { 'CF-Connecting-IP': '203.0.113.11' }), e);
-      expect(noToken.status).toBe(403);
-      expect(await noToken.json()).toEqual({ error: 'turnstile_required' });
-      // Девятая — всё ещё ответ о пароле, десятая закрывает IP.
-      expect((await attempt('wrong password 8', '203.0.113.11')).status).toBe(401);
-      expect((await attempt('wrong password 9', '203.0.113.11')).status).toBe(429);
-      // Верный пароль с запертого IP — всё равно отказ: блокировка не пропускает «избранных».
-      const locked = await attempt('correct horse battery staple', '203.0.113.11');
-      expect(locked.status).toBe(429);
-      expect(Number(locked.headers.get('Retry-After'))).toBeGreaterThan(0);
-      // Чужой IP не страдает от перебора, сделанного другим: блокировка по ключу, не глобально.
+      // Пятая неудача закрывает IP на 15 минут.
+      const blocked = await attempt('wrong password 4', '203.0.113.11');
+      expect(blocked.status).toBe(429);
+      expect(await blocked.json()).toEqual({ error: 'too_many_attempts' });
+      expect(Number(blocked.headers.get('Retry-After'))).toBeGreaterThan(0);
+      // Верный пароль с запертого IP — всё равно отказ: блокировка не для «избранных».
+      expect((await attempt('correct horse battery staple', '203.0.113.11')).status).toBe(429);
+      // Другой IP не страдает от чужого перебора: блокировка по ключу, не глобально.
       const other = await attempt('correct horse battery staple', '198.51.100.77');
       expect(other.status).toBe(200);
       expect((await other.json() as { access_token?: string }).access_token).toBeTruthy();
-      // Проверка — серверная: клиенту решение не доверяем ни разу.
-      expect(verify.mock.calls.length).toBeGreaterThan(0);
-      const form = verify.mock.calls[0][1] as { body: FormData };
-      expect(form.body.get('secret')).toBe('turnstile-secret-value');
-      expect(form.body.get('remoteip')).toBe('203.0.113.11');
+      expect(noNetwork).not.toHaveBeenCalled();
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+
+  it('перебор по одному адресу с разных IP упирается в лимит самого адреса', async () => {
+    const e = env();
+    const stored = await hashPassword('correct horse battery staple');
+    e.DB.prepare("INSERT INTO users (id, email, password_hash, status, world_id, created_at) VALUES ('u1', 'a@b.cc', ?, 'active', 'w1', 1)")
+      .bind(stored).run();
+    let status = 0;
+    // 15 адресных неудач с разных «IP»: распределённый перебор, где счётчик по IP бессилен.
+    for (let i = 0; i < 16; i++) {
+      const res = await login2(post('/auth/login', { email: 'a@b.cc', password: `wrong password ${i}` },
+        { 'CF-Connecting-IP': `203.0.${113 + (i % 3)}.${i + 1}` }), e);
+      status = res.status;
+    }
+    expect(status).toBe(429);
+    expect(e.__raw.prepare('SELECT key, attempts FROM auth_limits').all()
+      .some((r: { key: string }) => r.key.startsWith('login_email:'))).toBe(true);
+  });
+
+  it('алиасы одного ящика не обходят лимит и не создают второй аккаунт', async () => {
+    // `john+shop@gmail.com` и `john@gmail.com` — один ящик: нормализация обязана
+    // быть одинаковой и на входе, и на регистрации.
+    expect(canonicalEmail('John.Smith+shop@gmail.com')).toBe('johnsmith@gmail.com');
+    expect(canonicalEmail('a+b@example.com')).toBe('a@example.com');
+    expect(canonicalEmail('a@example.com')).toBe('a@example.com');
   });
 
   it('неизвестный email и неверный пароль отвечают одинаково: список адресов не проверяется', async () => {

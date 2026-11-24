@@ -13,6 +13,7 @@
 | D1 | `astra-global` (`49cf3fff-…`) | `astra-preview` (`a9656807-…`) | локальный файл `.wrangler/state` |
 | Durable Objects | боевые | изолированные (`[previews.durable_objects]`) | локальные |
 | `TURNSTILE_SITE_KEY` | реальный | пустой — проверка выключена | из `.dev.vars`/`[vars]` |
+| `SIGNUP_GUARD` | не задан — строгая регистрация включена | не задан — включена | `off` в `.dev.vars` (и в CI): там нет DNS и много регистраций в час |
 | `JWT_SECRET` | секрет | секрет превью **другой** | `.dev.vars` |
 | `ADMIN_TOKEN` | секрет (запись пула) | не нужен, запись не проверяется | `.dev.vars` = `ci-admin-token` |
 | Cron / архив | включён | не срабатывает (превью не планировщик) | вручную |
