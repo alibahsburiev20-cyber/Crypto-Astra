@@ -2,8 +2,8 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { DAY_MS } from '../../src/shared/constants';
 import {
-  BOXES, BOX_ORDER, PATROL, PLANES, PLANE_ORDER, PLANE_RARITY_NAMES, PLANE_RARITY_ORDER, RESOURCE_BASE_PRICES,
-  isPlaneId, planeSprite, planesOfRarity,
+  BOXES, BOX_ORDER, PATROL, PATROL_MAX_CONCURRENT, PLANES, PLANE_ORDER, PLANE_RARITY_NAMES, PLANE_RARITY_ORDER, RESOURCE_BASE_PRICES,
+  isPlaneId, planeSprite, planesOfRarity, type PlaneId,
 } from '../../src/shared/gameData';
 import { applyDelta, getBalance } from '../../src/world/balances';
 import { verifyLedger } from '../../src/world/ledger';
@@ -161,6 +161,116 @@ describe('розыгрыш машины', () => {
     }
   });
 
+  it('повторов не будет: собранная модель не может выпасть второй раз', () => {
+    // Для любого набора «уже собрано» бокс обязан выдавать только то, чего нет.
+    const ownedSets: PlaneId[][] = [
+      ['strizh'],
+      ['strizh', 'osa'],
+      ['strizh', 'osa', 'kolibri', 'skat'],
+      ['sokol'],
+      ['feniks'],
+      ['strizh', 'osa', 'kolibri', 'skat', 'sokol', 'manta', 'prizrak'],
+      ['strizh', 'osa', 'kolibri', 'skat', 'sokol', 'manta', 'prizrak', 'feniks'],
+    ];
+    for (const box of BOX_ORDER) {
+      for (const list of ownedSets) {
+        const owned = new Set<PlaneId>(list);
+        for (const seed of SEEDS) {
+          const plane = rollPlane(BOXES[box], seed, owned);
+          if (plane) expect(owned.has(plane), `${box}/${list.join('+')}/${seed}`).toBe(false);
+        }
+      }
+    }
+    // Собранная коллекция — машина не выпадает вовсе: дублей в мире нет.
+    const everything = new Set<PlaneId>(PLANE_ORDER);
+    for (const box of BOX_ORDER) {
+      for (const seed of SEEDS.slice(0, 50)) {
+        expect(rollPlane(BOXES[box], seed, everything), box).toBeNull();
+      }
+    }
+  });
+
+  it('анти-дубль не меняет старые розыгрыши и детерминирован', () => {
+    for (const box of BOX_ORDER) {
+      for (const seed of SEEDS) {
+        // Пустой набор «собрано» — ровно то же самое, что до правки: сохранённые
+        // в box_opens seed'ы перепроверяются байт в байт.
+        expect(rollPlane(BOXES[box], seed), `${box}/${seed}`).toBe(rollPlane(BOXES[box], seed, new Set()));
+        // Тот же seed и то же собранное — та же машина.
+        const owned = new Set<PlaneId>(['strizh']);
+        expect(rollPlane(BOXES[box], seed, owned)).toBe(rollPlane(BOXES[box], seed, new Set(['strizh'])));
+      }
+    }
+  });
+
+  it('собранную ступень бокс заменяет соседней, а не пустотой', () => {
+    const def = BOXES.crate_pro; // common 3 % + rare 0.8 % + legendary 0.4 %
+    const seedRare = (() => {
+      // Подберём seed, который без анти-дубля даёт редкую модель.
+      for (const seed of SEEDS) {
+        const plane = rollPlane(def, seed);
+        if (plane && PLANES[plane].rarity === 'rare') return seed;
+      }
+      return '';
+    })();
+    expect(seedRare).not.toBe('');
+    const rareModel = rollPlane(def, seedRare)!;
+    // Редкая ступень собрана целиком — бросок уезжает на обычную, не в ноль.
+    const allRare = new Set<PlaneId>(planesOfRarity('rare'));
+    const substitute = rollPlane(def, seedRare, allRare);
+    expect(substitute).not.toBeNull();
+    expect(substitute).not.toBe(rareModel);
+    expect(PLANES[substitute!].rarity).toBe('common');
+    // Обычная тоже собрана — тогда выше: легендарная остаётся единственной свежей.
+    const up = rollPlane(def, seedRare, new Set<PlaneId>([...planesOfRarity('rare'), ...planesOfRarity('common')]));
+    expect(PLANES[up!].rarity).toBe('legendary');
+  });
+
+  it('boxesView честно говорит, сколько моделей ещё не собрано', () => {
+    const { sql, tx } = world();
+    const view = () => boxesView(sql, 'p1', T0);
+    // Новичок: одна машина есть (стартовый «Стриж»), значит свежих обычных три.
+    const all = view();
+    const daily = all.boxes.find((b) => b.id === 'daily')!;
+    expect(daily.planeChances.length).toBeGreaterThan(0);
+    const common = daily.planeChances.find((c) => c.rarity === 'common')!;
+    expect(common.models).toBe(planesOfRarity('common').length);
+    expect(common.fresh).toBe(common.models - 1);
+    expect(view().planesFound).toBe(1);
+    expect(view().planesAllOwned).toBe(false);
+    // Собрать всё: fresh обнуляется, бокс объявляет, что машин не даст.
+    // Коллекцию кладём напрямую — проверять лотерею боксов здесь не нужно.
+    tx(() => {
+      for (const id of PLANE_ORDER) {
+        sql.exec(
+          `INSERT INTO player_planes (player_id, plane, count, first_at, last_at) VALUES ('p1', ?, 1, ?, ?)
+           ON CONFLICT (player_id, plane) DO UPDATE SET count = count + 1`,
+          id, T0, T0,
+        );
+      }
+    });
+    const full = view();
+    expect(full.planesAllOwned).toBe(true);
+    expect(full.planesTotal).toBe(PLANE_ORDER.length);
+    for (const box of full.boxes) {
+      for (const chance of box.planeChances) expect(chance.fresh).toBe(0);
+    }
+  });
+
+  it('ни одного повторного корабля из боксов: 400 открытий дают разные модели', () => {
+    const { sql, tx } = world(2_000_000);
+    const seen: string[] = [];
+    for (let i = 0; i < 400; i++) {
+      const res = tx(() => openBox(sql, 'p1', `nd${i}`, 'crate_pro', T0 + i * 1000));
+      const plane = (res as { plane?: { id: string; count: number } }).plane;
+      if (!plane) continue;
+      seen.push(plane.id);
+      // Счётчик не обязан расти: second copy of the same model never happens.
+      expect(plane.count).toBe(1);
+    }
+    expect(seen.length).toBeGreaterThan(0);
+    expect(new Set(seen).size).toBe(seen.length);
+  });
   it('легендарная машина действительно редкая: с контейнера реже 1 из 100', () => {
     const cfg = BOXES.crate_pro.plane!;
     expect(cfg.legendary!).toBeLessThan(0.01);
@@ -263,8 +373,16 @@ describe('звено в клиенте', () => {
     expect(app).toContain("state.planes");
     expect(css).toContain('.plane-grid');
     expect(css).toContain('.plane-slot');
-    // Подпись обязана обещать ровно то, что делает код: ни ASTRA, ни ресурсов.
-    expect(app).toContain('но ни ASTRA, ни ресурсов звено не даёт');
+    // Подпись обязана обещать ровно то, что делает код: ресурсы и опыт звено
+    // приносит, ASTRA — нет. И то и другое должно быть в тексте прямо.
+    expect(app).toContain('шанса на ASTRA нет');
+    expect(app).toContain('возвращается с закладкой ресурсов и опыта');
+    expect(app).toContain('ячейки под корабли звено не занимает');
+    // Анти-дубль боксов и патрулей тоже обещан в интерфейсе, а не только в коде.
+    expect(app).toContain('Повторных машин боксы и патрули не выдают');
+    // Шанс находки подписан как шанс новой машины и честен при собранной полке.
+    expect(app).toContain('находка новой ${chance} %');
+    expect(app).toContain('Звено собрано целиком');
   });
 
   it('патруль живёт в интерфейсе: кнопка, таймер возврата и забор находки', () => {
@@ -273,8 +391,13 @@ describe('звено в клиенте', () => {
     expect(app).toContain("'/planes/patrol'");
     expect(app).toContain("'/planes/patrol/claim'");
     expect(app).toContain('plane-patrol');
+    expect(app).toContain('plane-patrol-row');
     expect(app).toContain('В патруль');
-    expect(app).toContain('Забрать находку');
+    // Сдаются все вернувшиеся борта сразу — одной кнопкой.
+    expect(app).toContain('Забрать');
+    expect(app).toContain('salvageText');
+    // Сколько бортов пускает ангар — видно на карточке.
+    expect(app).toContain('p.slots');
     // Таймер возврата должен оживать сам: кнопка «Забрать» появляется без перезагрузки.
     expect(app).toContain("'data-patrol-ready'");
     expect(css).toContain('.plane-patrol');
@@ -333,10 +456,12 @@ describe('патруль: машины действительно летают',
     expect(BOXES.crate_supply.plane).toEqual({ common: 0.015 });
     expect(BOXES.crate_pro.plane).toEqual({ common: 0.03, rare: 0.008, legendary: 0.004 });
     expect(PATROL).toEqual({
-      common: { ms: 6 * 3600 * 1000, find: 0.04 },
-      rare: { ms: 12 * 3600 * 1000, find: 0.08 },
-      legendary: { ms: 24 * 3600 * 1000, find: 0.15 },
+      common: { ms: 6 * 3600 * 1000, find: 0.01, salvage: { iron_ore: 1 }, xp: 4 },
+      rare: { ms: 12 * 3600 * 1000, find: 0.02, salvage: { iron_ore: 2, silicon: 1 }, xp: 8 },
+      legendary: { ms: 24 * 3600 * 1000, find: 0.04, salvage: { iron_ore: 3, crystal: 1 }, xp: 16 },
     });
+    // Параллельность патруля ограничена слотами: не конвейер.
+    expect(PATROL_MAX_CONCURRENT).toBe(4);
   });
 
   it('чем реже машина, тем дольше и результативнее полёт', () => {
@@ -384,7 +509,66 @@ describe('патруль: машины действительно летают',
     expect(planesView(sql, 'p1', T0 + PATROL.legendary.ms + 1).patrols).toBe(1);
   });
 
-  it('патруль не даёт ни ASTRA, ни ресурсов: это коллекция, а не доход', () => {
+  it('звено может летать параллельно, но не больше слотов', () => {
+    const { sql, tx } = world();
+    // Четыре обычные машины — ровно столько, сколько есть в коллекции.
+    for (const plane of ['strizh', 'osa', 'kolibri', 'skat']) {
+      sql.exec(
+        `INSERT INTO player_planes (player_id, plane, count, first_at, last_at) VALUES ('p1', ?, 1, ?, ?)
+         ON CONFLICT (player_id, plane) DO UPDATE SET count = count + 1`,
+        plane, T0, T0,
+      );
+    }
+    const planes = ['strizh', 'osa', 'kolibri', 'skat'];
+    planes.forEach((plane, i) => {
+      expect(() => tx(() => startPatrol(sql, 'p1', `k${i}`, plane, T0))).not.toThrow();
+    });
+    // Пятый борт — уже конвейер: слоты закончились.
+    sql.exec(
+      `INSERT INTO player_planes (player_id, plane, count, first_at, last_at) VALUES ('p1', 'sokol', 1, ?, ?)
+       ON CONFLICT (player_id, plane) DO UPDATE SET count = count + 1`,
+      T0, T0,
+    );
+    expect(() => tx(() => startPatrol(sql, 'p1', 'k5', 'sokol', T0))).toThrow(/patrol_slots_full/);
+    const shelf = planesView(sql, 'p1', T0);
+    expect(shelf.active.length).toBe(PATROL_MAX_CONCURRENT);
+    expect(shelf.flying).toBe(PATROL_MAX_CONCURRENT);
+    expect(shelf.freeSlots).toBe(0);
+    // Каждая модель в воздухе помечена: кнопка «В патруль» не дразнится.
+    expect(shelf.models.filter((m) => m.flying).map((m) => m.id).sort())
+      .toEqual(['kolibri', 'osa', 'skat', 'strizh']);
+  });
+
+  it('одна машина дважды в воздух не выходит', () => {
+    const { sql, tx } = worldWithPlane('strizh');
+    tx(() => startPatrol(sql, 'p1', 'k1', 'strizh', T0));
+    expect(() => tx(() => startPatrol(sql, 'p1', 'k2', 'strizh', T0 + 1000))).toThrow(/patrol_busy/);
+  });
+
+  it('сдача забирает все вернувшиеся борта и отдаёт закладку каждого', () => {
+    const { sql, tx } = world();
+    for (const plane of ['strizh', 'osa']) {
+      sql.exec(
+        `INSERT INTO player_planes (player_id, plane, count, first_at, last_at) VALUES ('p1', ?, 1, ?, ?)
+         ON CONFLICT (player_id, plane) DO UPDATE SET count = count + 1`,
+        plane, T0, T0,
+      );
+    }
+    tx(() => startPatrol(sql, 'p1', 'k1', 'strizh', T0));
+    // Второй борт стартовал позже: к моменту сдачи первого он ещё летит.
+    tx(() => startPatrol(sql, 'p1', 'k2', 'osa', T0 + 1000));
+    const res = tx(() => claimPatrol(sql, 'p1', 'c1', T0 + PATROL.common.ms));
+    expect(res.claimed).toBe(1);
+    // Закладка обычной машины: одно железо и опыт.
+    expect(res.salvage).toEqual([{ resource: 'iron_ore', name: 'Железная руда', amount: 1 }]);
+    expect(res.xp).toBe(PATROL.common.xp);
+    expect(getResource(sql, 'p1', 'iron_ore')).toBe(1);
+    // Второй борт ещё в воздухе — его не трогаем.
+    expect(planesView(sql, 'p1', T0 + PATROL.common.ms).active.length).toBe(1);
+    expect(verifyLedger(sql).ok).toBe(true);
+  });
+
+  it('патруль даёт ресурсы и опыт, но не ASTRA и не топливо', () => {
     const { sql, tx } = worldWithPlane('strizh');
     tx(() => addResource(sql, 'p1', 'iron_ore', 2, T0));
     const astraBefore = getBalance(sql, 'p1', 'astra');
@@ -399,24 +583,35 @@ describe('патруль: машины действительно летают',
       tx(() => claimPatrol(sql, 'p1', `c${i}`, at + PATROL.common.ms));
     }
 
-    expect(getBalance(sql, 'p1', 'astra')).toBe(astraBefore);
+    expect(getBalance(sql, 'p1', 'astra'), 'ASTRA звеном не печатается').toBe(astraBefore);
     expect(getBalance(sql, 'p1', 'fuel')).toBe(fuelBefore);
     const resourcesAfter = sql.exec('SELECT resource, amount FROM resources WHERE player_id = ? ORDER BY resource', 'p1').toArray()
       .map((r) => `${String(r.resource)}:${Number(r.amount)}`).join(',');
-    expect(resourcesAfter).toBe(resourcesBefore);
+    // Ресурсы, наоборот, обязаны капать: иначе патруль — безделушка.
+    expect(resourcesAfter).not.toBe(resourcesBefore);
+    const totals = new Map(sql.exec('SELECT resource, amount FROM resources WHERE player_id = ? ORDER BY resource', 'p1').toArray()
+      .map((r) => [String(r.resource), Number(r.amount)]));
+    // 12 вылетов по 1 железу: 12 + то 2 железа, что лежали до теста.
+    expect(totals.get('iron_ore')).toBe(14);
+    expect(totals.get('copper_ore')).toBeUndefined();
+    // Опыт за вылет — 4: 12 × 4 = 48.
+    expect(Number(sql.exec("SELECT xp FROM players WHERE id = 'p1'").toArray()[0].xp)).toBe(48);
     expect(verifyLedger(sql).ok).toBe(true);
     expect(planesView(sql, 'p1', T0 + 1000000).patrols).toBe(12);
   });
 
-  it('найденная машина попадает в коллекцию, дубликаты копятся', () => {
-    // Ищем seed, на котором патруль точно что-то находит: 5 % на легендарной.
+  it('найденная машина попадает в коллекцию один раз', () => {
+    // Ищем seed, на котором патруль точно что-то находит: 15 % на легендарной.
     let seed = '';
-    for (let i = 0; i < 500; i++) {
+    for (let i = 0; i < 4000; i++) {
       const candidate = `${i}`.padStart(2, '0').repeat(16);
       if (rollPatrol('feniks', candidate)) { seed = candidate; break; }
     }
     expect(seed).not.toBe('');
-    const found = rollPatrol('feniks', seed)!;
+    // Ожидаем ровно то же, что посчитает сервер: коллекция игрока к моменту сдачи
+    // — «Стриж» (стартовый) и «Феникс», поэтому легенда уже занята и патруль
+    // скатывается на редкую ступень.
+    const found = rollPatrol('feniks', seed, new Set<PlaneId>(['strizh', 'feniks']))!;
     const { sql, tx } = worldWithPlane('feniks');
     sql.exec(`INSERT INTO plane_patrols (id, player_id, plane, seed, started_at, ends_at, status)
               VALUES ('x1', 'p1', 'feniks', ?, ?, ?, 'flying')`, seed, T0, T0 + 1000);
@@ -424,10 +619,70 @@ describe('патруль: машины действительно летают',
     expect(res.found?.id).toBe(found);
     const shelf = planesView(sql, 'p1', T0 + 2000);
     const mine = shelf.models.find((m) => m.id === found)!;
-    expect(mine.count).toBeGreaterThanOrEqual(1);
-    if (found === 'feniks') expect(mine.count).toBe(2);
+    // Патруль не приносит то, что уже стоит на полке: count остаётся 1 у новой
+    // машины и 1 у «Феникса», который летал.
+    expect(mine.count).toBe(1);
+    expect(shelf.models.find((m) => m.id === 'feniks')!.count).toBe(1);
+    expect(res.foundList.every((f) => f.firstTime)).toBe(true);
     expect(shelf.hours).toBe(0);
     expect(shelf.models[0].patrolMs).toBe(PATROL.common.ms);
+  });
+
+  it('патруль ищет только несобранное: ступени обходятся по весам', () => {
+    // Тот же seed, но с разным собранным набором: находка обязана быть новой.
+    let seed = '';
+    for (let i = 0; i < 4000; i++) {
+      const candidate = `${i}`.padStart(2, '0').repeat(16);
+      if (rollPatrol('feniks', candidate)) { seed = candidate; break; }
+    }
+    const legendary = planesOfRarity('legendary');
+    const rare = planesOfRarity('rare');
+    const common = planesOfRarity('common');
+    // Пустое `owned` = старый результат байт в байт.
+    const base = rollPatrol('feniks', seed)!;
+    expect(rollPatrol('feniks', seed, new Set<PlaneId>())).toBe(base);
+    // Легенда уже есть — скатываемся на редких (второй вес таблицы легендарных).
+    expect(rollPatrol('feniks', seed, new Set(legendary))).not.toBeNull();
+    expect(rare).toContain(rollPatrol('feniks', seed, new Set(legendary))!);
+    // Легенда и редкие собраны — в таблице легендарных больше ходить некуда.
+    expect(rollPatrol('feniks', seed, new Set([...legendary, ...rare]))).toBeNull();
+    // Обычная машина при собранной обычности находит редкую.
+    let cseed = '';
+    for (let i = 0; i < 2000; i++) {
+      const candidate = `${i}`.padStart(2, '0').repeat(16);
+      if (rollPatrol('strizh', candidate)) { cseed = candidate; break; }
+    }
+    expect(rollPatrol('strizh', cseed, new Set(common))).not.toBeNull();
+    expect([...rare, ...common]).toContain(rollPatrol('strizh', cseed, new Set(common))!);
+    // Собрано всё — находить нечего, и это не ошибка: патруль просто ничего не несёт.
+    expect(rollPatrol('strizh', cseed, new Set([...common, ...rare, ...legendary]))).toBeNull();
+    expect(rollPatrol('feniks', seed, new Set(PLANE_ORDER))).toBeNull();
+  });
+
+  it('два вернувшихся борта не приносят одну и ту же машину', () => {
+    // Один и тот же seed на двух «Стрижах»: если бы коллекция не обновлялась в
+    // цикле, обе находки совпали.
+    let seed = '';
+    for (let i = 0; i < 4000; i++) {
+      const candidate = `${i}`.padStart(2, '0').repeat(16);
+      const hit = rollPatrol('strizh', candidate);
+      // Нужна находка именно обычной ступени — тогда второй борт обязан взять другую.
+      if (hit && PLANES[hit].rarity === 'common') { seed = candidate; break; }
+    }
+    expect(seed).not.toBe('');
+    const { sql, tx } = worldWithPlane('strizh');
+    sql.exec(
+      `INSERT INTO plane_patrols (id, player_id, plane, seed, started_at, ends_at, status)
+       VALUES ('x1', 'p1', 'strizh', ?, ?, ?, 'flying'), ('x2', 'p1', 'osa', ?, ?, ?, 'flying')`,
+      seed, T0, T0 + 1000, seed, T0, T0 + 1000,
+    );
+    const res = tx(() => claimPatrol(sql, 'p1', 'c1', T0 + 2000));
+    const ids = res.foundList.map((f) => f.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    // Полка без повторов: найденное раньше не стояло ни у кого (у стартового
+    // «Стрижа» count 2 — его выдал хелпер, это не дубликат патруля).
+    const shelf = planesView(sql, 'p1', T0 + 2000);
+    for (const id of ids) expect(shelf.models.find((m) => m.id === id)!.count).toBe(1);
   });
 
   it('без активного патруля claim отвечает no_patrol', () => {

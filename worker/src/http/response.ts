@@ -54,6 +54,7 @@ export const STATUS_BY_CODE: Record<string, number> = {
   bad_plane: 400,
   plane_not_owned: 409,
   patrol_busy: 409,
+  patrol_slots_full: 409,
   patrol_flying: 409,
   no_patrol: 404,
   // Срез 6: рынок.

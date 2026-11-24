@@ -1,8 +1,8 @@
 import {
-  BOXES, BOX_COMPONENTS, BOX_ORDER, PLANES, PLANE_RARITY_NAMES, PLANE_RARITY_ORDER, RESOURCE_NAMES,
+  BOXES, BOX_COMPONENTS, BOX_ORDER, PLANES, PLANE_ORDER, PLANE_RARITY_NAMES, PLANE_RARITY_ORDER, RESOURCE_NAMES,
   isBoxId, planeSprite, planesOfRarity, type BoxDef, type BoxId, type PlaneId, type PlaneRarity,
 } from '../../shared/gameData';
-import { grantPlane } from './planes';
+import { grantPlane, ownedPlanes } from './planes';
 import { applyXp } from './progress';
 import { levelFromXp } from './expeditionMath';
 import { applyDelta, getBalance } from '../balances';
@@ -49,8 +49,12 @@ export interface BoxView {
   nextOpenAt: number;
   ready: boolean;
   opens: number;
-  /** Шансы машин звена по редкости — показываем их честно, они крошечные. */
-  planeChances: { rarity: PlaneRarity; rarityName: string; chance: number; models: number }[];
+  /**
+   * Шансы машин звена по редкости — показываем их честно, они крошечные.
+   * `models` — всего моделей ступени, `fresh` — из них ещё не собранных: бокс
+   * выдаёт только такие, поэтому при fresh = 0 шанса на машину нет.
+   */
+  planeChances: { rarity: PlaneRarity; rarityName: string; chance: number; models: number; fresh: number }[];
 }
 
 /** Спрайт бокса. Путь строим из id, как и у ресурсов: клиент не правится. */
@@ -70,7 +74,7 @@ function stack(list: BoxDrop[], resource: string, amount: number): void {
  * результат. Порядок байтов seed закреплён тестом, менять его нельзя: иначе уже
  * выданные боксы перестанут воспроизводиться по сохранённому seed.
  */
-export function rollBox(def: BoxDef, seed: string): BoxRoll {
+export function rollBox(def: BoxDef, seed: string, owned: Set<PlaneId> = new Set()): BoxRoll {
   const [lo, hi] = def.units;
   const units = lo + Math.min(hi - lo, Math.floor(seedUnit(seed, 0) * (hi - lo + 1)));
   const total = Math.max(1, Math.min(hi, units));
@@ -100,7 +104,7 @@ export function rollBox(def: BoxDef, seed: string): BoxRoll {
 
   // Машина звена. Свои байты (9 и 10), чтобы не сдвигать ресурсы: у уже
   // выданных боксов по сохранённому seed обязано воспроизводиться то же самое.
-  return { units: total, drops, rare, components, plane: rollPlane(def, seed) };
+  return { units: total, drops, rare, components, plane: rollPlane(def, seed, owned) };
 }
 
 /**
@@ -111,8 +115,18 @@ export function rollBox(def: BoxDef, seed: string): BoxRoll {
  * Ступень бросается двумя байтами: на одном 256 значений, и шанс 0.4 % слипся бы
  * с 0.8 %. Двух байтов хватает на квант 1/65536 = 0.0015 % — заявленный шанс и
  * фактический совпадают с точностью до него.
+ *
+ * **Повторов не будет.** `owned` — модели, которые у игрока уже есть. Байт 11
+ * выбирает только из них, поэтому выпасть второй «Стриж» невозможно. Если ступень
+ * собрана целиком, бросок переезжает на соседнюю: сначала ниже (обычнее), потом
+ * выше — так бокс остаётся полезным до конца коллекции, но не превращается в
+ * джекпот. Когда собраны все восемь машин, бокс отдаёт только ресурсы.
+ *
+ * Функция чистая и детерминированная: тот же seed и тот же набор `owned` — та же
+ * машина. Сохранённые в журнале seed старых открытий перепроверяются как раньше
+ * (для пустого `owned` результат совпадает с прежним байт в байт).
  */
-export function rollPlane(def: BoxDef, seed: string): PlaneId | null {
+export function rollPlane(def: BoxDef, seed: string, owned: Set<PlaneId> = new Set()): PlaneId | null {
   const cfg = def.plane;
   if (!cfg) return null;
   const roll = seedUnit16(seed, 9);
@@ -125,15 +139,35 @@ export function rollPlane(def: BoxDef, seed: string): PlaneId | null {
     if (roll < acc) { tier = rarity; break; }
   }
   if (!tier) return null;
-  const pool = planesOfRarity(tier);
-  if (!pool.length) return null;
-  const index = Math.min(pool.length - 1, Math.floor(seedUnit(seed, 11) * pool.length));
-  return pool[index];
+  const from = PLANE_RARITY_ORDER.indexOf(tier);
+  // Порядок обхода: своя ступень, затем ниже, затем выше. Дубль не выдаём, но и
+  // бокс не обнуляем, пока в коллекции есть свободное место.
+  for (let d = 0; d < PLANE_RARITY_ORDER.length; d++) {
+    for (const step of d === 0 ? [0] : [-d, d]) {
+      const i = from + step;
+      if (i < 0 || i >= PLANE_RARITY_ORDER.length) continue;
+      const chance = Number(((cfg as Record<string, number | undefined>)[PLANE_RARITY_ORDER[i]]) ?? 0);
+      if (!chance) continue; // ступени, которой в этом боксе нет, не подставляем
+      const pool = planesOfRarity(PLANE_RARITY_ORDER[i]).filter((id) => !owned.has(id));
+      if (!pool.length) continue;
+      const index = Math.min(pool.length - 1, Math.floor(seedUnit(seed, 11) * pool.length));
+      return pool[index];
+    }
+  }
+  return null;
 }
 
-export function boxesView(sql: SqlStorage, playerId: string, now: number): { boxes: BoxView[] } {
+/** Собрана ли вся коллекция: если да, бокс машины не выдаёт вовсе. */
+export function planesAllOwned(owned: Set<PlaneId>): boolean {
+  return PLANE_ORDER.every((id) => owned.has(id));
+}
+
+export function boxesView(sql: SqlStorage, playerId: string, now: number): { boxes: BoxView[]; planesAllOwned: boolean; planesFound: number; planesTotal: number } {
   const rows = sql.exec('SELECT box, last_open_at, opens FROM box_state WHERE player_id = ?', playerId).toArray();
   const byBox = new Map(rows.map((r) => [String(r.box), r]));
+  // Честный шанс — это шанс на то, что игрок ещё не собрал: собранные модели бокс
+  // не выдаёт, поэтому в UI показываем число свободных моделей ступени.
+  const owned = ownedPlanes(sql, playerId);
 
   return {
     boxes: BOX_ORDER.map((id) => {
@@ -153,15 +187,22 @@ export function boxesView(sql: SqlStorage, playerId: string, now: number): { box
         ready: nextOpenAt <= now,
         opens: row ? Number(row.opens) : 0,
         planeChances: PLANE_RARITY_ORDER
-          .map((rarity) => ({
-            rarity,
-            rarityName: PLANE_RARITY_NAMES[rarity],
-            chance: Number(((def.plane ?? {}) as Record<string, number | undefined>)[rarity] ?? 0),
-            models: planesOfRarity(rarity).length,
-          }))
+          .map((rarity) => {
+            const pool = planesOfRarity(rarity);
+            return {
+              rarity,
+              rarityName: PLANE_RARITY_NAMES[rarity],
+              chance: Number(((def.plane ?? {}) as Record<string, number | undefined>)[rarity] ?? 0),
+              models: pool.length,
+              fresh: pool.filter((id) => !owned.has(id)).length,
+            };
+          })
           .filter((entry) => entry.chance > 0 && entry.models > 0),
       };
     }),
+    planesAllOwned: PLANE_ORDER.every((id) => owned.has(id)),
+    planesFound: PLANE_ORDER.filter((id) => owned.has(id)).length,
+    planesTotal: PLANE_ORDER.length,
   };
 }
 
@@ -193,7 +234,10 @@ export function openBox(sql: SqlStorage, playerId: string, idemKey: string, boxI
 
     // 16 байт: розыгрышу нужно не больше 10, остальное — запас на будущие поля.
     const seed = crypto.randomUUID().replace(/-/g, '');
-    const roll = rollBox(def, seed);
+    // Набор «что уже собрано» читается до броска: rollPlane выдаёт только то,
+    // чего у игрока нет, поэтому повторных машин бокс физически не содержит.
+    const owned = ownedPlanes(sql, playerId);
+    const roll = rollBox(def, seed, owned);
 
     for (const drop of roll.drops) {
       applyResourceDelta(sql, {

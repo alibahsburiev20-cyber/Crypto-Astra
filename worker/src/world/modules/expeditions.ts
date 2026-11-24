@@ -82,9 +82,19 @@ function viewOf(sql: SqlStorage, row: Record<string, unknown>): ExpeditionView {
   };
 }
 
-export function listExpeditions(sql: SqlStorage, playerId: string): { active: ExpeditionView | null; recent: ExpeditionView[] } {
+/**
+ * Активные и завершённые рейсы.
+ *
+ * `active` — **массив**: сколько кораблей в воздухе, столько и записей. Раньше
+ * здесь стоял LIMIT 1, и второй рейс игрока просто не попадал в интерфейс:
+ * флот летал, а «Мостик» показывал один борт. Порядок — по времени старта,
+ * чтобы клиенту не нужно было сортировать.
+ */
+export function listExpeditions(sql: SqlStorage, playerId: string): {
+  active: ExpeditionView[]; recent: ExpeditionView[]; activeCount: number;
+} {
   const activeRows = sql.exec(
-    `SELECT * FROM expeditions WHERE player_id = ? AND status IN ('flying', 'waiting_choice') ORDER BY started_at DESC LIMIT 1`,
+    `SELECT * FROM expeditions WHERE player_id = ? AND status IN ('flying', 'waiting_choice') ORDER BY started_at`,
     playerId,
   ).toArray();
   const recent = sql.exec(
@@ -92,8 +102,9 @@ export function listExpeditions(sql: SqlStorage, playerId: string): { active: Ex
     playerId,
   ).toArray();
   return {
-    active: activeRows.length ? viewOf(sql, activeRows[0]) : null,
+    active: activeRows.map((r) => viewOf(sql, r)),
     recent: recent.map((r) => viewOf(sql, r)),
+    activeCount: activeRows.length,
   };
 }
 
@@ -111,6 +122,11 @@ export function startExpedition(
     const def = SHIPS[ship.type];
     if (!def) throw new ApiError(400, 'bad_expedition');
     if (ship.durability <= 0) throw new ApiError(409, 'ship_broken');
+    // Занятость считается по кораблю, а не по игроку: флот из шести бортов
+    // умеет летать шестью рейсами. Общий лимит не нужен — он следует из числа
+    // кораблей, а жадность до «фарма» остужает суточный порог полной награды
+    // (EXPEDITION_FULL_REWARD) и топливо: параллельных рейсов столько, сколько
+    // топлива хватило бы на каждый.
     if (ship.status !== 'idle') throw new ApiError(409, 'ship_busy');
     const busy = sql.exec(
       `SELECT 1 FROM expeditions WHERE ship_id = ? AND status IN ('flying', 'waiting_choice') LIMIT 1`,

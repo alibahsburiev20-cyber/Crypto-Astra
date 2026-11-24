@@ -77,13 +77,13 @@ export class World extends DurableObject<Env> {
     return this.ctx.storage.transactionSync(() => claim(this.sql, playerId, idemKey, Date.now()));
   }
 
-  async getState(playerId: string, premium = false) {
+  async getState(playerId: string, premium = false, shipId: string | null = null) {
     const now = Date.now();
     this.lastSeen = now;
     const state = this.ctx.storage.transactionSync(() => {
       // Premium забирает готовый бонус сам: игрок не должен помнить про кнопку.
       const claimed = premium ? autoClaim(this.sql, playerId, now) : null;
-      const built = buildState(this.sql, playerId, now, premium);
+      const built = buildState(this.sql, playerId, now, premium, shipId);
       return claimed?.ok
         ? { ...built, autoClaimed: { astra: claimed.reward, nextClaimAt: claimed.nextClaimAt } }
         : { ...built, autoClaimed: null };

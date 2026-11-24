@@ -32,7 +32,12 @@ export async function isPremium(env: Env, a: AuthContext): Promise<boolean> {
   }
 }
 
-export async function me(env: Env, a: AuthContext): Promise<Response> {
+/**
+ * `shipId` (`?ship=`) — для какого корабля планировщик считает планеты и
+ * варианты рейса. Экран «Куда летим» позволяет выбрать любой борт флота, а
+ * радиус, расход и груз у всех разные.
+ */
+export async function me(env: Env, a: AuthContext, shipId: string | null = null): Promise<Response> {
   // server_time нужен клиенту, чтобы таймеры не зависели от часов устройства.
   const premium = await isPremium(env, a);
   // Срок Premium дублируется в мир: по нему сортируется гильдия и рисуется значок.
@@ -42,7 +47,10 @@ export async function me(env: Env, a: AuthContext): Promise<Response> {
       await world(env, a).syncPremium(a.userId, owned.premiumUntil);
     } catch { /* платежи выключены или D1 недоступна — игра идёт без значка */ }
   }
-  return json({ world_id: a.worldId, server_time: Date.now(), premium, ...(await world(env, a).getState(a.userId, premium)) });
+  return json({
+    world_id: a.worldId, server_time: Date.now(), premium,
+    ...(await world(env, a).getState(a.userId, premium, shipId)),
+  });
 }
 
 // ── Профиль: позывной и косметика (этап 17) ─────────────────────────────────

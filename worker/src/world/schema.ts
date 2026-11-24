@@ -191,7 +191,9 @@ export const WORLD_SCHEMA: string[] = [
      PRIMARY KEY (player_id, plane))`,
   `CREATE INDEX IF NOT EXISTS idx_player_planes_player ON player_planes (player_id)`,
   // Патрули звена (этап 6): seed хранится, чтобы находку можно было перепроверить.
-  // Награды в экономике нет — ни ASTRA, ни ресурсов.
+  // Награды (ресурсы и опыт за вылет) начисляются при сдаче и живут в `ledger`;
+  // в этой таблице — только полёт и его итог, поэтому строка не меняется после
+  // возвращения борта.
   `CREATE TABLE IF NOT EXISTS plane_patrols (
      id TEXT PRIMARY KEY, player_id TEXT NOT NULL REFERENCES players (id), plane TEXT NOT NULL,
      seed TEXT NOT NULL, started_at INTEGER NOT NULL, ends_at INTEGER NOT NULL,

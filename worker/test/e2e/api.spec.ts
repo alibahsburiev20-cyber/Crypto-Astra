@@ -179,6 +179,93 @@ if (!BASE) {
       expect(me.data.balances.astra).toBe(505);
     });
 
+    it('несколько кораблей летят параллельно: active — массив', async () => {
+      // Один рейс уже идёт (state.expeditionId) — проверяем форму ответа и то,
+      // что второй корабль не блокируется «игрок уже летит»: блокируется только
+      // занятый борт.
+      const me = await api('/me?ship=' + encodeURIComponent(state.shipId));
+      expect(me.status).toBe(200);
+      expect(Array.isArray(me.data.expeditions.active)).toBe(true);
+      expect(typeof me.data.expeditions.activeCount).toBe('number');
+      expect(me.data.expeditions.active.every((x: { shipId: string }) => x.shipId === state.shipId)).toBe(true);
+      // Тот же корабль второй раз — занято; чужого корабля у тестового игрока нет,
+      // поэтому параллельность здесь видна именно в форме ответа.
+      const again = await api('/expeditions/start', {
+        method: 'POST', key: 'e2e-start-again',
+        body: { shipId: state.shipId, planet: 'cinder', kind: 'short' },
+      });
+      expect(again.status).toBe(409);
+      expect(again.data.error).toBe('ship_busy');
+      // Неизвестный корабль в ?ship= не ломает состояние: сервер считается с
+      // первым бортом, а не падает.
+      const fallback = await api('/me?ship=no-such-ship');
+      expect(fallback.status).toBe(200);
+      expect(fallback.data.planets.length).toBe(me.data.planets.length);
+    });
+
+    it('гараж: шесть ячеек — по числу кораблей', async () => {
+      const g = await api('/garage');
+      expect(g.status).toBe(200);
+      expect(g.data.max).toBe(6);
+      expect(g.data.base).toBe(3);
+      expect(g.data.used).toBe(1);
+      // Лестница цен не длиннее потолка: покупатель видит всю дорогу до конца.
+      expect(g.data.nextPrices.length).toBeLessThanOrEqual(g.data.max - g.data.base);
+    });
+
+    it('звено: слоты, патруль и закладка — без ASTRA', async () => {
+      const before = await api('/planes');
+      expect(before.status).toBe(200);
+      expect(before.data.slots).toBe(4);
+      expect(Array.isArray(before.data.active)).toBe(true);
+      expect(before.data.freeSlots).toBe(before.data.slots - before.data.flying);
+      // Стартовый «Стриж» есть всегда: на нём и летаем.
+      const start = await api('/planes/patrol', { method: 'POST', key: 'e2e-patrol', body: { plane: 'strizh' } });
+      expect(start.status).toBe(200);
+      expect(start.data.patrol.plane).toBe('strizh');
+      expect(start.data.patrol.salvage.length).toBeGreaterThan(0);
+      // Второй вылет той же машины — занято; чужая машина — запрещено.
+      expect((await api('/planes/patrol', { method: 'POST', key: 'e2e-patrol-2', body: { plane: 'strizh' } })).data.error)
+        .toBe('patrol_busy');
+      expect((await api('/planes/patrol', { method: 'POST', key: 'e2e-patrol-3', body: { plane: 'feniks' } })).status)
+        .toBe(409);
+      // Ранняя сдача — patrol_flying. Retry-After прилетает только с маршрутов,
+      // которые бросают ApiError сами; из DO идёт код строкой, поэтому клиенту
+      // служит endsAt в состоянии, а не заголовок.
+      const early = await api('/planes/patrol/claim', { method: 'POST', key: 'e2e-patrol-claim', body: {} });
+      expect(early.status).toBe(409);
+      expect(early.data.error).toBe('patrol_flying');
+      const after = await api('/me');
+      expect(after.data.planes.active.length).toBe(1);
+      expect(after.data.planes.active[0].ready).toBe(false);
+      // Начислений не было: закладка отдаётся только при сдаче.
+      expect(after.data.planes.patrols).toBe(0);
+      expect(after.data.expeditions.active.length).toBe(1);
+    });
+
+    it('боксы честно показывают, сколько машин ещё не собрано', async () => {
+      // Открытие бокса тратит суточный таймер, поэтому здесь — только список:
+      // анти-дубль проверяется по fresh-счётчикам, а сама выдача — в юнит-тестах
+      // (400 открытий, ни одного повтора).
+      const list = await api('/boxes');
+      expect(list.status).toBe(200);
+      expect(list.data.planesTotal).toBe(8);
+      expect(list.data.planesFound).toBeGreaterThanOrEqual(1);
+      expect(list.data.planesAllOwned).toBe(false);
+      const daily = list.data.boxes.find((b: { id: string }) => b.id === 'daily');
+      const common = daily.planeChances.find((c: { rarity: string }) => c.rarity === 'common');
+      // Стартовый «Стриж» уже в ангаре — значит из четырёх обычных свежих три.
+      expect(common.models).toBe(4);
+      expect(common.fresh).toBe(common.models - 1);
+      const planes = await api('/planes');
+      const strizh = planes.data.models.find((m: { id: string }) => m.id === 'strizh');
+      expect(strizh.count).toBe(1);
+      // У собранной модели есть закладка вылета: без неё патруль был бы безделушкой.
+      expect(strizh.salvage.length).toBeGreaterThan(0);
+      expect(strizh.salvageText.length).toBeGreaterThan(0);
+      expect(strizh.xp).toBeGreaterThan(0);
+    });
+
     it('чужое событие и отсутствие ключа идемпотентности дают понятные коды', async () => {
       const choose = await api('/expeditions/choose-event', {
         method: 'POST', key: 'e2e-choose', body: { expeditionId: 'nope', choiceId: 'bypass' },

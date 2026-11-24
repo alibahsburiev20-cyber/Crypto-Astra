@@ -3,6 +3,7 @@ import type { Env } from '../../src/env';
 import { requireAdmin } from '../../src/http/admin';
 import { describe, expect, it } from 'vitest';
 import { DAY_MS } from '../../src/shared/constants';
+import { SHIP_ORDER } from '../../src/shared/gameData';
 import { RUN_MS, makeField, MAX_SPEED } from '../../src/shared/minigame';
 import { applyDelta, getBalance } from '../../src/world/balances';
 import { adminSummary, grantAstra, setFrozen } from '../../src/world/modules/adminWorld';
@@ -30,8 +31,13 @@ function world(astra = 5000) {
 }
 
 describe('гараж: ячейки и покупка кораблей', () => {
-  it('база три, Premium добавляет одну, потолок восемь', () => {
+  it('база три, Premium добавляет одну, потолок = размер флота', () => {
     const { sql } = world();
+    // Ячеек ровно столько, сколько кораблей существует: восьмая клетка при шести
+    // корпусах была бы вечным пустым слотом, за который просят ASTRA.
+    expect(GARAGE_MAX).toBe(6);
+    expect(GARAGE_MAX).toBe(SHIP_ORDER.length);
+    expect(GARAGE_BASE + (GARAGE_MAX - GARAGE_BASE)).toBe(GARAGE_MAX);
     expect(garageSlots(sql, 'p1', false)).toBe(GARAGE_BASE);
     expect(garageSlots(sql, 'p1', true)).toBe(GARAGE_BASE + 1);
     const view = garageView(sql, 'p1', true);

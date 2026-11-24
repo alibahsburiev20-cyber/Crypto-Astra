@@ -1199,6 +1199,13 @@ button.ghost, .cta-small { min-height: 36px; }
 /* Cloudflare рисует сюда iframe фиксированной высоты: держим место заранее,
    иначе виджет прыгал бы по экрану и сдвигал кнопку. */
 .ts-host { min-height: 68px; max-width: 320px; }
+.bonus-check.is-done { border-style: solid; border-color: rgba(61, 220, 132, .45); background: rgba(61, 220, 132, .07); }
+.bonus-check.is-error { border-style: solid; border-color: rgba(240, 102, 102, .5); background: rgba(240, 102, 102, .07); }
+.bonus-check-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.bonus-check-actions button { font-size: 12px; padding: 6px 10px; }
+/* Виджет в состоянии ошибки прячем, но node живёт дальше: «Повторить» обязан
+   найти тот же контейнер, иначе challenge starting заново лечится только F5. */
+.ts-wrap.is-hidden { display: none; }
 .ts-host iframe { display: block; }
 .bonus-check-block { margin-bottom: 4px; }
 
@@ -1381,6 +1388,31 @@ body.is-box-stage { overflow: hidden; }
 }
 
 /* ── Авиазвено (этап 6) ─────────────────────────────────── */
+/* Экран «Рейс»: сначала то, что уже в воздухе, потом планировщик следующего
+   борта. Кораблей может быть несколько — они летят параллельно. */
+.flight-live { display: grid; gap: 10px; margin-bottom: 14px; }
+.expedition-card { display: grid; gap: 10px; }
+.expedition-head {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center;
+}
+.expedition-who { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.expedition-who h3 { margin: 0; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.expedition-who p { margin: 0; font-size: 11px; }
+.expedition-ship { image-rendering: pixelated; flex: 0 0 auto; }
+.expedition-head > p { margin: 0; font-size: 11px; text-align: right; }
+/* Выбор корабля в планировщике: чипы по числу свободных бортов. */
+.ship-picker { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0 2px; }
+.picker-label { font-size: 11px; color: var(--muted); }
+.ship-chip {
+  display: inline-flex; align-items: center; gap: 6px; min-width: 0; padding: 6px 10px;
+  border-radius: 999px; border: 1px solid rgba(201, 206, 214, .18);
+  background: rgba(11, 18, 32, .72); color: inherit; font-size: 12px; cursor: pointer;
+}
+.ship-chip.selected { border-color: rgba(53, 214, 232, .6); box-shadow: 0 0 0 1px rgba(53, 214, 232, .25); }
+.ship-chip span { min-width: 0; overflow-wrap: anywhere; }
+.ship-chip em { font-style: normal; font-size: 10px; color: var(--muted); }
+.ship-chip img { image-rendering: pixelated; flex: 0 0 auto; }
+
 .plane-block { margin-top: 12px; }
 .plane-block h3 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .plane-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
@@ -1410,6 +1442,27 @@ body.is-box-stage { overflow: hidden; }
   align-items: center; margin: 10px 0; position: relative; overflow: hidden;
 }
 .plane-patrol.is-ready { border-color: rgba(61, 220, 132, .45); background: rgba(61, 220, 132, .06); }
+/* Несколько бортов в воздухе: карточка патруля стала списком, поэтому
+   одноколоночная раскладка и заголовок с кнопкой сдачи. */
+.plane-patrol { grid-template-columns: minmax(0, 1fr); align-items: start; gap: 8px; }
+.plane-patrol-head {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between;
+}
+.plane-patrol-head h3 { margin: 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.plane-patrol-head button { padding: 8px 12px; font-size: 12px; }
+.plane-patrol-list { display: grid; gap: 8px; }
+.plane-patrol-row {
+  display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 10px; align-items: center;
+}
+.plane-patrol-row .plane-patrol-sky { height: 48px; }
+.plane-patrol-row .plane-patrol-art { top: 0; }
+.plane-patrol-name {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; font-weight: 700;
+}
+/* Закладка вылета — то, ради чего звено теперь летает. */
+.plane-salvage { font-size: 10px; color: #3ddc84; text-align: center; line-height: 1.3; }
+.plane-slot.is-flying { border-color: rgba(61, 220, 132, .45); }
+.plane-slot.is-flying .plane-art { opacity: .8; }
 .plane-patrol-sky {
   position: relative; height: 64px; border-radius: 10px; overflow: hidden;
   background: linear-gradient(90deg, rgba(11, 18, 32, .9), rgba(53, 214, 232, .14));
