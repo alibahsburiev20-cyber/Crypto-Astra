@@ -1,3 +1,5 @@
+import { DAY_MS } from './constants';
+
 // Каталог из концепции v2.1. Базовые количества награды в expeditionMath — стартовые:
 // в концепции задана форма формулы, но не целые «базовая_стоимость» по планетам.
 
@@ -193,6 +195,72 @@ export const RECIPES: Record<RecipeId, Recipe> = {
 };
 
 export const RECIPE_ORDER: RecipeId[] = ['energy_cell', 'circuit', 'alloy_plate'];
+
+// ── Боксы (этап 5) ───────────────────────────────────────────────────────────
+// Два бесплатных (дневной и недельный) и два платных. Платные — сток ASTRA:
+// ресурсы из них всегда дешевле цены бокса, иначе получился бы печатный станок
+// «купил бокс → продал ресурсы на рынке». Это проверяется тестом
+// `boxes.test.ts` по `RESOURCE_BASE_PRICES`, а не держится на обещаниях.
+//
+// Доходность подобрана ниже рейсов: короткий рейс приносит 2 единицы за 15 минут
+// (за сутки их набегает 10–30), дневной бокс — 3–5 единиц за сутки, недельный —
+// 11–15 за неделю. Рейс вдобавок даёт ASTRA, очки и опыт, бокс — только ресурсы.
+export type BoxId = 'daily' | 'weekly' | 'crate_supply' | 'crate_pro';
+
+export interface BoxDef {
+  id: BoxId;
+  name: string;
+  hint: string;
+  /** 0 — бесплатный. */
+  price: number;
+  /** 0 — без таймера. */
+  cooldownMs: number;
+  /** Сколько единиц ресурсов выпадает: [минимум, максимум]. */
+  units: [number, number];
+  pool: string[];
+  /** Компоненты: count попыток, у каждой шанс chance. */
+  components?: { count: number; chance: number };
+  rare?: { resource: string; chance: number };
+}
+
+/** Компоненты, которые могут выпасть из бокса. */
+export const BOX_COMPONENTS = ['energy_cell', 'circuit', 'alloy_plate'] as const;
+
+export const BOXES: Record<BoxId, BoxDef> = {
+  daily: {
+    id: 'daily', name: 'Дневной бокс', hint: 'Раз в сутки, бесплатно',
+    price: 0, cooldownMs: DAY_MS, units: [3, 5],
+    pool: ['iron_ore', 'copper_ore', 'silicon', 'ice'],
+    components: { count: 1, chance: 0.1 },
+  },
+  weekly: {
+    id: 'weekly', name: 'Недельный бокс', hint: 'Раз в неделю, бесплатно',
+    price: 0, cooldownMs: 7 * DAY_MS, units: [11, 15],
+    pool: ['iron_ore', 'copper_ore', 'silicon', 'ice', 'helium3', 'titanium', 'crystal'],
+    components: { count: 1, chance: 1 },
+    rare: { resource: 'astralite', chance: 0.15 },
+  },
+  crate_supply: {
+    id: 'crate_supply', name: 'Ящик снабжения', hint: 'Ресурсы первого сектора',
+    price: 280, cooldownMs: 0, units: [16, 22],
+    pool: ['iron_ore', 'copper_ore', 'silicon', 'ice'],
+    components: { count: 1, chance: 0.3 },
+  },
+  crate_pro: {
+    id: 'crate_pro', name: 'Грузовой контейнер', hint: 'Ресурсы, компоненты и шанс на астралит',
+    price: 850, cooldownMs: 0, units: [30, 38],
+    pool: ['iron_ore', 'copper_ore', 'silicon', 'ice', 'helium3', 'titanium', 'crystal'],
+    components: { count: 2, chance: 0.55 },
+    rare: { resource: 'astralite', chance: 0.2 },
+  },
+};
+
+export const BOX_ORDER: BoxId[] = ['daily', 'weekly', 'crate_supply', 'crate_pro'];
+
+export function isBoxId(value: string): value is BoxId {
+  return (BOX_ORDER as string[]).includes(value);
+}
+
 
 export function isRecipeId(value: string): value is RecipeId {
   return (RECIPE_ORDER as string[]).includes(value);

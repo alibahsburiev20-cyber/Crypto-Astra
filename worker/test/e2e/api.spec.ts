@@ -426,5 +426,86 @@ if (!BASE) {
       expect((await api('/social', { auth: false })).status).toBe(401);
       expect((await api('/guild', { auth: false })).status).toBe(401);
     });
+
+    // Боксы идут последними в файле: они меняют баланс ASTRA и склад ресурсов,
+    // а проверки выше опираются на конкретные суммы.
+    it('боксы: дневной открывается, повтор упирается в таймер', async () => {
+      const list = await api('/boxes');
+      expect(list.status).toBe(200);
+      expect(list.data.boxes.map((b: any) => b.id)).toEqual(['daily', 'weekly', 'crate_supply', 'crate_pro']);
+      const daily = list.data.boxes.find((b: any) => b.id === 'daily');
+      expect(daily.ready).toBe(true);
+      expect(daily.price).toBe(0);
+      expect(String(daily.sprite)).toBe('/sprites/boxes/daily.png');
+
+      const astraBefore = (await api('/me')).data.balances.astra;
+      const open = await api('/boxes/open', { method: 'POST', key: 'e2e-box-daily-1', body: { box: 'daily' } });
+      expect(open.status).toBe(200);
+      expect(open.data.box).toBe('daily');
+      expect(open.data.drops.length).toBeGreaterThan(0);
+      const units = open.data.drops
+        .filter((d: any) => ['iron_ore', 'copper_ore', 'silicon', 'ice'].includes(d.resource))
+        .reduce((s: number, d: any) => s + d.amount, 0);
+      expect(units).toBe(open.data.units);
+
+      const me = await api('/me');
+      expect(me.data.balances.astra).toBe(astraBefore);
+      const resources = (me.data.resources || []).reduce((s: number, r: any) => s + r.amount, 0);
+      expect(resources).toBeGreaterThanOrEqual(units);
+
+      const again = await api('/boxes/open', { method: 'POST', key: 'e2e-box-daily-2', body: { box: 'daily' } });
+      expect(again.status).toBe(429);
+      expect(again.data.error).toBe('box_cooldown');
+      // Таймер виден в каталоге: клиент считает по нему, а не по заголовку.
+      const after = await api('/boxes');
+      const dailyAfter = after.data.boxes.find((b: any) => b.id === 'daily');
+      expect(dailyAfter.ready).toBe(false);
+      expect(dailyAfter.nextOpenAt).toBeGreaterThan(0);
+    });
+
+    it('платный бокс списывает ASTRA и не открывается без денег', async () => {
+      // К этому месту игрок потратился на гильдию и рейсы — пополняем бюджет
+      // тем же админским начислением, что и в жизни (без него тест зависел бы
+      // от порядка проверок выше).
+      const top = await api('/admin/world/grant?world=w1', {
+        method: 'POST', auth: false, admin: true,
+        body: { player: email, astra: 2000, reason: 'e2e: бюджет на боксы' },
+      });
+      expect(top.status).toBe(200);
+      const before = (await api('/me')).data.balances.astra;
+
+      const paid = await api('/boxes/open', { method: 'POST', key: 'e2e-box-paid-1', body: { box: 'crate_supply' } });
+      expect(paid.status).toBe(200);
+      expect(paid.data.price).toBe(280);
+      expect((await api('/me')).data.balances.astra).toBe(before - 280);
+
+      const bad = await api('/boxes/open', { method: 'POST', key: 'e2e-box-bad', body: { box: 'ghost' } });
+      expect(bad.status).toBe(400);
+      expect(bad.data.error).toBe('bad_box');
+      expect((await api('/me')).data.balances.astra).toBe(before - 280);
+
+      const pro = await api('/boxes/open', { method: 'POST', key: 'e2e-box-pro-1', body: { box: 'crate_pro' } });
+      expect(pro.status).toBe(200);
+      expect(pro.data.price).toBe(850);
+      const left = (await api('/me')).data.balances.astra;
+      expect(left).toBe(before - 280 - 850);
+
+      // Дожимаем баланс ниже цены дешёвого бокса: сколько именно останется,
+      // зависит от того, что успели потратить проверки выше, поэтому цикл, а не
+      // жёсткая цифра.
+      let astra = left;
+      let n = 2;
+      while (astra >= 850) {
+        const again = await api('/boxes/open', { method: 'POST', key: `e2e-box-pro-${n++}`, body: { box: 'crate_pro' } });
+        expect(again.status).toBe(200);
+        astra -= 850;
+        expect((await api('/me')).data.balances.astra).toBe(astra);
+      }
+
+      const poor = await api('/boxes/open', { method: 'POST', key: 'e2e-box-poor', body: { box: 'crate_supply' } });
+      expect(poor.status).toBe(409);
+      expect(poor.data.error).toBe('insufficient_funds');
+      expect((await api('/me')).data.balances.astra).toBe(astra);
+    });
   });
 }
