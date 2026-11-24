@@ -287,6 +287,41 @@ export const PLANES: Record<PlaneId, PlaneDef> = {
 
 export const PLANE_ORDER: PlaneId[] = ['strizh', 'osa', 'kolibri', 'skat', 'sokol', 'manta', 'prizrak', 'feniks'];
 
+/** От обычных к легендарным: порядок важен для розыгрыша и для полки. */
+export const PLANE_RARITY_ORDER: PlaneRarity[] = ['common', 'rare', 'legendary'];
+
+export function planesOfRarity(rarity: PlaneRarity): PlaneId[] {
+  return PLANE_ORDER.filter((id) => PLANES[id].rarity === rarity);
+}
+
+/**
+ * Патруль: машина летает сама и иногда находит ещё одну машину.
+ *
+ * Это единственная «летающая» механика звена — и она намеренно **не приносит ни
+ * ASTRA, ни ресурсов**. Иначе звеном можно было бы фармить экономику в обход
+ * рейсов: машин может быть восемь, а рейс у флота один на корабль.
+ *
+ * Полёт долгий — это и есть тормоз: 6 / 12 / 24 часа в зависимости от редкости.
+ * Один патруль на игрока, поэтому даже у самого усердного максимум 4 вылета в
+ * сутки обычными машинами, а не конвейер. Чем реже машина, тем выше шанс
+ * находки: редкая ищет лучше, легендарная ищет легендарное.
+ */
+export const PATROL: Record<PlaneRarity, { ms: number; find: number }> = {
+  common: { ms: 6 * 3600 * 1000, find: 0.04 },
+  rare: { ms: 12 * 3600 * 1000, find: 0.08 },
+  legendary: { ms: 24 * 3600 * 1000, find: 0.15 },
+};
+
+/**
+ * Какую редкость находит патруль: своя ступень с большим весом, соседние — реже.
+ * Легендарная машина ищет легендарные чаще всех — в этом и смысл владеть ею.
+ */
+export const PATROL_FIND: Record<PlaneRarity, { rarity: PlaneRarity; weight: number }[]> = {
+  common: [{ rarity: 'common', weight: 88 }, { rarity: 'rare', weight: 12 }],
+  rare: [{ rarity: 'rare', weight: 70 }, { rarity: 'common', weight: 25 }, { rarity: 'legendary', weight: 5 }],
+  legendary: [{ rarity: 'legendary', weight: 60 }, { rarity: 'rare', weight: 40 }],
+};
+
 export const PLANE_RARITY_NAMES: Record<PlaneRarity, string> = {
   common: 'обычная',
   rare: 'редкая',
@@ -296,6 +331,9 @@ export const PLANE_RARITY_NAMES: Record<PlaneRarity, string> = {
 export function isPlaneId(value: string): value is PlaneId {
   return (PLANE_ORDER as string[]).includes(value);
 }
+
+/** Стартовая машина: без неё патруль недоступен, пока не повезёт с боксом. */
+export const STARTER_PLANE: PlaneId = 'strizh';
 
 /** Спрайт машины. Путь из id: клиент не надо править при добавлении модели. */
 export function planeSprite(id: PlaneId): string {
@@ -328,11 +366,18 @@ export interface BoxDef {
   components?: { count: number; chance: number };
   rare?: { resource: string; chance: number };
   /**
-   * Шанс найти машину звена. Пул — какие модели может выдать этот бокс.
-   * Коллекция ничего не стоит в ASTRA, поэтому шанс не влияет на «печатный
+   * Шанс найти машину звена — **по редкости**, отдельным числом на ступень.
+   * Это абсолютные шансы за одно открытие, а не доля: если в `crate_pro` обычная
+   * 3 % и легендарная 0.4 %, столько и есть. Ноль или пропуск — ступень из бокса
+   * не выпадает вовсе.
+   *
+   * Коллекция ничего не стоит в ASTRA, поэтому шансы не влияют на «печатный
    * станок» платных боксов: их ресурсная часть считается отдельно.
+   *
+   * Шансы здесь намеренно крошечные (0.4–4 % против 6–36 % в первом выпуске):
+   * коллекция должна быть длинным охотничьим треком, а не вечерним лутом.
    */
-  plane?: { chance: number; pool: PlaneId[] };
+  plane?: { common?: number; rare?: number; legendary?: number };
 }
 
 /** Компоненты, которые могут выпасть из бокса. */
@@ -344,7 +389,7 @@ export const BOXES: Record<BoxId, BoxDef> = {
     price: 0, cooldownMs: DAY_MS, units: [3, 5],
     pool: ['iron_ore', 'copper_ore', 'silicon', 'ice'],
     components: { count: 1, chance: 0.1 },
-    plane: { chance: 0.06, pool: ['strizh', 'osa', 'kolibri', 'skat'] },
+    plane: { common: 0.008 },
   },
   weekly: {
     id: 'weekly', name: 'Недельный бокс', hint: 'Раз в неделю, бесплатно',
@@ -352,16 +397,16 @@ export const BOXES: Record<BoxId, BoxDef> = {
     pool: ['iron_ore', 'copper_ore', 'silicon', 'ice', 'helium3', 'titanium', 'crystal'],
     components: { count: 1, chance: 1 },
     rare: { resource: 'astralite', chance: 0.15 },
-    // Недельный — единственный бесплатный шанс на легендарную машину: иначе
-    // коллекцию нельзя было бы закрыть, не потратив ASTRA ни разу.
-    plane: { chance: 0.28, pool: [...PLANE_ORDER] },
+    // Недельный — шанс на редкую машину бесплатно. Легендарной здесь нет: она
+    // только в дорогом контейнере и в патруле с редкой машины.
+    plane: { common: 0.04, rare: 0.008 },
   },
   crate_supply: {
     id: 'crate_supply', name: 'Ящик снабжения', hint: 'Ресурсы первого сектора',
     price: 280, cooldownMs: 0, units: [16, 22],
     pool: ['iron_ore', 'copper_ore', 'silicon', 'ice'],
     components: { count: 1, chance: 0.3 },
-    plane: { chance: 0.12, pool: ['strizh', 'osa', 'kolibri', 'skat'] },
+    plane: { common: 0.015 },
   },
   crate_pro: {
     id: 'crate_pro', name: 'Грузовой контейнер', hint: 'Ресурсы, компоненты и шанс на астралит',
@@ -369,7 +414,7 @@ export const BOXES: Record<BoxId, BoxDef> = {
     pool: ['iron_ore', 'copper_ore', 'silicon', 'ice', 'helium3', 'titanium', 'crystal'],
     components: { count: 2, chance: 0.55 },
     rare: { resource: 'astralite', chance: 0.2 },
-    plane: { chance: 0.35, pool: [...PLANE_ORDER] },
+    plane: { common: 0.03, rare: 0.008, legendary: 0.004 },
   },
 };
 

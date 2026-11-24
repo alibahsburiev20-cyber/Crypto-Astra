@@ -3,6 +3,7 @@ import type { Env } from '../env';
 import { runDueJobs } from './jobs';
 import { autoClaim, claim, type ClaimResult } from './modules/claim';
 import { boxesHistory, boxesView, openBox } from './modules/boxes';
+import { claimPatrol, planesView, startPatrol } from './modules/planes';
 import { startCraft } from './modules/crafting';
 import { cancelExpedition, chooseExpeditionEvent, startExpedition } from './modules/expeditions';
 import { createPlayer } from './modules/players';
@@ -109,6 +110,23 @@ export class World extends DurableObject<Env> {
     const result = this.ctx.storage.transactionSync(() => openBox(this.sql, playerId, idemKey, boxId, now));
     await this.arm();
     return result;
+  }
+
+  // Авиазвено: полка и патруль. Патруль — транзакция без наград в экономике,
+  // поэтому планировщик будить не нужно: результат забирает сам игрок.
+  getPlanes(playerId: string) {
+    const now = Date.now();
+    return this.ctx.storage.transactionSync(() => planesView(this.sql, playerId, now));
+  }
+
+  async startPatrol(playerId: string, idemKey: string, planeId: string) {
+    const now = Date.now();
+    return this.ctx.storage.transactionSync(() => startPatrol(this.sql, playerId, idemKey, planeId, now));
+  }
+
+  async claimPatrol(playerId: string, idemKey: string) {
+    const now = Date.now();
+    return this.ctx.storage.transactionSync(() => claimPatrol(this.sql, playerId, idemKey, now));
   }
 
   async installModule(playerId: string, idemKey: string, body: { shipId: string; module: string }) {

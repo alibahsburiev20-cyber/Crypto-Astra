@@ -190,6 +190,14 @@ export const WORLD_SCHEMA: string[] = [
      first_at INTEGER NOT NULL, last_at INTEGER NOT NULL,
      PRIMARY KEY (player_id, plane))`,
   `CREATE INDEX IF NOT EXISTS idx_player_planes_player ON player_planes (player_id)`,
+  // Патрули звена (этап 6): seed хранится, чтобы находку можно было перепроверить.
+  // Награды в экономике нет — ни ASTRA, ни ресурсов.
+  `CREATE TABLE IF NOT EXISTS plane_patrols (
+     id TEXT PRIMARY KEY, player_id TEXT NOT NULL REFERENCES players (id), plane TEXT NOT NULL,
+     seed TEXT NOT NULL, started_at INTEGER NOT NULL, ends_at INTEGER NOT NULL,
+     status TEXT NOT NULL DEFAULT 'flying' CHECK (status IN ('flying', 'done')),
+     found TEXT, claimed_at INTEGER)`,
+  `CREATE INDEX IF NOT EXISTS idx_plane_patrols_player ON plane_patrols (player_id, status)`,
   `CREATE TRIGGER IF NOT EXISTS ledger_no_update BEFORE UPDATE ON ledger
      BEGIN SELECT RAISE(ABORT, 'ledger is append-only'); END`,
   `CREATE TRIGGER IF NOT EXISTS ledger_no_delete BEFORE DELETE ON ledger

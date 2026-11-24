@@ -1,11 +1,12 @@
 import {
-  BOXES, BOX_COMPONENTS, BOX_ORDER, PLANES, PLANE_ORDER, PLANE_RARITY_NAMES, RESOURCE_NAMES,
-  isBoxId, planeSprite, type BoxDef, type BoxId, type PlaneId,
+  BOXES, BOX_COMPONENTS, BOX_ORDER, PLANES, PLANE_RARITY_NAMES, PLANE_RARITY_ORDER, RESOURCE_NAMES,
+  isBoxId, planeSprite, planesOfRarity, type BoxDef, type BoxId, type PlaneId, type PlaneRarity,
 } from '../../shared/gameData';
+import { grantPlane } from './planes';
 import { applyDelta, getBalance } from '../balances';
 import { ApiError } from '../errors';
 import { withIdempotency } from '../idempotency';
-import { seedUnit } from './expeditionMath';
+import { seedUnit, seedUnit16 } from './expeditionMath';
 import { applyResourceDelta, assertPlayable } from './maintenance';
 import { playerExists } from './players';
 
@@ -46,6 +47,8 @@ export interface BoxView {
   nextOpenAt: number;
   ready: boolean;
   opens: number;
+  /** Шансы машин звена по редкости — показываем их честно, они крошечные. */
+  planeChances: { rarity: PlaneRarity; rarityName: string; chance: number; models: number }[];
 }
 
 /** Спрайт бокса. Путь строим из id, как и у ресурсов: клиент не правится. */
@@ -95,55 +98,35 @@ export function rollBox(def: BoxDef, seed: string): BoxRoll {
 
   // Машина звена. Свои байты (9 и 10), чтобы не сдвигать ресурсы: у уже
   // выданных боксов по сохранённому seed обязано воспроизводиться то же самое.
-  const plane = def.plane && seedUnit(seed, 9) < def.plane.chance
-    ? def.plane.pool[Math.min(def.plane.pool.length - 1, Math.floor(seedUnit(seed, 10) * def.plane.pool.length))]
-    : null;
-
-  return { units: total, drops, rare, components, plane: plane ?? null };
+  return { units: total, drops, rare, components, plane: rollPlane(def, seed) };
 }
 
-export interface PlaneView {
-  id: PlaneId;
-  name: string;
-  rarity: string;
-  rarityName: string;
-  hint: string;
-  sprite: string;
-  count: number;
-  firstAt: number;
-}
-
-/** Полка звена: все модели, включая ещё не найденные (count 0). */
-export function planesView(sql: SqlStorage, playerId: string): { found: number; total: number; models: PlaneView[] } {
-  const rows = sql.exec('SELECT plane, count, first_at FROM player_planes WHERE player_id = ?', playerId).toArray();
-  const byId = new Map(rows.map((r) => [String(r.plane), r]));
-  const models = PLANE_ORDER.map((id) => {
-    const def = PLANES[id];
-    const row = byId.get(id);
-    return {
-      id,
-      name: def.name,
-      rarity: def.rarity,
-      rarityName: PLANE_RARITY_NAMES[def.rarity],
-      hint: def.hint,
-      sprite: planeSprite(id),
-      count: row ? Number(row.count) : 0,
-      firstAt: row ? Number(row.first_at) : 0,
-    };
-  });
-  return { found: models.filter((m) => m.count > 0).length, total: PLANE_ORDER.length, models };
-}
-
-/** Начислить машину. Дубликаты копятся счётчиком — коллекция не «сгорает». */
-function grantPlane(sql: SqlStorage, playerId: string, plane: PlaneId, now: number): number {
-  const row = sql.exec('SELECT count FROM player_planes WHERE player_id = ? AND plane = ?', playerId, plane).toArray()[0];
-  const count = row ? Number(row.count) + 1 : 1;
-  sql.exec(
-    `INSERT INTO player_planes (player_id, plane, count, first_at, last_at) VALUES (?, ?, 1, ?, ?)
-     ON CONFLICT (player_id, plane) DO UPDATE SET count = count + 1, last_at = excluded.last_at`,
-    playerId, plane, now, now,
-  );
-  return count;
+/**
+ * Машина звена: отдельный бросок **по редкости**. Байты 9–10 — попадание в ступень
+ * (обычная проверяется первой, дальше редкая и легендарная), байт 11 — какая
+ * именно модель внутри ступени. Ресурсы эти байты не трогают: у них 0–8.
+ *
+ * Ступень бросается двумя байтами: на одном 256 значений, и шанс 0.4 % слипся бы
+ * с 0.8 %. Двух байтов хватает на квант 1/65536 = 0.0015 % — заявленный шанс и
+ * фактический совпадают с точностью до него.
+ */
+export function rollPlane(def: BoxDef, seed: string): PlaneId | null {
+  const cfg = def.plane;
+  if (!cfg) return null;
+  const roll = seedUnit16(seed, 9);
+  let acc = 0;
+  let tier: PlaneRarity | null = null;
+  for (const rarity of PLANE_RARITY_ORDER) {
+    const chance = Number((cfg as Record<string, number | undefined>)[rarity] ?? 0);
+    if (!chance) continue;
+    acc += chance;
+    if (roll < acc) { tier = rarity; break; }
+  }
+  if (!tier) return null;
+  const pool = planesOfRarity(tier);
+  if (!pool.length) return null;
+  const index = Math.min(pool.length - 1, Math.floor(seedUnit(seed, 11) * pool.length));
+  return pool[index];
 }
 
 export function boxesView(sql: SqlStorage, playerId: string, now: number): { boxes: BoxView[] } {
@@ -167,6 +150,14 @@ export function boxesView(sql: SqlStorage, playerId: string, now: number): { box
         nextOpenAt,
         ready: nextOpenAt <= now,
         opens: row ? Number(row.opens) : 0,
+        planeChances: PLANE_RARITY_ORDER
+          .map((rarity) => ({
+            rarity,
+            rarityName: PLANE_RARITY_NAMES[rarity],
+            chance: Number(((def.plane ?? {}) as Record<string, number | undefined>)[rarity] ?? 0),
+            models: planesOfRarity(rarity).length,
+          }))
+          .filter((entry) => entry.chance > 0 && entry.models > 0),
       };
     }),
   };
@@ -211,7 +202,7 @@ export function openBox(sql: SqlStorage, playerId: string, idemKey: string, boxI
 
     // Машина звена: пишется в ту же транзакцию, что и ресурсы, поэтому
     // «выпало в анимации, но не сохранилось» невозможно.
-    const plane = roll.plane ? grantPlane(sql, playerId, roll.plane, now) : 0;
+    const planeCount = roll.plane ? grantPlane(sql, playerId, roll.plane, now) : 0;
 
     sql.exec(
       `INSERT INTO box_state (player_id, box, last_open_at, opens) VALUES (?, ?, ?, ?)
@@ -242,8 +233,8 @@ export function openBox(sql: SqlStorage, playerId: string, idemKey: string, boxI
             rarityName: PLANE_RARITY_NAMES[PLANES[roll.plane].rarity],
             hint: PLANES[roll.plane].hint,
             sprite: planeSprite(roll.plane),
-            count: plane,
-            firstTime: plane === 1,
+            count: planeCount,
+            firstTime: planeCount === 1,
           }
           : null,
         astra,

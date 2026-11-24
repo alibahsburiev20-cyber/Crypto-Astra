@@ -1334,6 +1334,39 @@ body.is-box-stage { overflow: hidden; }
   box-shadow: 0 0 0 1px rgba(240, 138, 36, .18), 0 8px 20px rgba(240, 138, 36, .12);
 }
 .plane-find { font-size: 11px; }
+.plane-fly-btn { width: 100%; font-size: 11px; padding: 6px 8px; }
+.box-plane-chances { color: rgba(201, 206, 214, .75); font-size: 11px; }
+
+/* Патруль: машина реально «летит» — полоса неба, дрейф и мягкое качание.
+   Только transform/opacity: на телефоне так не дёргается раскладка. */
+.plane-patrol {
+  display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 12px;
+  align-items: center; margin: 10px 0; position: relative; overflow: hidden;
+}
+.plane-patrol.is-ready { border-color: rgba(61, 220, 132, .45); background: rgba(61, 220, 132, .06); }
+.plane-patrol-sky {
+  position: relative; height: 64px; border-radius: 10px; overflow: hidden;
+  background: linear-gradient(90deg, rgba(11, 18, 32, .9), rgba(53, 214, 232, .14));
+}
+.plane-patrol-sky::after {
+  content: ''; position: absolute; left: 0; right: 0; top: 50%; height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(201, 206, 214, .35), transparent);
+}
+.plane-patrol-art {
+  position: absolute; top: 8px; left: 50%; width: 48px; height: 48px;
+  image-rendering: pixelated; margin-left: -24px;
+  animation: plane-drift 3.6s ease-in-out infinite alternate;
+}
+.plane-patrol.is-ready .plane-patrol-art { animation: none; }
+.plane-patrol-info { min-width: 0; display: grid; gap: 4px; }
+.plane-patrol-info h3 { margin: 0; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.plane-patrol-info p { margin: 0; font-size: 11px; }
+.plane-patrol-info button { width: 100%; padding: 8px 10px; font-size: 12px; }
+.plane-timer { display: none; }
+@keyframes plane-drift {
+  from { transform: translate(-14px, 2px) rotate(-4deg); }
+  to { transform: translate(14px, -2px) rotate(4deg); }
+}
 @media (max-width: 520px) {
   .plane-grid { grid-template-columns: repeat(2, 1fr); }
 }

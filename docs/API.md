@@ -393,6 +393,9 @@ ASTRA из бокса не выпадает никогда.
 | Метод | Путь | Тело | Ответ |
 | --- | --- | --- | --- |
 | GET | `/boxes` | — | `boxes[]`, `history[]` |
+| GET | `/planes` | полка звена и текущий патруль |
+| POST | `/planes/patrol` | `{ plane }` + `Idempotency-Key` — отправить машину в патруль |
+| POST | `/planes/patrol/claim` | `Idempotency-Key` — забрать вернувшуюся машину |
 | POST | `/boxes/open` | `{ box }` + `Idempotency-Key` | `box`, `name`, `price`, `drops[]`, `units`, `rare`, `components`, `plane`, `astra`, `nextOpenAt`, `opens` |
 
 `boxes[]` — по записи на бокс: `id` (`daily`, `weekly`, `crate_supply`, `crate_pro`),
@@ -407,7 +410,31 @@ ASTRA из бокса не выпадает никогда.
 Открытие пишется в журнал: `box_purchase` (списание цены) и `box_open` (ресурсы),
 причина и seed сохраняются в `box_opens`, поэтому выдачу можно перепроверить.
 
-Поле `plane` — машина звена (этап 6) или `null`:
+### Авиазвено (этап 6)
+
+`GET /planes` → `{ found, total, models[], patrol, patrols, hours }`. В `models[]`
+все восемь машин, включая не найденные (`count: 0`): `{ id, name, rarity,
+rarityName, hint, sprite, count, firstAt, patrolMs, findChance }`.
+
+`POST /planes/patrol` `{ "plane": "strizh" }` отправляет **свою** машину в патруль.
+Один патруль на игрока. Длительность зависит от редкости: обычная 6 ч, редкая
+12 ч, легендарная 24 ч — это и есть ограничение на часту находок. Ответ:
+`{ patrol, planes }`.
+Коды: `bad_plane` (400), `plane_not_owned` (409), `patrol_busy` (409),
+`world_frozen` (423).
+
+`POST /planes/patrol/claim` забирает вернувшуюся машину: `{ found, plane, planes }`,
+где `found` — `{ id, name, rarity, rarityName, sprite, count, firstTime }` или
+`null`. Раньше времени — `patrol_flying` (409), без патруля — `no_patrol` (404).
+Сколько осталось ждать, клиент берёт из `patrol.endsAt`: ошибка из мира приходит
+строкой кода, поэтому `Retry-After` на этих 409 не уходит.
+
+**Патруль не даёт ни ASTRA, ни ресурсов, ни очков.** Это принципиально: машин
+может быть восемь, и если бы каждая привозила ресурсы, звено стало бы вторым
+флотом и обошло бы лимит рейсов. Звено — коллекция: находка патруля это только
+ещё одна машина (шанс 4 / 8 / 15 % за вылет по редкости).
+
+Поле `plane` в `/boxes/open` — машина звена (этап 6) или `null`:
 
 ```
 plane: { id, name, rarity, rarityName, hint, sprite, count, firstTime } | null

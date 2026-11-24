@@ -31,6 +31,17 @@ export function seedUnit(seed: string, byteIndex: number): number {
   return n / 255;
 }
 
+/**
+ * То же, что `seedUnit`, но по двум байтам: 65536 значений вместо 256. Нужно для
+ * очень маленьких шансов — на одном байте 0.4 % и 0.8 % слиплись бы в 1/256.
+ */
+export function seedUnit16(seed: string, byteIndex: number): number {
+  const hi = Number.parseInt(seed.slice(byteIndex * 2, byteIndex * 2 + 2), 16);
+  const lo = Number.parseInt(seed.slice(byteIndex * 2 + 2, byteIndex * 2 + 4), 16);
+  if (!Number.isFinite(hi) || !Number.isFinite(lo)) throw new Error('bad_seed');
+  return ((hi << 8) | lo) / 65535;
+}
+
 export function seedMultiplier(seed: string): number {
   return 0.8 + seedUnit(seed, 0) * 0.4;
 }

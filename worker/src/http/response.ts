@@ -50,6 +50,12 @@ export const STATUS_BY_CODE: Record<string, number> = {
   account_deleted: 403,
   garage_full: 409,
   garage_max: 409,
+  // Этап 6: авиазвено. Как и всё остальное, каждый код обязан быть здесь.
+  bad_plane: 400,
+  plane_not_owned: 409,
+  patrol_busy: 409,
+  patrol_flying: 409,
+  no_patrol: 404,
   // Срез 6: рынок.
   bad_resource: 400,
   bad_amount: 400,
