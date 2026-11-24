@@ -1,5 +1,5 @@
 import { FUEL_REGEN_MS, utcDay } from '../../shared/constants';
-import { MODULES, SHIPS, type ShipType } from '../../shared/gameData';
+import { MODULES, SHIPS, TANK_MODULES, type ModuleId, type ShipType } from '../../shared/gameData';
 import { applyDelta, getBalance } from '../balances';
 import { ApiError } from '../errors';
 import { cleanupIdempotency } from '../idempotency';
@@ -47,22 +47,36 @@ export function verifyStreak(checks: { day: number; ok: boolean }[], today: numb
 }
 
 export function fuelCap(sql: SqlStorage, playerId: string): number {
-  // Бак считается по лучшему кораблю флота. Топливная система расширяет бак
-  // своего корабля, поэтому уровень читается вместе с типом.
+  // Бак считается по лучшему кораблю флота. Топливная система и контур
+  // охлаждения расширяют бак своего корабля, поэтому модули читаются вместе с
+  // типом: два модуля на одном корпусе дают сумму обоих.
+  // Порядок параметров = порядок вопросов в SQL: сначала список модулей, потом
+  // игрок. Переставить их местами — и бак молча станет нулевым.
   const rows = sql.exec(
-    `SELECT s.type AS type,
-            COALESCE((SELECT level FROM ship_modules m WHERE m.ship_id = s.id AND m.module = 'fuel_system'), 0) AS tank_level
-       FROM ships s WHERE s.player_id = ?`,
-    playerId,
+    `SELECT s.id AS id, s.type AS type, m.module AS module, m.level AS level
+       FROM ships s
+       LEFT JOIN ship_modules m ON m.ship_id = s.id AND m.module IN (${TANK_MODULES.map(() => '?').join(', ')})
+      WHERE s.player_id = ?`,
+    ...TANK_MODULES, playerId,
   ).toArray();
-  let cap = 0;
+  // Бонус считаем по каждому модулю отдельно: у них разные perLevel, и правка
+  // формулы не должна требовать миграции.
+  const bonus = new Map<string, number>();
+  const types = new Map<string, ShipType>();
   for (const row of rows) {
-    const def = SHIPS[String(row.type) as ShipType];
+    const shipId = String(row.id);
+    types.set(shipId, String(row.type) as ShipType);
+    const def = row.module == null ? null : MODULES[String(row.module) as ModuleId];
     if (!def) continue;
-    const bonus = Number(row.tank_level) * MODULES.fuel_system.perLevel;
-    cap = Math.max(cap, def.tank + bonus);
+    bonus.set(shipId, (bonus.get(shipId) ?? 0) + Number(row.level) * def.perLevel);
   }
-  return cap;
+  let cap = 0;
+  for (const [shipId, type] of types) {
+    const ship = SHIPS[type];
+    if (!ship) continue;
+    cap = Math.max(cap, ship.tank + (bonus.get(shipId) ?? 0));
+  }
+  return Math.floor(cap);
 }
 
 interface Daily { expeditions: number; fuelBought: number; pointsGained: number }

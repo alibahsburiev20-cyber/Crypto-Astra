@@ -1,5 +1,6 @@
 import { CLAIM_INTERVAL_MS, START_ASTRA, START_FUEL, WORLD_CAPACITY } from '../../shared/constants';
 import { STARTER_PLANE } from '../../shared/gameData';
+import { levelFromXp } from './expeditionMath';
 import { applyDelta, getBalance } from '../balances';
 import { ApiError } from '../errors';
 import { ensureMaintenance } from './maintenance';
@@ -44,7 +45,9 @@ export function getPlayerState(sql: SqlStorage, playerId: string) {
   if (!p.length) throw new ApiError(404, 'player_not_found');
   const c = sql.exec('SELECT last_claim_at FROM claim_state WHERE player_id = ?', playerId).toArray();
   return {
-    id: playerId, level: Number(p[0].level), xp: Number(p[0].xp),
+    // Уровень — производная от опыта (см. playerLevel): иначе клиент и сервер
+    // живут разными числами, пока игрок не завершит очередной рейс.
+    id: playerId, level: levelFromXp(Number(p[0].xp)), xp: Number(p[0].xp),
     balances: {
       astra: getBalance(sql, playerId, 'astra'), fuel: getBalance(sql, playerId, 'fuel'), points: getBalance(sql, playerId, 'points'),
     },

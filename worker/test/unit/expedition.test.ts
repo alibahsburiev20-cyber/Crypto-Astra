@@ -14,6 +14,7 @@ import { claim } from '../../src/world/modules/claim';
 import { createPlayer } from '../../src/world/modules/players';
 import { applyDurability } from '../../src/world/modules/progress';
 import { buyFuel, repairShip } from '../../src/world/modules/upkeep';
+import { setLevel } from '../helpers/level';
 import { makeWorld } from '../helpers/sqlShim';
 
 const T0 = DAY_MS * 10;
@@ -31,10 +32,22 @@ describe('формулы этапа 1', () => {
   it('seed даёт множитель 0.8–1.2, уровень и ремонт сходятся с концепцией', () => {
     expect(seedMultiplier('00'.repeat(8))).toBeCloseTo(0.8);
     expect(seedMultiplier('ff'.repeat(8))).toBeCloseTo(1.2);
+    // Кривая уровня. Числа зафиксированы специально: они решают, когда игрок
+    // доходит до верфи, и менять их можно только вместе с этим тестом.
     expect(xpThreshold(1)).toBe(0);
-    expect(xpThreshold(2)).toBe(100);
-    expect(levelFromXp(99)).toBe(1);
-    expect(levelFromXp(100)).toBe(2);
+    expect(xpThreshold(2)).toBe(40);
+    expect(xpThreshold(5)).toBe(242);
+    expect(xpThreshold(12)).toBe(903);
+    expect(xpThreshold(20)).toBe(1838);
+    expect(xpThreshold(30)).toBe(3185);
+    expect(levelFromXp(39)).toBe(1);
+    expect(levelFromXp(40)).toBe(2);
+    expect(levelFromXp(241)).toBe(4);
+    expect(levelFromXp(242)).toBe(5);
+    // Порог монотонный: «опыт есть, а уровень не растёт» невозможен по построению.
+    for (let level = 2; level <= 40; level++) {
+      expect(xpThreshold(level), `L${level}`).toBeGreaterThan(xpThreshold(level - 1));
+    }
     expect(fuelCost(1, 'short')).toBe(1);
     expect(fuelCost(1, 'medium')).toBe(2);
     expect(fuelCost(1, 'long')).toBe(4);
@@ -107,7 +120,7 @@ describe('экспедиция', () => {
     expect(() => tx(() => startExpedition(sql, 'p1', 'k', { shipId: id, planet: 'ferra', kind: 'long' }, T0))).toThrow(/not_enough_fuel/);
     expect(sql.exec('SELECT COUNT(*) AS c FROM expeditions').toArray()[0].c).toBe(0);
     expect(() => tx(() => startExpedition(sql, 'p1', 'k', { shipId: id, planet: 'tessera', kind: 'short' }, T0))).toThrow(/sector_locked/);
-    tx(() => sql.exec(`UPDATE players SET level = 12 WHERE id = 'p1'`));
+    tx(() => setLevel(sql, 'p1', 12));
     expect(() => tx(() => startExpedition(sql, 'p1', 'k', { shipId: id, planet: 'vesper', kind: 'short' }, T0))).toThrow(/ship_range/);
   });
 

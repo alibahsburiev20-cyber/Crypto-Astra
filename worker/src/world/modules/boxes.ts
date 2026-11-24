@@ -3,6 +3,8 @@ import {
   isBoxId, planeSprite, planesOfRarity, type BoxDef, type BoxId, type PlaneId, type PlaneRarity,
 } from '../../shared/gameData';
 import { grantPlane } from './planes';
+import { applyXp } from './progress';
+import { levelFromXp } from './expeditionMath';
 import { applyDelta, getBalance } from '../balances';
 import { ApiError } from '../errors';
 import { withIdempotency } from '../idempotency';
@@ -204,6 +206,11 @@ export function openBox(sql: SqlStorage, playerId: string, idemKey: string, boxI
     // «выпало в анимации, но не сохранилось» невозможно.
     const planeCount = roll.plane ? grantPlane(sql, playerId, roll.plane, now) : 0;
 
+    // Открытие бокса — трата (или бесплатное действие), и она обязана хоть что-то
+    // значить для уровня. ASTRA при этом не печатается: опыт — не валюта.
+    const xp = def.xp ?? 0;
+    if (xp) applyXp(sql, { playerId, delta: xp, reason: 'box_open', sourceRef: boxId, idemKey }, now, levelFromXp);
+
     sql.exec(
       `INSERT INTO box_state (player_id, box, last_open_at, opens) VALUES (?, ?, ?, ?)
        ON CONFLICT (player_id, box) DO UPDATE SET last_open_at = excluded.last_open_at, opens = excluded.opens`,
@@ -238,6 +245,7 @@ export function openBox(sql: SqlStorage, playerId: string, idemKey: string, boxI
           }
           : null,
         astra,
+        xp,
         nextOpenAt: view ? view.nextOpenAt : 0,
         opens: opens + 1,
       },

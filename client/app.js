@@ -567,6 +567,43 @@ function ownedSkin() {
   return owned ? SKIN_SPRITES[owned.cosmetic] : null;
 }
 
+/** Состояние модулей одного корабля из /me (id → слоты, что стоит, эффекты). */
+function shipMods(shipId) {
+  const list = state?.modules?.ships || [];
+  return list.find((x) => x.id === shipId) || null;
+}
+
+/**
+ * Гнёзда под модули. Рисунок простой и читаемый сразу: пустой слот — пунктирное
+ * гнездо, занятый — иконка модуля и точки уровня. Чем больше слотов у корпуса,
+ * тем длиннее полоса: «корабль накачан» видно не открывая раздел.
+ */
+function moduleRig(view, size) {
+  if (!view) return null;
+  const pips = [];
+  for (let i = 0; i < view.slots; i += 1) {
+    const mod = view.modules[i];
+    const dots = [];
+    for (let l = 1; l <= (state.modules.maxLevel || 5); l += 1) {
+      dots.push(el('i', { class: mod && mod.level >= l ? 'on' : null }));
+    }
+    pips.push(el('div', {
+      class: `rig-pip${mod ? ' is-on' : ''}`,
+      title: mod ? `${mod.name} · уровень ${mod.level} · ${mod.effectText}` : `Свободный слот ${i + 1}`,
+    },
+    mod
+      ? el('img', { src: `/sprites/modules/${mod.id}.png`, alt: mod.name, width: String(size), height: String(size), loading: 'lazy' })
+      : null,
+    el('div', { class: 'rig-dots' }, ...dots)));
+  }
+  return el('div', { class: 'rig-pips' }, ...pips);
+}
+
+/** Картинка корпуса: скин, если куплен, иначе обычный спрайт типа. */
+function shipArtSrc(type) {
+  return ownedSkin() || `/sprites/ships/${type}.png`;
+}
+
 function shipArt(type) {
   const skin = ownedSkin();
   if (skin) {
@@ -622,6 +659,9 @@ function levelBar(compact) {
       return fill;
     })()),
     el('p', { class: 'muted level-foot' }, `${p.xp} XP всего · нужно ${p.next} XP для уровня ${p.level + 1}`),
+    // Раньше опыт капал только за рейс, и «очки есть, а уровень 1» выглядело
+    // сломанным. Теперь список полный — игрок видит, за что растёт уровень.
+    el('p', { class: 'muted level-foot' }, 'Опыт: Claim, рейсы, арена, миссии, боксы, крафт и каждый уровень модуля.'),
   );
 }
 
@@ -1042,19 +1082,37 @@ function garagePanel() {
   const cells = [];
   for (let i = 0; i < g.slots; i += 1) {
     const ship = state.ships[i];
-    cells.push(el('div', { class: `garage-slot${ship ? ' is-filled' : ''}` },
-      el('img', {
-        src: ship ? '/sprites/garage/slot_filled.png' : '/sprites/garage/slot_empty.png',
-        alt: '', width: '96', height: '96', class: 'garage-cell',
-      }),
-      el('span', { class: 'garage-label' }, ship ? ship.name : 'свободно')));
+    if (!ship) {
+      cells.push(el('div', { class: 'garage-slot' },
+        el('div', { class: 'garage-cell' }),
+        el('span', { class: 'garage-label' }, 'свободно')));
+      continue;
+    }
+    const mods = shipMods(ship.id);
+    const hurt = ship.durability < 50;
+    cells.push(el('div', { class: `garage-slot is-filled${hurt ? ' is-hurt' : ''}` },
+      el('div', { class: 'garage-cell' },
+        el('img', {
+          src: shipArtSrc(ship.type), alt: ship.name,
+          width: '72', height: '36', class: 'garage-ship', loading: 'lazy',
+        }),
+        // Полоса модулей прямо в ячейке: видно, что в корабле вложено.
+        moduleRig(mods, 14),
+        el('span', { class: 'garage-dur' }, `${ship.durability}%`)),
+      el('span', { class: 'garage-label' }, ship.name),
+      el('span', { class: 'garage-sub' }, ship.status === 'flying'
+        ? 'в рейсе'
+        : (mods ? `модули ${mods.used}/${mods.slots}` : 'на базе'))));
   }
   // Недоступные ячейки показываем призраком: видно, сколько ещё можно купить.
   for (let i = g.slots; i < g.max; i += 1) {
     cells.push(el('div', { class: 'garage-slot is-locked' },
-      el('img', { src: '/sprites/garage/slot_locked.png', alt: '', width: '96', height: '96', class: 'garage-cell', loading: 'lazy' }),
+      el('div', { class: 'garage-cell' }),
       el('span', { class: 'garage-label' }, 'закрыто')));
   }
+  // Цены ячеек растут: и за каждую следующую, и с уровнем. Показываем всю
+  // лестницу сразу — иначе «ещё одна за 200» выглядит обещанием, а не ценой.
+  const ladder = (g.nextPrices || []).slice(1);
   return el('div', { class: 'block garage-block' },
     el('h3', {}, 'Гараж',
       el('span', { class: 'badge' }, `${g.used}/${g.slots}`),
@@ -1063,12 +1121,16 @@ function garagePanel() {
       `Ячеек ${g.slots} из ${g.max}. Свободно: ${g.free}. Купить корабль можно только при свободной ячейке.`),
     el('div', { class: 'garage-grid' }, ...cells),
     g.canBuy
-      ? el('button', {
-        type: 'button', disabled: state.frozen || state.balances.astra < g.price ? '' : null,
-        onClick: doBuySlot,
-      },
-      el('img', { src: '/icons/ui/garage.png', alt: '', width: '18', height: '18', class: 'icon-sm' }),
-      `Ещё ячейка за ${astraNum(g.price)} ASTRA`)
+      ? el('div', { class: 'garage-buy' },
+        el('button', {
+          type: 'button', disabled: state.frozen || state.balances.astra < g.price ? '' : null,
+          onClick: doBuySlot,
+        },
+        el('img', { src: '/icons/ui/garage.png', alt: '', width: '18', height: '18', class: 'icon-sm' }),
+        `Ещё ячейка за ${astraNum(g.price)} ASTRA`),
+        el('p', { class: 'muted garage-ladder' },
+          `Каждая следующая дороже: ${ladder.length ? ladder.map((p) => astraNum(p)).join(' → ') : 'потолок'}`
+          + ` · надбавка за уровень ${g.level} уже в цене`))
       : el('p', { class: 'muted' }, `Больше ${g.max} ячеек не бывает.`),
   );
 }
@@ -1078,6 +1140,16 @@ function doBuySlot() { return act('garage-slot', '/garage/buy', {}); }
 function renderFleet() {
   const owned = state.ships.map((s) => el('div', { class: 'block' },
     shipArt(s.type),
+    // Рядом с кораблём — его слоты: сколько занято и чем. Это и есть ответ на
+    // «модули должны быть заметны»: накачанный корпус выглядит иначе пустого.
+    el('p', { class: 'rig-summary' }, (() => {
+      const mods = shipMods(s.id);
+      if (!mods) return '';
+      return mods.used
+        ? `слоты ${mods.used}/${mods.slots} · ${mods.modules.map((m) => `${m.name} L${m.level}`).join(', ')}`
+        : `слоты ${mods.used}/${mods.slots} · пусто`;
+    })()),
+    moduleRig(shipMods(s.id), 22),
     el('h3', {}, `${s.name} · ${s.durability}%`),
     el('p', { class: 'muted' }, s.status === 'flying' ? 'В рейсе' : 'На базе'),
     s.repair.blocked === 'ok' ? el('button', { type: 'button', disabled: state.frozen ? '' : null, onClick: () => doRepair(s.id) },
@@ -1191,6 +1263,13 @@ function astraNum(n) {
   return Number(n || 0).toLocaleString('ru-RU');
 }
 
+/** Пять делений — по одному на уровень модуля: прогресс виден без цифр. */
+function levelDots(level, max) {
+  const dots = [];
+  for (let i = 1; i <= (max || 5); i += 1) dots.push(el('i', { class: level >= i ? 'on' : null }));
+  return el('span', { class: 'lv-dots' }, ...dots);
+}
+
 function moduleCard(ship, entry) {
   const owned = (ship.modules || []).find((m) => m.id === entry.id);
   const level = owned ? owned.level : 0;
@@ -1207,7 +1286,8 @@ function moduleCard(ship, entry) {
   return el('div', { class: `block module-card${level ? ' installed' : ''}${blocked && !next ? ' locked' : ''}` },
     el('img', { src: `/sprites/modules/${entry.id}.png`, alt: '', width: '52', height: '52', class: 'module-art', loading: 'lazy' }),
     el('div', { class: 'module-info' },
-      el('h3', {}, entry.name, level ? el('span', { class: 'badge' }, `L${level}`) : null),
+      el('h3', {}, entry.name, level ? el('span', { class: 'badge' }, `L${level}`) : null,
+        levelDots(level, entry.maxLevel)),
       el('p', { class: 'muted' }, owned ? owned.effectText : 'Не установлен'),
       next
         ? el('p', { class: 'muted' }, `Дальше: ${next.effectText} · ${astraNum(next.price)} ASTRA${parts ? ` + ${parts}` : ''}`)
@@ -1246,17 +1326,26 @@ function renderModules() {
     cells.push(el('div', { class: `slot-cell${mod ? ' is-filled' : ''}` },
       el('img', {
         src: mod ? `/sprites/modules/${mod.id}.png` : '/sprites/garage/slot_empty.png',
-        alt: '', width: '64', height: '64', class: 'slot-art', loading: 'lazy',
+        alt: mod ? mod.name : 'свободный слот', width: '64', height: '64', class: 'slot-art', loading: 'lazy',
       }),
-      el('span', { class: 'slot-label' }, mod ? `${mod.name} L${mod.level}` : 'пусто')));
+      el('span', { class: 'slot-label' }, mod ? `${mod.name} L${mod.level}` : 'пусто'),
+      el('span', { class: 'slot-effect' }, mod ? mod.effectText : `слот ${i + 1} свободен`)));
   }
+  // Корпус показан так же, как в гараже и во флоте: полоса слотов над силуэтом.
+  const rig = el('div', { class: 'module-rig' },
+    el('img', {
+      src: shipArtSrc(ship.type), alt: ship.name, width: '192', height: '96', class: 'module-ship', loading: 'lazy',
+    }),
+    moduleRig(ship, 20));
 
   return el('div', { class: 'screen' },
     el('div', { class: 'screen-title' }, el('h2', {}, 'Модули'), el('span', { class: 'badge' }, `до L${m.maxLevel}`)),
-    el('p', { class: 'muted' }, 'Модуль ставится на конкретный корабль и занимает его слот. Снять нельзя — только улучшить: вложенные ASTRA не возвращаются.'),
+    el('p', { class: 'muted' }, 'Модуль ставится на конкретный корабль и занимает его слот. Снять нельзя — только улучшить: вложенные ASTRA не возвращаются. У больших корпусов слотов больше, а два модуля одного эффекта складываются: движок и навигатор режут длительность вдвоём.'),
+    el('p', { class: 'muted' }, `Каталог: ${m.catalog.length} модулей, у этого корпуса ${ship.slots} слота(ов). Прокачка даёт опыт.`),
     el('div', { class: 'ship-tabs' }, ...tabs),
     el('div', { class: 'block' },
       el('h3', {}, ship.name, el('span', { class: 'badge' }, `слоты ${ship.used}/${ship.slots}`)),
+      rig,
       el('div', { class: 'slot-row' }, ...cells),
       el('p', { class: 'muted' }, ship.modules.length
         ? ship.modules.map((x) => `${x.name} L${x.level}: ${x.effectText}`).join(' · ')

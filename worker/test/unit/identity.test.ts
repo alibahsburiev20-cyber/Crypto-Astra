@@ -14,6 +14,7 @@ import { createPlayer } from '../../src/world/modules/players';
 import { applyDelta, getBalance } from '../../src/world/balances';
 import { RUN_MS } from '../../src/shared/minigame';
 import { buildState } from '../../src/world/modules/state';
+import { setLevel } from '../helpers/level';
 import { makeWorld } from '../helpers/sqlShim';
 
 const T0 = DAY_MS * 30 + 3_600_000;
@@ -25,7 +26,10 @@ function world(astra = 5000) {
     createPlayer(w.sql, 'p2', T0);
     applyDelta(w.sql, { playerId: 'p1', asset: 'astra', delta: astra, reason: 'seed' }, T0);
     applyDelta(w.sql, { playerId: 'p2', asset: 'astra', delta: astra, reason: 'seed' }, T0);
-    w.sql.exec('UPDATE players SET level = 30');
+    // Раньше здесь был голый UPDATE level = 30 на всех: уровень теперь считается
+    // из опыта, поэтому обоим ставим опыт (и журнал остаётся честным).
+    setLevel(w.sql, 'p1', 30);
+    setLevel(w.sql, 'p2', 30);
   });
   return w;
 }

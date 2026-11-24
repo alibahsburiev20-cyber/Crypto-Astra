@@ -1,11 +1,13 @@
 import {
-  MODULES, MODULE_ORDER, MODULE_MAX_LEVEL, SHIPS, isModuleId, moduleEffectText, moduleFx, moduleParts, modulePrice,
+  MODULES, MODULE_ORDER, MODULE_MAX_LEVEL, SHIPS, XP, isModuleId, moduleEffectText, moduleFx, moduleParts, modulePrice,
   type ModuleFx, type ModuleId, type ShipType,
 } from '../../shared/gameData';
 import { applyDelta, getBalance } from '../balances';
 import { ApiError } from '../errors';
 import { withIdempotency } from '../idempotency';
 import { applyResourceDelta, assertPlayable, getResource } from './maintenance';
+import { applyXp } from './progress';
+import { levelFromXp } from './expeditionMath';
 
 // Модули (этап 2, срез 4). Модуль ставится на корабль, занимает слот и живёт до
 // конца сезона: снять его нельзя, только улучшить. Поэтому вложение не
@@ -98,6 +100,8 @@ export interface InstallResult {
   module: ModuleId;
   level: number;
   price: number;
+  /** Опыт за покупку (уровень модуля × XP.moduleLevel). */
+  xp: number;
   astra: number;
 }
 
@@ -144,8 +148,12 @@ export function installModule(
        ON CONFLICT (ship_id, module) DO UPDATE SET level = excluded.level, installed_at = excluded.installed_at`,
       ship.id, module, level, now,
     );
+    // Вложение в корабль — это прогресс, поэтому за него капает опыт: чем выше
+    // уровень модуля, тем дороже он обошёлся и тем больше опыта.
+    const xp = XP.moduleLevel * level;
+    applyXp(sql, { playerId, delta: xp, reason: 'module_buy', sourceRef: ship.id, idemKey }, now, levelFromXp);
     return {
-      value: { shipId: ship.id, module, level, price, astra: getBalance(sql, playerId, 'astra') },
+      value: { shipId: ship.id, module, level, price, xp, astra: getBalance(sql, playerId, 'astra') },
       store: true,
     };
   });
