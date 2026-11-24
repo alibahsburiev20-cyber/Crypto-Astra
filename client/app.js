@@ -147,6 +147,9 @@ const RESOURCES = {
   helium3: 'Гелий-3', titanium: 'Титан', crystal: 'Кристалл',
   astralite: 'Астралит', void_crystal: 'Пустотный кристалл', quantum_dust: 'Квантовая пыль',
   energy_cell: 'Энергоячейка', circuit: 'Схема', alloy_plate: 'Сплавная пластина',
+  helium_coolant: 'Гелиевый хладагент', titanium_frame: 'Титановая рама',
+  crystal_lens: 'Кристаллическая линза', astralite_core: 'Астралитовое ядро',
+  void_weave: 'Пустотное полотно', quantum_matrix: 'Квантовая матрица',
 };
 
 // Запись журнала по ресурсу приходит как res:<имя>, а не как базовый актив.
@@ -1022,7 +1025,7 @@ function renderCraftScreen() {
   if (!c) return el('div', { class: 'screen' }, el('p', { class: 'muted' }, 'Сервер ещё не отдаёт крафт.'));
   const busy = c.slots - c.running.length <= 0;
   const have = (id) => (state.resources.find((r) => r.id === id)?.amount ?? 0);
-  const rows = c.recipes.map((r) => {
+  const card = (r) => {
     const enough = r.inputs.every((i) => have(i.resource) >= i.amount) && state.balances.astra >= r.fee;
     return el('div', { class: 'block craft-card' },
       el('img', { src: `/icons/resources/${r.id}.png`, alt: '', width: '56', height: '56', class: 'craft-art', loading: 'lazy' }),
@@ -1037,7 +1040,28 @@ function renderCraftScreen() {
         }, busy ? 'Очередь занята' : enough ? 'Скрафтить' : 'Не хватает'),
       ),
     );
-  });
+  };
+  // Рецепты делятся на два круга, и это не косметика: первый собирается из
+  // ресурсов первого сектора (доступен сразу), второй требует редких ресурсов
+  // секторов 2–5 и нужен только модулям с 4-го уровня.
+  const groups = [
+    {
+      tier: 1, title: 'Первый круг',
+      hint: 'Железо, медь, кремний и лёд — первый сектор. Нужен для ремонта и первых модулей.',
+    },
+    {
+      tier: 2, title: 'Дальний круг',
+      hint: 'Редкие ресурсы секторов 2–5: гелий-3, титан, кристалл, астралит, пустотный кристалл, квантовая пыль. Идут в модули с 4-го уровня.',
+    },
+  ].map((g) => {
+    const list = c.recipes.filter((r) => (r.tier || 1) === g.tier);
+    if (!list.length) return null;
+    return el('div', { class: 'craft-group' },
+      el('h3', { class: 'craft-group-title' }, g.title),
+      el('p', { class: 'muted' }, g.hint),
+      ...list.map(card));
+  }).filter(Boolean);
+
   return el('div', { class: 'screen' },
     el('div', { class: 'screen-title' }, el('h2', {}, 'Крафт'), el('span', { class: 'badge' }, `слотов ${c.slots}` )),
     el('p', { class: 'muted' }, 'Ресурсы и плата в ASTRA списываются сразу, компонент приходит по таймеру. Компоненты нужны модулям и крупному ремонту.'),
@@ -1047,7 +1071,7 @@ function renderCraftScreen() {
         ? el('p', { class: 'ok', 'data-prefix': 'Готовится: ', 'data-until': c.running[0].endsAt }, c.running[0].name)
         : el('p', { class: 'muted' }, 'Пусто. Готовый компонент начислится сам, даже если экран закрыт.'),
     ),
-    ...rows,
+    ...groups,
     note ? el('p', { class: note.startsWith('Ошибка') ? 'error' : 'ok' }, note) : null,
   );
 }
@@ -2138,7 +2162,7 @@ function renderWallet() {
         el('button', { type: 'button', class: 'ghost danger', onClick: () => doDeleteAccount() }, 'Удалить аккаунт'))),
     el('div', { class: 'block' },
       el('h3', {}, 'Крафт'),
-      el('p', { class: 'muted' }, 'Энергоячейка, схема и сплавная пластина — в отдельном разделе.'),
+      el('p', { class: 'muted' }, 'Девять рецептов — от энергоячейки до квантовой матрицы — в отдельном разделе.'),
       el('button', { type: 'button', class: 'ghost', onClick: () => setView('craft') },
         el('img', { src: '/icons/nav/craft.png', alt: '', width: '18', height: '18', class: 'icon-sm' }), 'Открыть крафт'),
     ),

@@ -453,6 +453,10 @@ button.ghost:hover:not(:disabled) { background: rgba(255, 255, 255, .08); }
 
 /* ── Крафт ───────────────────────────────────── */
 .craft-card { display: grid; grid-template-columns: 56px 1fr; gap: 12px; align-items: start; }
+/* Два круга рецептов: заголовок группы отделяет стартовые от дальних. */
+.craft-group { display: grid; gap: 8px; margin-top: 6px; }
+.craft-group-title { margin: 12px 0 0; font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.craft-group > p.muted { margin: 0; font-size: 11px; line-height: 1.4; }
 .craft-art { width: 56px; height: 56px; object-fit: contain; image-rendering: pixelated; filter: drop-shadow(0 6px 10px rgba(0, 0, 0, .45)); }
 .craft-info { min-width: 0; }
 .craft-info p { margin: 0 0 6px; font-size: 11px; line-height: 1.35; }

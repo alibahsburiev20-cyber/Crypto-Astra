@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DAY_MS, REPAIR_ASTRA_PER_PERCENT } from '../../src/shared/constants';
-import { MODULES, MODULE_MAX_LEVEL, modulePrice } from '../../src/shared/gameData';
+import { MODULES, MODULE_MAX_LEVEL, moduleParts, modulePrice } from '../../src/shared/gameData';
 import { applyDelta, getBalance } from '../../src/world/balances';
 import { verifyLedger } from '../../src/world/ledger';
 import { computeReward, durationOf, repairCost } from '../../src/world/modules/expeditionMath';
@@ -25,10 +25,10 @@ function shipId(sql: SqlStorage): string {
   return String(sql.exec(`SELECT id FROM ships WHERE player_id = 'p1'`).toArray()[0].id);
 }
 
-/** Кладёт в трюм компоненты на уровень: amount × level. */
+/** Кладёт в трюм ровно то, что просит уровень: moduleParts уже умножает на уровень. */
 function giveParts(sql: SqlStorage, tx: <T>(fn: () => T) => T, module: keyof typeof MODULES, level: number) {
-  for (const part of MODULES[module].parts) {
-    tx(() => addResource(sql, 'p1', part.resource, part.amount * level, T0 + 2));
+  for (const part of moduleParts(module, level)) {
+    tx(() => addResource(sql, 'p1', part.resource, part.amount, T0 + 2));
   }
 }
 
