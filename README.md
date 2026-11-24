@@ -133,6 +133,7 @@ npm run seed -- --users 3                     # тестовые игроки (�
 npm run simulate -- --players 200 --days 30   # источники и стоки экономики
 npx tsx scripts/planes-forecast.ts            # шансы и сроки сбора авиазвена
 npm run check-ledger -- --file snapshot.json  # проверка хеш-цепочки и балансов
+npm run smoke:arcade -- --base <URL> --email … --password …   # аркада: полный круг на живом воркере
 ```
 
 ### E2E

@@ -25,6 +25,7 @@
     "ads-forecast": "tsx scripts/ads-forecast.ts",
     "pay:loadtest": "tsx scripts/pay-loadtest.ts",
     "health": "tsx scripts/health-check.ts",
+    "smoke:arcade": "tsx scripts/arcade-smoke.ts",
     "restore:drill": "bash scripts/restore-drill.sh",
     "pay:hot-address": "tsx scripts/hot-address.ts"
   },
