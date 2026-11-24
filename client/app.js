@@ -210,6 +210,12 @@ let turnstileToken = null;
 let turnstileWidget = null;
 let turnstileScript = null;
 let loginNeedsTurnstile = false;
+// Бонусный шлюз (этап 6): Claim и бесплатные боксы сервер выдаёт только с
+// одноразовым токеном Turnstile. Виджет живёт прямо в разделе, токен — в
+// bonusToken; после любого бонусного действия он сбрасывается, потому что
+// Cloudflare одноразовый.
+let bonusToken = null;
+let bonusWidget = null;
 
 function setText(selector, value) {
   const n = document.querySelector(selector);
@@ -399,11 +405,8 @@ async function loadConfig() {
   refreshTurnstileVisibility();
 }
 
-function showTurnstile() {
-  const box = $('#turnstile');
-  if (!config.turnstile_site_key) return false;
-  box.hidden = false;
-  if (turnstileWidget !== null) return true;
+/** Скрипт Turnstile грузится один раз на страницу и переиспользуется формами. */
+function ensureTurnstileScript() {
   if (!turnstileScript) {
     turnstileScript = new Promise((resolve, reject) => {
       const s = document.createElement('script');
@@ -415,7 +418,15 @@ function showTurnstile() {
       document.head.append(s);
     });
   }
-  turnstileScript.then(() => {
+  return turnstileScript;
+}
+
+function showTurnstile() {
+  const box = $('#turnstile');
+  if (!config.turnstile_site_key) return false;
+  box.hidden = false;
+  if (turnstileWidget !== null) return true;
+  ensureTurnstileScript().then(() => {
     if (!window.turnstile || turnstileWidget !== null || box.hidden) return;
     turnstileWidget = window.turnstile.render(box, {
       sitekey: config.turnstile_site_key,
@@ -439,6 +450,69 @@ function resetTurnstile() {
   }
 }
 
+/** Включён ли шлюз: сервер отдал site key — значит секрет настроен и требует. */
+function bonusGateOn() {
+  return Boolean(config.turnstile_site_key);
+}
+
+/**
+ * Разметка шлюза: блок с подписью и контейнером под виджет. Один id на
+ * «Мостик», «Бонусы» и «Боксы» — эти экраны не живут одновременно.
+ */
+function bonusGateBlock() {
+  if (!bonusGateOn()) return null;
+  return el('div', { class: 'bonus-check' },
+    bonusToken
+      ? el('p', { class: 'ok' }, 'Человек подтверждён — можно забирать.')
+      : el('p', { class: 'muted' }, 'Подтвердите, что вы человек: Claim и бесплатные бонусы выдаются только после проверки.'),
+    bonusToken ? null : el('div', { id: 'turnstile-claim', class: 'ts-host' }));
+}
+
+/** Навешиваем виджет после перерисовки экрана. Токен уже есть — перерисовка не нужна. */
+function mountBonusGate() {
+  const box = document.getElementById('turnstile-claim');
+  if (!box || !bonusGateOn() || bonusToken) return;
+  ensureTurnstileScript().then(() => {
+    if (!window.turnstile || !document.getElementById('turnstile-claim')) return;
+    if (bonusWidget !== null) {
+      // Экран перерисован: старый контейнер detached, виджет ставим заново.
+      try { window.turnstile.remove(bonusWidget); } catch { /* уже снят */ }
+      bonusWidget = null;
+    }
+    bonusWidget = window.turnstile.render(box, {
+      sitekey: config.turnstile_site_key,
+      theme: 'dark',
+      callback: (token) => { bonusToken = token; refreshBonusButtons(); },
+      'expired-callback': () => { bonusToken = null; refreshBonusButtons(); },
+      'error-callback': () => { bonusToken = null; refreshBonusButtons(); },
+    });
+  }).catch(() => {
+    turnstileScript = null;
+  });
+}
+
+/** Кнопки бонусов активны только со свежим токеном (и когда таймер позволил). */
+function refreshBonusButtons() {
+  const blocked = bonusGateOn() && !bonusToken;
+  const claimLeft = left(state?.nextClaimAt);
+  for (const btn of document.querySelectorAll('[data-claim]')) {
+    btn.disabled = blocked || claimLeft > 0 || !!state?.frozen;
+  }
+  for (const btn of document.querySelectorAll('[data-box-button][data-free="1"]')) {
+    if (btn.dataset.busy === '1') continue;
+    btn.disabled = blocked || !!state?.frozen;
+  }
+}
+
+/** Токен одноразовый: после любого бонусного действия просим подтверждение заново. */
+function resetBonusGate() {
+  bonusToken = null;
+  if (bonusWidget !== null && window.turnstile) {
+    try { window.turnstile.reset(bonusWidget); } catch { /* виджет уже снят */ }
+  }
+  refreshBonusButtons();
+}
+
 function refreshTurnstileVisibility() {
   const box = $('#turnstile');
   const need = Boolean(config.turnstile_site_key) && (mode === 'register' || loginNeedsTurnstile);
@@ -454,8 +528,10 @@ function left(ts) { return ts ? Math.max(0, ts - (Date.now() + serverOffset)) : 
 
 function updateTimers() {
   const claimLeft = left(state?.nextClaimAt);
-  const btn = document.querySelector('[data-claim]');
-  if (btn) btn.disabled = claimLeft > 0 || !!state?.frozen;
+  const blockedByGate = bonusGateOn() && !bonusToken;
+  for (const btn of document.querySelectorAll('[data-claim]')) {
+    btn.disabled = claimLeft > 0 || !!state?.frozen || blockedByGate;
+  }
   const noteEl = document.querySelector('[data-claim-note]');
   if (noteEl) {
     noteEl.textContent = claimLeft > 0
@@ -823,9 +899,10 @@ function renderBridge() {
           : 'Claim доступен. +5 ASTRA, не чаще раза в 15 минут.'),
         el('button', {
           type: 'button', 'data-claim': '',
-          disabled: claimLeft > 0 || state.frozen ? '' : null,
+          disabled: claimLeft > 0 || state.frozen || (bonusGateOn() && !bonusToken) ? '' : null,
           onClick: doClaim,
         }, el('img', { src: '/icons/ui/claim.png', alt: '', width: '22', height: '22', class: 'icon-sm' }), 'Забрать'),
+        bonusGateBlock(),
       ),
       el('div', { class: 'block' },
         el('h3', {}, 'Корабль'),
@@ -1596,9 +1673,10 @@ function renderBonus() {
         claimLeft > 0 ? fmtLeft(claimLeft) : 'готово'),
       el('button', {
         type: 'button', class: 'cta', 'data-claim': '',
-        disabled: claimLeft > 0 || state.frozen ? '' : null,
+        disabled: claimLeft > 0 || state.frozen || (bonusGateOn() && !bonusToken) ? '' : null,
         onClick: doClaim,
       }, 'Забрать бонус'),
+      bonusGateBlock(),
     ),
     el('div', { class: 'panel-grid' },
       el('div', { class: 'block' }, el('h3', {}, 'Шкала уровня'), levelBar(true),
@@ -1617,7 +1695,8 @@ function renderBonus() {
         el('h3', {}, 'Как это работает'),
         el('ul', { class: 'bonus-rules' },
           el('li', {}, 'Бонус можно забрать раз в 15 минут — таймер идёт от сервера.'),
-          el('li', {}, 'Опыт даёт рейсы и миссии, уровень открывает сектора и корабли.'),
+          el('li', {}, 'Перед выдачей бонуса игра просит подтвердить, что ты человек: Cloudflare Turnstile, токен одноразовый.'),
+          el('li', {}, 'Опыт капает за Claim, рейсы, миссии, боксы, крафт и каждый уровень модуля; уровень открывает сектора и верфь.'),
           el('li', {}, 'ASTRA — внутриигровая валюта: купить её нельзя.')),
       ),
     ),
@@ -2412,8 +2491,10 @@ function boxCard(b) {
       el('button', {
         type: 'button',
         class: b.price > 0 ? 'primary' : 'cta',
-        disabled: locked || poor || state.frozen ? '' : null,
+        // Бесплатный бокс — бонус: без подтверждения «я человек» кнопка спит.
+        disabled: locked || poor || state.frozen || (b.price === 0 && bonusGateOn() && !bonusToken) ? '' : null,
         'data-box-button': b.id,
+        'data-free': b.price === 0 ? '1' : null,
         onClick: () => doOpenBox(b.id),
       }, label),
       b.opens ? el('p', { class: 'muted box-opens' }, `Открыт ${b.opens === 1 ? 'один раз' : `${b.opens} раз`}`) : null,
@@ -2436,6 +2517,10 @@ function renderBoxes() {
       el('button', { type: 'button', class: 'ghost', onClick: () => loadBoxes() }, 'Обновить'));
   }
 
+  const gate = bonusGateOn() && data.boxes.some((b) => b.price === 0)
+    ? el('div', { class: 'block bonus-check-block' }, bonusGateBlock())
+    : null;
+
   const result = boxResult && dropsLine(boxResult.drops)
     ? el('div', { class: 'box-result' },
       el('b', {}, `Из «${boxResult.name}» выпало:`),
@@ -2450,7 +2535,8 @@ function renderBoxes() {
 
   return el('div', { class: 'screen' },
     header,
-    el('p', { class: 'muted' }, 'Боксы — это ресурсы, а не валюта: ASTRA из них не выпадает. Дневной и недельный бесплатны по таймеру, платные — сток ASTRA. Доходность ниже, чем у рейсов: рейс приносит ещё очки и опыт.'),
+    el('p', { class: 'muted' }, 'Боксы — это ресурсы, а не валюта: ASTRA из них не выпадает. Дневной и недельный бесплатны по таймеру — и только после подтверждения, что ты человек; платные — сток ASTRA. Доходность ниже, чем у рейсов.'),
+    gate,
     result,
     el('div', { class: 'box-grid' }, ...data.boxes.map(boxCard)),
     history.length ? el('div', { class: 'block' },
@@ -2524,6 +2610,8 @@ function render() {
   panel.append(body);
   // Арена живёт на canvas: цикл перевешиваем на свежий элемент после перерисовки.
   if (view === 'arena') arenaMount();
+  // Виджет «я человек» живёт в разметке экрана — ставим его после каждой перерисовки.
+  if (view === 'bridge' || view === 'boxes' || view === 'bonus') mountBonusGate();
   for (const btn of document.querySelectorAll('[data-view]')) btn.classList.toggle('active', btn.dataset.view === view);
 }
 
@@ -2651,7 +2739,14 @@ async function act(scope, path, body) {
   return result;
 }
 
-function doClaim() { return act('claim', '/claim', {}); }
+function doClaim() {
+  // Сервер с настроенным секретом не отдаст бонус без токена; тело мягкое —
+  // пустой POST старых версий отвечает 403 turnstile_required, а не 400.
+  return act('claim', '/claim', { turnstileToken: bonusToken }).then((r) => {
+    resetBonusGate();
+    return r;
+  });
+}
 function doStart(shipId, planet, kind) {
   if (!shipId || !planet) { note = 'Ошибка: выберите планету и корабль'; render(); return Promise.resolve(); }
   return act(`start:${shipId}:${planet}:${kind}`, '/expeditions/start', { shipId, planet, kind });
@@ -2685,6 +2780,7 @@ function doOpenBox(boxId) {
   const btn = document.querySelector(`[data-box-button="${boxId}"]`);
   if (btn) {
     btn.disabled = true;
+    btn.dataset.busy = '1';
     btn.textContent = 'Открываем…';
   }
   // Аудиоконтекст создаём прямо в обработчике клика: после await браузер уже не
@@ -2693,7 +2789,9 @@ function doOpenBox(boxId) {
   // Ключ включает счётчик открытий: двойной клик — одно действие, а следующее
   // открытие того же бокса — уже новое.
   const opens = boxData?.boxes?.find((b) => b.id === boxId)?.opens ?? 0;
-  return act(`box:${boxId}:${opens}`, '/boxes/open', { box: boxId }).then(async (res) => {
+  const wasFree = (boxData?.boxes?.find((b) => b.id === boxId)?.price ?? 1) === 0;
+  return act(`box:${boxId}:${opens}`, '/boxes/open', { box: boxId, turnstileToken: bonusToken }).then(async (res) => {
+    if (wasFree) resetBonusGate();
     // Что выпало — из ответа сервера: в /boxes этого нет.
     if (res && res.status < 400 && res.data?.drops) {
       boxResult = { ...res.data, at: Date.now() };

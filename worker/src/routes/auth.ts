@@ -6,7 +6,7 @@ import {
   clearAttempts, currentBlock, ipOf, loginKeys, readState, recordAttempt, registerKeys,
 } from '../auth/rateLimit';
 import { createSession, revokeSession, rotateSession } from '../auth/sessions';
-import { verifyTurnstile } from '../auth/turnstile';
+import { checkTurnstile, turnstileEnabled } from '../auth/turnstile';
 import { WORLD_CAPACITY } from '../shared/constants';
 import { adsConfig } from '../ads/config';
 import type { Env } from '../env';
@@ -25,20 +25,6 @@ function creds(body: Record<string, unknown>): { email: string; password: string
   if (!EMAIL_RE.test(email) || email.length > 254) throw new ApiError(400, 'invalid_email');
   if (password.length < 8 || password.length > 128) throw new ApiError(400, 'invalid_password');
   return { email, password };
-}
-
-export function turnstileEnabled(env: Env): boolean {
-  return Boolean(env.TURNSTILE_SECRET);
-}
-
-async function checkTurnstile(env: Env, request: Request, body: Record<string, unknown>): Promise<void> {
-  // Секрет не задан — проверка пропускается (локальная разработка и тесты).
-  if (!turnstileEnabled(env)) return;
-  if (!env.TURNSTILE_SITE_KEY) console.warn('TURNSTILE_SECRET задан, но TURNSTILE_SITE_KEY пуст: клиент не сможет получить токен');
-  const token = body.turnstileToken;
-  if (typeof token !== 'string' || !token) throw new ApiError(403, 'turnstile_required');
-  const ok = await verifyTurnstile(env.TURNSTILE_SECRET, token, ipOf(request));
-  if (!ok) throw new ApiError(403, 'turnstile_failed');
 }
 
 // Публичная конфигурация клиента: site key Turnstile и серверное время.
