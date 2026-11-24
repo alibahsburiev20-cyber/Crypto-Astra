@@ -1,4 +1,5 @@
 import { offlineSummary } from '/welcome.js';
+import { createBoxStage } from './box-stage.js';
 
 // Признак «JS работает»: без него CSS не прячет секции перед анимацией появления.
 document.documentElement.classList.add('js');
@@ -191,6 +192,8 @@ let serverOffset = 0;
 let boxData = null;
 // Что выпало в последний раз — показываем до перезагрузки страницы.
 let boxResult = null;
+// Сцена открытия: создаётся один раз и переиспользуется.
+let boxStage = null;
 
 // Turnstile включается только если сервер отдал site key в /config.
 // Без ключей (локальная разработка) виджет не грузится вообще.
@@ -1487,6 +1490,17 @@ function sfx(kind) {
   } catch { /* звук — украшение, а не условие игры */ }
 }
 
+// Звук открытия бокса: короткий «взвод» и вспышка. Как и остальные звуки,
+// подчиняется общему переключателю (astra:sound), который лежит в «Арене».
+function boxSound() {
+  if (!arenaSoundOn) return;
+  try {
+    tone(220, 420, 'triangle', 0.16, 0.05);
+    setTimeout(() => tone(520, 1040, 'sine', 0.22, 0.06), 160);
+    setTimeout(() => tone(780, 1560, 'sine', 0.26, 0.05), 300);
+  } catch { /* звук — украшение */ }
+}
+
 function arenaHud() {
   return el('div', { class: 'arena-hud' },
     el('span', {}, el('b', { 'data-arena-time': '' }, '0:45')),
@@ -2434,12 +2448,34 @@ function doGuildRename(name, tag) { return act(`guild-rename:${name}:${tag}`, '/
 function doGuildRole(playerId, role) { return act(`guild-role:${playerId}:${role}`, '/guild/role', { playerId, role }).then(loadGuild); }
 function doOpenBox(boxId) {
   boxResult = null;
+  // Пока сервер отвечает, кнопка занята: иначе легко нажать дважды и не понять,
+  // почему пришло одно открытие.
+  const btn = document.querySelector(`[data-box-button="${boxId}"]`);
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Открываем…';
+  }
+  // Аудиоконтекст создаём прямо в обработчике клика: после await браузер уже не
+  // считает вызов «жестом пользователя» и звук открытия может не заиграть.
+  try { audioCtx(); } catch { /* без звука тоже работает */ }
   // Ключ включает счётчик открытий: двойной клик — одно действие, а следующее
   // открытие того же бокса — уже новое.
   const opens = boxData?.boxes?.find((b) => b.id === boxId)?.opens ?? 0;
   return act(`box:${boxId}:${opens}`, '/boxes/open', { box: boxId }).then(async (res) => {
     // Что выпало — из ответа сервера: в /boxes этого нет.
-    if (res && res.status < 400 && res.data?.drops) boxResult = { ...res.data, at: Date.now() };
+    if (res && res.status < 400 && res.data?.drops) {
+      boxResult = { ...res.data, at: Date.now() };
+      const box = boxData?.boxes?.find((b) => b.id === boxId);
+      // Сцена живёт на body, поэтому перерисовка экрана её не сносит.
+      boxStage ||= createBoxStage();
+      boxSound();
+      boxStage.play({
+        box: boxId,
+        name: res.data.name || box?.name,
+        sprite: box?.sprite,
+        drops: res.data.drops,
+      });
+    }
     await loadBoxes();
   });
 }
