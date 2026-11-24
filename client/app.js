@@ -928,6 +928,37 @@ function rewardBlock(reward, title = 'Результат уже начислен
 
 // Гараж: ячейки решают, сколько кораблей может быть одновременно. Без ячейки
 // верфь не продаёт корпус — об этом честно говорит кнопка.
+// Строка о находке звена: одна и та же в боксах и на полке гаража.
+function planeFindLine(plane) {
+  return el('span', { class: `ok plane-find rarity-${plane.rarity || 'common'}` },
+    plane.firstTime ? 'Новая машина в звене: ' : 'Машина звена: ',
+    el('b', {}, `${plane.name} (${plane.rarityName || plane.rarity || 'обычная'})`),
+    plane.firstTime ? '' : ` ×${plane.count}`);
+}
+
+// Полка «Авиазвено»: восемь машин из боксов. Это коллекция, а не корабли —
+// ячейки гаража они не занимают и в рейсы не летают, поэтому подписи
+// «найдено 3 из 8», а не «в строю».
+function planeShelf() {
+  const p = state.planes;
+  if (!p || !p.models) return null;
+  const cells = p.models.map((m) => el('div', {
+    class: `plane-slot rarity-${m.rarity || 'common'}${m.count ? ' is-found' : ' is-locked'}`,
+  },
+    el('img', {
+      src: m.sprite || `/sprites/planes/${m.id}.png`,
+      alt: '', width: '72', height: '72', class: 'plane-art', loading: 'lazy',
+    }),
+    el('span', { class: 'plane-name' }, m.count ? m.name : '???'),
+    el('span', { class: 'plane-meta' }, m.count ? `${m.rarityName || m.rarity}${m.count > 1 ? ` ×${m.count}` : ''}` : m.hint)));
+  return el('div', { class: 'block plane-block' },
+    el('h3', {}, 'Авиазвено',
+      el('span', { class: 'badge' }, `${p.found}/${p.total}`)),
+    el('p', { class: 'muted' },
+      'Маленькие машины из боксов. Это коллекция: они не летают, не занимают ячейки под корабли и не приносят ASTRA — только висят в гараже.'),
+    el('div', { class: 'plane-grid' }, ...cells));
+}
+
 function garagePanel() {
   const g = state.garage;
   if (!g) return null;
@@ -975,7 +1006,7 @@ function renderFleet() {
     s.repair.blocked === 'ok' ? el('button', { type: 'button', disabled: state.frozen ? '' : null, onClick: () => doRepair(s.id) },
       el('img', { src: '/icons/ui/repair.png', alt: '', width: '20', height: '20', class: 'icon-sm', loading: 'lazy' }),
       `Ремонт за ${s.repair.cost} ASTRA${s.repair.plate ? ' + пластина' : ''}`) : null,
-    s.repair.blocked === 'needs_plate' ? el('p', { class: 'error' }, 'Ниже 50% нужна сплавная пластина — скрафтите её в «Крафте» (3 руды + 1 титан, 60 ASTRA).') : null,
+    s.repair.blocked === 'needs_plate' ? el('p', { class: 'error' }, 'Ниже 50% нужна сплавная пластина — скрафтите её в «Крафте» (железо 3 + медь 2, 60 ASTRA).') : null,
     el('button', { type: 'button', class: 'ghost', onClick: () => setView('modules') },
       el('img', { src: '/icons/nav/modules.png', alt: '', width: '18', height: '18', class: 'icon-sm' }), 'Модули'),
     s.durability <= 70 && s.durability >= 50 ? el('p', { class: 'muted' }, 'Почините до следующего рейса, иначе можно просесть ниже 50%.') : null,
@@ -1010,6 +1041,7 @@ function renderFleet() {
   return el('div', { class: 'screen' },
     el('div', { class: 'screen-title' }, el('h2', {}, 'Флот'), el('span', { class: 'badge' }, `${state.ships.length} в строю`)),
     garagePanel(),
+    planeShelf(),
     ...owned,
     el('div', { class: 'screen-title' }, el('h2', {}, 'Верфь'), el('span', { class: 'badge' }, `${astraNum(state.balances.astra)} ASTRA`)),
     el('p', { class: 'muted' }, 'Один корпус каждого типа. Новый корабль расширяет бак флота и открывает дальние сектора.'),
@@ -2233,7 +2265,8 @@ function renderBoxes() {
     ? el('div', { class: 'box-result' },
       el('b', {}, `Из «${boxResult.name}» выпало:`),
       el('span', {}, dropsLine(boxResult.drops)),
-      boxResult.components ? el('span', { class: 'ok' }, `компонентов: ${boxResult.components}`) : null)
+      boxResult.components ? el('span', { class: 'ok' }, `компонентов: ${boxResult.components}`) : null,
+      boxResult.plane ? planeFindLine(boxResult.plane) : null)
     : null;
 
   const history = (data.history || []).map((h) => el('li', {},
@@ -2498,6 +2531,7 @@ function doOpenBox(boxId) {
         name: res.data.name || box?.name,
         sprite: box?.sprite,
         drops: res.data.drops,
+        plane: res.data.plane || null,
       });
     }
     await loadBoxes();

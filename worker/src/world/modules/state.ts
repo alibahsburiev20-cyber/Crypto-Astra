@@ -16,6 +16,7 @@ import { getPlayerState } from './players';
 import { seasonBrief } from './season';
 import { minigameBrief } from './minigame';
 import { garageView } from './garage';
+import { planesView } from './boxes';
 import { ownIdentity } from './identity';
 
 export function buildState(sql: SqlStorage, playerId: string, now: number, premium = false) {
@@ -99,6 +100,8 @@ export function buildState(sql: SqlStorage, playerId: string, now: number, premi
     modules: moduleStateFor(sql, playerId),
     // Гараж: сколько ячеек, сколько занято и почём следующая.
     garage: garageView(sql, playerId, premium),
+    // Авиазвено: коллекция из боксов. Ни на что не влияет, но видно прогресс.
+    planes: planesView(sql, playerId),
     // Своя карточка: позывной, рамка, след, значок и срок Premium.
     profile: ownIdentity(sql, playerId, now),
     catalog: SHIP_ORDER.map((type) => {

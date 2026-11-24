@@ -182,6 +182,14 @@ export const WORLD_SCHEMA: string[] = [
      id TEXT PRIMARY KEY, player_id TEXT NOT NULL REFERENCES players (id), box TEXT NOT NULL,
      seed TEXT NOT NULL, cost INTEGER NOT NULL, drops_json TEXT NOT NULL, created_at INTEGER NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS idx_box_opens_player ON box_opens (player_id, created_at)`,
+  // Авиазвено (этап 6). Коллекция машин из боксов: ни ячеек гаража, ни рейсов,
+  // ни ASTRA. Хранится только счётчик, чтобы дубликаты не сгорали.
+  `CREATE TABLE IF NOT EXISTS player_planes (
+     player_id TEXT NOT NULL REFERENCES players (id), plane TEXT NOT NULL,
+     count INTEGER NOT NULL DEFAULT 1 CHECK (count > 0),
+     first_at INTEGER NOT NULL, last_at INTEGER NOT NULL,
+     PRIMARY KEY (player_id, plane))`,
+  `CREATE INDEX IF NOT EXISTS idx_player_planes_player ON player_planes (player_id)`,
   `CREATE TRIGGER IF NOT EXISTS ledger_no_update BEFORE UPDATE ON ledger
      BEGIN SELECT RAISE(ABORT, 'ledger is append-only'); END`,
   `CREATE TRIGGER IF NOT EXISTS ledger_no_delete BEFORE DELETE ON ledger

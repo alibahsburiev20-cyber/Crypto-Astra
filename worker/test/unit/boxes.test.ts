@@ -118,6 +118,7 @@ describe('розыгрыш (rollBox)', () => {
             "resource": "silicon",
           },
         ],
+        "plane": null,
         "rare": false,
         "units": 5,
       }

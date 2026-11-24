@@ -258,6 +258,50 @@ export const RECIPE_ORDER: RecipeId[] = [
 /** Рецепты первого круга: их видно новичку, они собираются из первого сектора. */
 export const STARTER_RECIPES: RecipeId[] = RECIPE_ORDER.filter((id) => RECIPES[id].tier === 1);
 
+// ── Авиазвено (этап 6) ───────────────────────────────────────────────────────
+// Маленькие машины, которые падают из боксов и висят в гараже на полке. Это
+// **коллекция, а не флот**: они не летают, не занимают ячейки под корабли и не
+// приносят ни ASTRA, ни ресурсов. Иначе бокс стал бы заменой верфи, а флот —
+// печатным станком: каждый корабль добавляет параллельный рейс.
+export type PlaneId = 'strizh' | 'osa' | 'kolibri' | 'skat' | 'sokol' | 'manta' | 'prizrak' | 'feniks';
+export type PlaneRarity = 'common' | 'rare' | 'legendary';
+
+export interface PlaneDef {
+  id: PlaneId;
+  name: string;
+  rarity: PlaneRarity;
+  /** Короткая строка для карточки: силуэт, а не характеристики. */
+  hint: string;
+}
+
+export const PLANES: Record<PlaneId, PlaneDef> = {
+  strizh: { id: 'strizh', name: 'Стриж', rarity: 'common', hint: 'Разведчик звена' },
+  osa: { id: 'osa', name: 'Оса', rarity: 'common', hint: 'Перехватчик' },
+  kolibri: { id: 'kolibri', name: 'Колибри', rarity: 'common', hint: 'Курьер' },
+  skat: { id: 'skat', name: 'Скат', rarity: 'common', hint: 'Разведчик глубокого космоса' },
+  sokol: { id: 'sokol', name: 'Сокол', rarity: 'rare', hint: 'Тяжёлый перехватчик' },
+  manta: { id: 'manta', name: 'Манта', rarity: 'rare', hint: 'Дальний разведчик' },
+  prizrak: { id: 'prizrak', name: 'Призрак', rarity: 'rare', hint: 'Ночная машина' },
+  feniks: { id: 'feniks', name: 'Феникс', rarity: 'legendary', hint: 'Один на всю галактику' },
+};
+
+export const PLANE_ORDER: PlaneId[] = ['strizh', 'osa', 'kolibri', 'skat', 'sokol', 'manta', 'prizrak', 'feniks'];
+
+export const PLANE_RARITY_NAMES: Record<PlaneRarity, string> = {
+  common: 'обычная',
+  rare: 'редкая',
+  legendary: 'легендарная',
+};
+
+export function isPlaneId(value: string): value is PlaneId {
+  return (PLANE_ORDER as string[]).includes(value);
+}
+
+/** Спрайт машины. Путь из id: клиент не надо править при добавлении модели. */
+export function planeSprite(id: PlaneId): string {
+  return `/sprites/planes/${id}.png`;
+}
+
 // ── Боксы (этап 5) ───────────────────────────────────────────────────────────
 // Два бесплатных (дневной и недельный) и два платных. Платные — сток ASTRA:
 // ресурсы из них всегда дешевле цены бокса, иначе получился бы печатный станок
@@ -283,6 +327,12 @@ export interface BoxDef {
   /** Компоненты: count попыток, у каждой шанс chance. */
   components?: { count: number; chance: number };
   rare?: { resource: string; chance: number };
+  /**
+   * Шанс найти машину звена. Пул — какие модели может выдать этот бокс.
+   * Коллекция ничего не стоит в ASTRA, поэтому шанс не влияет на «печатный
+   * станок» платных боксов: их ресурсная часть считается отдельно.
+   */
+  plane?: { chance: number; pool: PlaneId[] };
 }
 
 /** Компоненты, которые могут выпасть из бокса. */
@@ -294,6 +344,7 @@ export const BOXES: Record<BoxId, BoxDef> = {
     price: 0, cooldownMs: DAY_MS, units: [3, 5],
     pool: ['iron_ore', 'copper_ore', 'silicon', 'ice'],
     components: { count: 1, chance: 0.1 },
+    plane: { chance: 0.06, pool: ['strizh', 'osa', 'kolibri', 'skat'] },
   },
   weekly: {
     id: 'weekly', name: 'Недельный бокс', hint: 'Раз в неделю, бесплатно',
@@ -301,12 +352,16 @@ export const BOXES: Record<BoxId, BoxDef> = {
     pool: ['iron_ore', 'copper_ore', 'silicon', 'ice', 'helium3', 'titanium', 'crystal'],
     components: { count: 1, chance: 1 },
     rare: { resource: 'astralite', chance: 0.15 },
+    // Недельный — единственный бесплатный шанс на легендарную машину: иначе
+    // коллекцию нельзя было бы закрыть, не потратив ASTRA ни разу.
+    plane: { chance: 0.28, pool: [...PLANE_ORDER] },
   },
   crate_supply: {
     id: 'crate_supply', name: 'Ящик снабжения', hint: 'Ресурсы первого сектора',
     price: 280, cooldownMs: 0, units: [16, 22],
     pool: ['iron_ore', 'copper_ore', 'silicon', 'ice'],
     components: { count: 1, chance: 0.3 },
+    plane: { chance: 0.12, pool: ['strizh', 'osa', 'kolibri', 'skat'] },
   },
   crate_pro: {
     id: 'crate_pro', name: 'Грузовой контейнер', hint: 'Ресурсы, компоненты и шанс на астралит',
@@ -314,6 +369,7 @@ export const BOXES: Record<BoxId, BoxDef> = {
     pool: ['iron_ore', 'copper_ore', 'silicon', 'ice', 'helium3', 'titanium', 'crystal'],
     components: { count: 2, chance: 0.55 },
     rare: { resource: 'astralite', chance: 0.2 },
+    plane: { chance: 0.35, pool: [...PLANE_ORDER] },
   },
 };
 

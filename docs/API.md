@@ -393,7 +393,7 @@ ASTRA из бокса не выпадает никогда.
 | Метод | Путь | Тело | Ответ |
 | --- | --- | --- | --- |
 | GET | `/boxes` | — | `boxes[]`, `history[]` |
-| POST | `/boxes/open` | `{ box }` + `Idempotency-Key` | `box`, `name`, `price`, `drops[]`, `units`, `rare`, `components`, `astra`, `nextOpenAt`, `opens` |
+| POST | `/boxes/open` | `{ box }` + `Idempotency-Key` | `box`, `name`, `price`, `drops[]`, `units`, `rare`, `components`, `plane`, `astra`, `nextOpenAt`, `opens` |
 
 `boxes[]` — по записи на бокс: `id` (`daily`, `weekly`, `crate_supply`, `crate_pro`),
 `name`, `hint`, `sprite`, `price` (0 у бесплатных), `cooldownMs`, `units` (`[min, max]`),
@@ -406,6 +406,19 @@ ASTRA из бокса не выпадает никогда.
 не меняются. Неизвестный `box` — `bad_box` (400). Замороженный мир — `world_frozen` (423).
 Открытие пишется в журнал: `box_purchase` (списание цены) и `box_open` (ресурсы),
 причина и seed сохраняются в `box_opens`, поэтому выдачу можно перепроверить.
+
+Поле `plane` — машина звена (этап 6) или `null`:
+
+```
+plane: { id, name, rarity, rarityName, hint, sprite, count, firstTime } | null
+```
+
+Машина идёт сверху ресурсов и на них не влияет: `units` и `drops` считаются как
+раньше, тем же seed. Она не тратит ASTRA, не занимает ячейку гаража и в рейсы не
+летит — это коллекция. Дубликаты копятся в `player_planes.count`, `firstTime`
+говорит, новая ли это модель. Полка целиком приходит в `/me` в блоке `planes`:
+`{ found, total, models: [{ id, name, rarity, rarityName, hint, sprite, count, firstAt }] }`,
+не найденные модели там тоже есть — с `count: 0`.
 
 Состав боксов лежит в `worker/src/shared/gameData.ts` (`BOXES`). Платные боксы —
 сток ASTRA: средняя выдача по базовым ценам рынка не больше 60 % цены (проверяется
