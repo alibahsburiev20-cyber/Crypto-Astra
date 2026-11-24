@@ -103,6 +103,8 @@ const ERRORS = {
   expedition_done: 'Рейс уже завершён',
   bad_expedition: 'Проверьте планету и тип рейса',
   player_not_found: 'Игрок не найден',
+  bad_box: 'Такого бокса нет',
+  box_cooldown: 'Этот бокс ещё закрыт: дождитесь таймера',
   idempotency_key_required: 'Повторите действие',
   idempotency_key_reused: 'Ключ запроса уже использован',
   reservation_expired: 'Место в мире истекло, попробуйте снова',
@@ -134,6 +136,8 @@ const REASONS = {
   market_sale: 'Продажа на рынке',
   market_tax: 'Налог рынка',
   market_cancel: 'Снятие лота',
+  box_purchase: 'Покупка бокса',
+  box_open: 'Ресурсы из бокса',
   migration: 'Перенос истории',
 };
 const ASSETS = { astra: 'ASTRA', fuel: 'Топливо', points: 'Очки' };
@@ -182,6 +186,11 @@ const arenaKeys = { left: false, right: false };
 // Разница «серверное время − часы устройства». Все таймеры считаются по серверу,
 // иначе при сбитых часах Claim и рейс выглядят недоступными.
 let serverOffset = 0;
+// Боксы (этап 5): таймеры бесплатных и каталог платных. Грузится при входе в
+// раздел, как сезон и социальное, чтобы не утяжелять /me.
+let boxData = null;
+// Что выпало в последний раз — показываем до перезагрузки страницы.
+let boxResult = null;
 
 // Turnstile включается только если сервер отдал site key в /config.
 // Без ключей (локальная разработка) виджет не грузится вообще.
@@ -446,6 +455,12 @@ function updateTimers() {
     const until = Number(n.getAttribute('data-until'));
     const prefix = n.getAttribute('data-prefix') || '';
     n.textContent = prefix + fmtLeft(left(until));
+  }
+  // Бокс: таймер вышел — кнопка должна ожить сама, без перезагрузки страницы.
+  for (const n of document.querySelectorAll('[data-open-box]')) {
+    if (left(Number(n.getAttribute('data-until'))) > 0 || n.dataset.refresh) continue;
+    n.dataset.refresh = '1';
+    loadBoxes();
   }
 }
 function fmtLeft(ms) {
@@ -1299,6 +1314,13 @@ function renderSeason() {
 // ── Задания и Astra Pass (этап 4) ────────────────────────────────────────────
 // Прогресс миссий считает сервер по журналу и таблицам игры, поэтому клиент
 // только рисует то, что пришло: никаких счётчиков на стороне браузера.
+async function loadBoxes() {
+  const { status, data } = await authed('/boxes');
+  if (status === 200) boxData = data;
+  else if (status !== 0) note = `Ошибка: ${errText(data.error)}`;
+  if (view === 'boxes') render();
+}
+
 async function loadSocial() {
   const { status, data } = await authed('/social');
   if (status === 200) socialData = data;
@@ -2116,6 +2138,82 @@ function renderWallet() {
   );
 }
 
+
+// ── Боксы (этап 5) ───────────────────────────────────────────────────────────
+// Два бесплатных по таймеру и два платных за ASTRA. Состав выдаёт только
+// сервер: здесь он показывает каталог, таймеры и то, что реально выпало.
+function boxCard(b) {
+  const wait = b.nextOpenAt ? left(b.nextOpenAt) : 0;
+  const locked = b.cooldownMs > 0 && wait > 0;
+  const poor = b.price > 0 && state.balances.astra < b.price;
+  const label = locked
+    ? 'Закрыт'
+    : b.price > 0
+      ? (poor ? `Нужно ${b.price} ASTRA` : `Открыть за ${b.price} ASTRA`)
+      : 'Открыть бесплатно';
+  return el('div', { class: `box-card${locked ? ' is-locked' : ''}${b.price > 0 ? ' is-paid' : ''}` },
+    el('img', { src: b.sprite, alt: '', width: '128', height: '128', class: 'box-art', loading: 'lazy' }),
+    el('div', { class: 'box-body' },
+      el('div', { class: 'box-head' },
+        el('h3', {}, b.name),
+        el('span', { class: `badge${b.price > 0 ? ' badge-paid' : ''}` }, b.price > 0 ? `${b.price} ASTRA` : 'бесплатно')),
+      el('p', { class: 'muted' }, b.hint),
+      el('p', { class: 'muted' }, `Ресурсов за открытие: ${b.units[0]}–${b.units[1]}` + (b.price > 0 ? '' : ' · ресурсы, не ASTRA')),
+      locked
+        ? el('p', { class: 'box-timer', 'data-until': String(b.nextOpenAt), 'data-open-box': b.id }, '')
+        : (b.price > 0
+          ? el('p', { class: 'muted' }, `Баланс: ${astraNum(state.balances.astra)} ASTRA`)
+          : el('p', { class: 'ok' }, 'Бокс готов')),
+      el('button', {
+        type: 'button',
+        class: b.price > 0 ? 'primary' : 'cta',
+        disabled: locked || poor || state.frozen ? '' : null,
+        'data-box-button': b.id,
+        onClick: () => doOpenBox(b.id),
+      }, label),
+      b.opens ? el('p', { class: 'muted box-opens' }, `Открыт ${b.opens === 1 ? 'один раз' : `${b.opens} раз`}`) : null,
+    ),
+  );
+}
+
+function dropsLine(drops) {
+  return (drops || []).map((d) => `${d.name || RESOURCES[d.resource] || d.resource} ×${d.amount}`).join(' · ');
+}
+
+function renderBoxes() {
+  const data = boxData;
+  const header = el('div', { class: 'screen-title' },
+    el('h2', {}, 'Боксы'),
+    el('span', { class: 'badge' }, data ? 'контейнеры базы' : 'загрузка'));
+  if (!data) {
+    return el('div', { class: 'screen' }, header,
+      el('p', { class: 'muted' }, 'Загружаем боксы…'),
+      el('button', { type: 'button', class: 'ghost', onClick: () => loadBoxes() }, 'Обновить'));
+  }
+
+  const result = boxResult && dropsLine(boxResult.drops)
+    ? el('div', { class: 'box-result' },
+      el('b', {}, `Из «${boxResult.name}» выпало:`),
+      el('span', {}, dropsLine(boxResult.drops)),
+      boxResult.components ? el('span', { class: 'ok' }, `компонентов: ${boxResult.components}`) : null)
+    : null;
+
+  const history = (data.history || []).map((h) => el('li', {},
+    el('span', { class: 'muted' }, `${fmtDay(h.at)} · ${data.boxes.find((b) => b.id === h.box)?.name || h.box}`),
+    el('span', {}, dropsLine(h.drops))));
+
+  return el('div', { class: 'screen' },
+    header,
+    el('p', { class: 'muted' }, 'Боксы — это ресурсы, а не валюта: ASTRA из них не выпадает. Дневной и недельный бесплатны по таймеру, платные — сток ASTRA. Доходность ниже, чем у рейсов: рейс приносит ещё очки и опыт.'),
+    result,
+    el('div', { class: 'box-grid' }, ...data.boxes.map(boxCard)),
+    history.length ? el('div', { class: 'block' },
+      el('h3', {}, 'Последние открытия'),
+      el('ul', { class: 'plain box-history' }, ...history)) : null,
+    note ? el('p', { class: note.startsWith('Ошибка') ? 'error' : 'ok' }, note) : null,
+  );
+}
+
 function renderLedger() {
   return el('div', { class: 'screen' },
     el('div', { class: 'screen-title' }, el('h2', {}, 'Журнал'), el('span', { class: 'badge' }, 'append-only')),
@@ -2173,6 +2271,7 @@ function render() {
               : view === 'missions' ? renderMissions()
                 : view === 'guild' ? renderGuild()
                   : view === 'bonus' ? renderBonus()
+                    : view === 'boxes' ? renderBoxes()
                     : view === 'arena' ? renderArena()
             : view === 'wallet' ? renderWallet()
             : view === 'ledger' ? renderLedger() : renderBridge();
@@ -2283,6 +2382,7 @@ async function act(scope, path, body) {
   note = '';
   const key = idemKey(scope);
   const { status, data } = await authed(path, { method: 'POST', headers: { 'Idempotency-Key': key }, body });
+  const result = { status, data };
 
   // Связь пропала или сервер экономит: сохраняем действие, а не теряем его.
   const offline = status === 0;
@@ -2293,7 +2393,7 @@ async function act(scope, path, body) {
       ? 'Связь пропала: действие сохранено и отправится само'
       : 'Действие уже в очереди, отправим при связи';
     render();
-    return;
+    return result;
   }
 
   idemDone(scope);
@@ -2302,6 +2402,7 @@ async function act(scope, path, body) {
   // Короткий сигнал: без него действие в другой вкладке выглядит «зависшим».
   if (view !== 'arena') sfx(status >= 400 ? 'lose' : 'pick');
   await loadGame();
+  return result;
 }
 
 function doClaim() { return act('claim', '/claim', {}); }
@@ -2331,12 +2432,24 @@ function doGuildLeave() { return act('guild-leave', '/guild/leave', {}).then(loa
 function doGuildKick(playerId) { return act(`guild-kick:${playerId}`, '/guild/kick', { playerId }).then(loadGuild); }
 function doGuildRename(name, tag) { return act(`guild-rename:${name}:${tag}`, '/guild/rename', { name, tag }).then(loadGuild); }
 function doGuildRole(playerId, role) { return act(`guild-role:${playerId}:${role}`, '/guild/role', { playerId, role }).then(loadGuild); }
+function doOpenBox(boxId) {
+  boxResult = null;
+  // Ключ включает счётчик открытий: двойной клик — одно действие, а следующее
+  // открытие того же бокса — уже новое.
+  const opens = boxData?.boxes?.find((b) => b.id === boxId)?.opens ?? 0;
+  return act(`box:${boxId}:${opens}`, '/boxes/open', { box: boxId }).then(async (res) => {
+    // Что выпало — из ответа сервера: в /boxes этого нет.
+    if (res && res.status < 400 && res.data?.drops) boxResult = { ...res.data, at: Date.now() };
+    await loadBoxes();
+  });
+}
 function doApplyReferral(code) { return act(`ref:${code}`, '/referrals/apply', { code }).then(loadGuild); }
 
 function setView(v) {
   view = v;
   note = '';
   if (v === 'bonus') loadPayAccount();
+  if (v === 'boxes') loadBoxes();
   if (v === 'arena') { arenaResult = null; if (!arenaData) loadArena(); }
   // Рейтинг в /me не лежит: при входе в раздел подтягиваем полный отчёт.
   if (v === 'season') loadSeason();

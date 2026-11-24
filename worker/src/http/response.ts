@@ -95,6 +95,9 @@ export const STATUS_BY_CODE: Record<string, number> = {
   admin_disabled: 503,
   pool_unavailable: 503,
   season_not_found: 404,
+  // Этап 5: боксы. У каждого кода обязан быть статус, иначе игрок увидит internal.
+  bad_box: 400,
+  box_cooldown: 429,
 };
 
 export function json(data: unknown, status = 200, headers: Record<string, string> = {}): Response {

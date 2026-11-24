@@ -2,6 +2,7 @@ import { DurableObject } from 'cloudflare:workers';
 import type { Env } from '../env';
 import { runDueJobs } from './jobs';
 import { autoClaim, claim, type ClaimResult } from './modules/claim';
+import { boxesHistory, boxesView, openBox } from './modules/boxes';
 import { startCraft } from './modules/crafting';
 import { cancelExpedition, chooseExpeditionEvent, startExpedition } from './modules/expeditions';
 import { createPlayer } from './modules/players';
@@ -89,6 +90,23 @@ export class World extends DurableObject<Env> {
   async startCraft(playerId: string, idemKey: string, recipeId: string) {
     const now = Date.now();
     const result = this.ctx.storage.transactionSync(() => startCraft(this.sql, playerId, idemKey, recipeId, now));
+    await this.arm();
+    return result;
+  }
+
+  // Боксы: чтение таймеров и открытие. Открытие — транзакция, поэтому ASTRA и
+  // ресурсы не могут разъехаться даже при падении между шагами.
+  getBoxes(playerId: string) {
+    const now = Date.now();
+    return this.ctx.storage.transactionSync(() => ({
+      ...boxesView(this.sql, playerId, now),
+      history: boxesHistory(this.sql, playerId, 5),
+    }));
+  }
+
+  async openBox(playerId: string, idemKey: string, boxId: string) {
+    const now = Date.now();
+    const result = this.ctx.storage.transactionSync(() => openBox(this.sql, playerId, idemKey, boxId, now));
     await this.arm();
     return result;
   }

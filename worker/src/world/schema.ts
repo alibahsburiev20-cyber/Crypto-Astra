@@ -172,6 +172,16 @@ export const WORLD_SCHEMA: string[] = [
      player_id TEXT NOT NULL, level INTEGER NOT NULL, season_id TEXT NOT NULL,
      claimed_at INTEGER NOT NULL,
      PRIMARY KEY (player_id, level, season_id))`,
+  // Боксы (этап 5). `box_state` — таймеры бесплатных, `box_opens` — журнал
+  // открытий с seed: по нему видно, что выпало и можно ли это перепроверить.
+  `CREATE TABLE IF NOT EXISTS box_state (
+     player_id TEXT NOT NULL REFERENCES players (id), box TEXT NOT NULL,
+     last_open_at INTEGER NOT NULL, opens INTEGER NOT NULL DEFAULT 0,
+     PRIMARY KEY (player_id, box))`,
+  `CREATE TABLE IF NOT EXISTS box_opens (
+     id TEXT PRIMARY KEY, player_id TEXT NOT NULL REFERENCES players (id), box TEXT NOT NULL,
+     seed TEXT NOT NULL, cost INTEGER NOT NULL, drops_json TEXT NOT NULL, created_at INTEGER NOT NULL)`,
+  `CREATE INDEX IF NOT EXISTS idx_box_opens_player ON box_opens (player_id, created_at)`,
   `CREATE TRIGGER IF NOT EXISTS ledger_no_update BEFORE UPDATE ON ledger
      BEGIN SELECT RAISE(ABORT, 'ledger is append-only'); END`,
   `CREATE TRIGGER IF NOT EXISTS ledger_no_delete BEFORE DELETE ON ledger

@@ -304,6 +304,19 @@ export async function referralApply(request: Request, env: Env, a: AuthContext):
 }
 
 // ── Гараж (этап 14) ──────────────────────────────────────────────────────────
+// Боксы: чтение таймеров и открытие. Открытие идёт через общий `idemKey`:
+// двойной клик не снимет ASTRA дважды.
+export async function boxes(env: Env, a: AuthContext): Promise<Response> {
+  return json(await world(env, a).getBoxes(a.userId));
+}
+
+export async function boxOpen(request: Request, env: Env, a: AuthContext): Promise<Response> {
+  const body = await readJson(request);
+  const box = typeof body.box === 'string' ? body.box : '';
+  if (!box) throw new ApiError(400, 'bad_box');
+  return json(await world(env, a).openBox(a.userId, idemKey(request), box));
+}
+
 export async function garage(env: Env, a: AuthContext): Promise<Response> {
   return json(await world(env, a).getGarage(a.userId, await isPremium(env, a)));
 }

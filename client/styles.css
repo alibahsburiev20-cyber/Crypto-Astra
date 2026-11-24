@@ -1133,3 +1133,30 @@ button.ghost, .cta-small { min-height: 36px; }
 .garage-slot.is-locked { opacity: 0.45; }
 .garage-slot.is-locked .garage-label { font-style: italic; }
 .garage-block { background-image: url('/sprites/garage/hangar_bg.png'); background-size: cover; background-position: center; }
+
+/* Боксы (этап 5): карточки контейнеров и результат открытия. */
+.box-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.box-card {
+  display: grid; grid-template-columns: 128px minmax(0, 1fr); gap: 12px; align-items: start;
+  padding: 12px; border: 1px solid var(--line); border-radius: 14px;
+  background: rgba(10, 18, 36, .55);
+}
+.box-card.is-paid { border-color: rgba(240, 138, 36, .35); background: rgba(240, 138, 36, .05); }
+.box-card.is-locked { opacity: .72; }
+.box-art { image-rendering: pixelated; width: 128px; height: 128px; }
+.box-body { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.box-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.box-head h3 { margin: 0; font-size: 15px; }
+.box-card p { margin: 0; font-size: 12px; }
+.box-timer { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--orange, #f08a24); }
+.box-opens { opacity: .8; }
+.badge-paid { border-color: rgba(240, 138, 36, .5); color: var(--orange, #f08a24); }
+.box-result {
+  display: flex; flex-direction: column; gap: 4px; padding: 12px; margin-bottom: 12px;
+  border: 1px solid rgba(61, 220, 132, .4); border-radius: 14px; background: rgba(61, 220, 132, .07);
+}
+.box-history li { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+@media (max-width: 560px) {
+  .box-card { grid-template-columns: 88px minmax(0, 1fr); }
+  .box-art { width: 88px; height: 88px; }
+}
