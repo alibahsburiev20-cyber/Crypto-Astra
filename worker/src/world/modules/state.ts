@@ -19,7 +19,18 @@ import { garageView } from './garage';
 import { planesView } from './planes';
 import { ownIdentity } from './identity';
 
-export function buildState(sql: SqlStorage, playerId: string, now: number, premium = false) {
+/**
+ * Состояние игрока для `/me`.
+ *
+ * `shipId` — для какого корабля считать список планет и варианты рейса. По
+ * умолчанию это первый корабль игрока, но экран «Куда летим» умеет выбирать
+ * борт, и тогда серверу нужно знать, какой: у разных кораблей разный радиус,
+ * расход топлива и оценка награды. Ошибиться в оценках сервер не даёт:
+ * варианты считаются той же математикой, что и награда.
+ */
+export function buildState(
+  sql: SqlStorage, playerId: string, now: number, premium = false, shipId: string | null = null,
+) {
   const base = getPlayerState(sql, playerId);
   const day = utcDay(now);
   const daily = dailyOf(sql, playerId, day);
@@ -50,7 +61,10 @@ export function buildState(sql: SqlStorage, playerId: string, now: number, premi
     }
     return { id: String(raw.id), type, name: def.name, durability, status, repair };
   });
-  const activeShip = ships[0];
+  // Корабль, под который считается планировщик рейсов. Чужой или неизвестный id
+  // молча возвращает к первому кораблю: /me не должен падать из-за устаревшего
+  // выбора в интерфейсе.
+  const activeShip = (shipId ? ships.find((sh) => sh.id === shipId) : null) ?? ships[0];
   const shipFx = activeShip ? (fxByShip.get(activeShip.id) ?? NEUTRAL_FX) : NEUTRAL_FX;
   const planets = PLANETS.map((planet) => {
     const sector = sectorById(planet.sector);

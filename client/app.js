@@ -13,7 +13,7 @@ const ERRORS = {
   invalid_password: 'Пароль: от 8 до 128 символов',
   bad_request: 'Некорректный запрос',
   payload_too_large: 'Запрос слишком большой',
-  turnstile_failed: 'Проверка не пройдена',
+  turnstile_failed: 'Проверка «я человек» не пройдена — подтвердите ещё раз',
   unauthorized: 'Нужно войти заново',
   no_session: 'Сессия истекла, войдите заново',
   ship_not_found: 'Корабль не найден',
@@ -30,7 +30,7 @@ const ERRORS = {
   short: 'Забег не дотянут до конца: попытка сгорела',
   daily_limit: 'Попытки на сегодня кончились',
   registration_incomplete: 'Регистрация не завершилась, попробуйте войти или обратитесь в поддержку',
-  turnstile_required: 'Подтвердите, что вы не робот',
+  turnstile_required: 'Сначала пройдите проверку «я человек» — без неё бонус не выдаётся',
   too_many_attempts: 'Слишком много попыток. Подождите и попробуйте снова',
   world_frozen: 'Мир заморожен: журнал не сходится',
   season_not_found: 'Сезон не найден',
@@ -79,7 +79,7 @@ const ERRORS = {
   ship_locked: 'Уровень ещё мал для этого корабля',
   ship_owned: 'Такой корабль уже в ангаре',
   garage_full: 'Гараж полон: купите ещё одну ячейку',
-  garage_max: 'Больше ячеек не бывает: максимум 8',
+  garage_max: 'Больше ячеек не бывает: максимум 6 — по числу кораблей',
   bad_world: 'Неверный идентификатор мира',
   admin_disabled: 'Админка выключена: не задан ADMIN_TOKEN',
   admin_forbidden: 'Токен админки не подошёл',
@@ -108,6 +108,7 @@ const ERRORS = {
   bad_plane: 'Такой машины в звене нет',
   plane_not_owned: 'Этой машины у вас ещё нет — ищите её в боксах и в патрулях',
   patrol_busy: 'Машина уже в патруле: дождитесь возвращения',
+  patrol_slots_full: 'Все слоты звена заняты: сдайте вернувшиеся борта или подождите',
   patrol_flying: 'Патруль ещё не вернулся',
   no_patrol: 'Активного патруля нет',
   box_cooldown: 'Этот бокс ещё закрыт: дождитесь таймера',
@@ -144,6 +145,7 @@ const REASONS = {
   market_cancel: 'Снятие лота',
   box_purchase: 'Покупка бокса',
   box_open: 'Ресурсы из бокса',
+  plane_salvage: 'Добыча авиазвена',
   migration: 'Перенос истории',
 };
 const ASSETS = { astra: 'ASTRA', fuel: 'Топливо', points: 'Очки' };
@@ -216,6 +218,34 @@ let loginNeedsTurnstile = false;
 // Cloudflare одноразовый.
 let bonusToken = null;
 let bonusWidget = null;
+/**
+ * Состояние шлюза: 'loading' — скрипт ещё грузится, 'ready' — виджет ждёт
+ * нажатия, 'done' — токен получен, 'error' — виджет не поднялся.
+ *
+ * Раньше про любую беду (нельзя скачать challenges.cloudflare.com, ключ не
+ * подходит к домену, игрок сидит через блокировщик) интерфейс молчал: кнопка
+ * оставалась серой, а рядом висел «сбой». Теперь у каждой беды есть своё слово и
+ * своя кнопка «Повторить» — проверка это внешний сервис, и что она недоступна,
+ * надо сказать прямо, а не превращать в таймаут.
+ */
+let bonusGate = 'loading';
+let bonusGateNote = '';
+/**
+ * Контейнер под виджет. Один и тот же node переезжает из карточки в карточку:
+ * перерисовка экрана не рвёт живой challenge, иначе каждые несколько секунд
+ * Turnstile начинала бы сначала и в итоге падала в error-callback.
+ */
+const bonusGateHost = (() => {
+  const node = document.createElement('div');
+  node.id = 'turnstile-claim';
+  node.className = 'ts-host';
+  return node;
+})();
+
+function setBonusGate(status, noteText = '') {
+  bonusGate = status;
+  bonusGateNote = noteText;
+}
 
 function setText(selector, value) {
   const n = document.querySelector(selector);
@@ -432,8 +462,17 @@ function showTurnstile() {
       sitekey: config.turnstile_site_key,
       theme: 'dark',
       callback: (token) => { turnstileToken = token; },
-      'expired-callback': () => { turnstileToken = null; },
-      'error-callback': () => { turnstileToken = null; },
+      'expired-callback': () => {
+        turnstileToken = null;
+        const box = $('#turnstile');
+        if (box && !box.hidden) $('#auth-error').textContent = 'Подтверждение истекло — отметьте заново';
+      },
+      'error-callback': (err) => {
+        turnstileToken = null;
+        // Тот же принцип, что и в бонусном шлюзе: сбой внешнего сервиса — это не
+        // «вы робот» и не пустая форма, а строчка с понятным следующим шагом.
+        $('#auth-error').textContent = turnstileErrorText(err);
+      },
     });
   }).catch(() => {
     // Сбросить промис, чтобы следующая попытка снова попробовала загрузить скрипт.
@@ -461,34 +500,146 @@ function bonusGateOn() {
  */
 function bonusGateBlock() {
   if (!bonusGateOn()) return null;
-  return el('div', { class: 'bonus-check' },
-    bonusToken
-      ? el('p', { class: 'ok' }, 'Человек подтверждён — можно забирать.')
-      : el('p', { class: 'muted' }, 'Подтвердите, что вы человек: Claim и бесплатные бонусы выдаются только после проверки.'),
-    bonusToken ? null : el('div', { id: 'turnstile-claim', class: 'ts-host' }));
+  if (bonusToken) {
+    return el('div', { class: 'bonus-check is-done' },
+      el('p', { class: 'ok' }, 'Человек подтверждён — можно забирать.'));
+  }
+  const hint = {
+    loading: 'Загружаем проверку…',
+    ready: 'Подтвердите, что вы человек: Claim и бесплатные бонусы выдаются только после проверки.',
+    error: bonusGateNote || 'Проверка не ответила. Попробуйте ещё раз.',
+  }[bonusGate] || '';
+  return el('div', { class: `bonus-check is-${bonusGate}` },
+    el('p', { class: bonusGate === 'error' ? 'error' : 'muted' }, hint),
+    bonusGate === 'error' ? el('div', { class: 'bonus-check-actions' },
+      el('button', { type: 'button', class: 'ghost', onClick: () => retryBonusGate() }, 'Повторить проверку'),
+      el('button', { type: 'button', class: 'link', onClick: () => location.reload() }, 'Перезагрузить страницу'))
+      : null,
+    // Контейнер не пересоздаётся: в нём живёт iframe Turnstile. В ошибке он
+    // просто скрыт — «Повторить» должен найти тот же node, а не новый.
+    el('div', { class: `ts-wrap${bonusGate === 'error' ? ' is-hidden' : ''}` }, bonusGateHost));
 }
 
 /** Навешиваем виджет после перерисовки экрана. Токен уже есть — перерисовка не нужна. */
 function mountBonusGate() {
+  if (!bonusGateOn()) { setBonusGate('ready'); return; }
+  if (bonusToken) { setBonusGate('done'); return; }
   const box = document.getElementById('turnstile-claim');
-  if (!box || !bonusGateOn() || bonusToken) return;
+  if (!box) return;
+  // Живой виджет уже стоит в нужном контейнере (node переезжает между экранами
+  // целиком) — значит ничего пересаживать нельзя: каждый повторный render()
+  // обрывал бы challenge на середине и приводил бы к «сбою».
+  if (bonusWidget !== null && window.turnstile && box.firstChild) return;
+  if (window.turnstile) { renderBonusWidget(box); return; }
+  setBonusGate('loading');
   ensureTurnstileScript().then(() => {
-    if (!window.turnstile || !document.getElementById('turnstile-claim')) return;
-    if (bonusWidget !== null) {
-      // Экран перерисован: старый контейнер detached, виджет ставим заново.
-      try { window.turnstile.remove(bonusWidget); } catch { /* уже снят */ }
-      bonusWidget = null;
+    if (!window.turnstile) {
+      setBonusGate('error', 'Скрипт проверки загрузился, но не запустился: его блокирует расширение или сеть. Отключите блокировщик и повторите.');
+      refreshBonusGateView();
+      return;
     }
+    const target = document.getElementById('turnstile-claim');
+    if (target) renderBonusWidget(target);
+    else refreshBonusGateView();
+  }).catch(() => {
+    // Сбросить промис, чтобы следующая попытка снова попробовала загрузить скрипт.
+    turnstileScript = null;
+    setBonusGate('error', 'Не удалось загрузить проверку Cloudflare: нет связи или её блокирует расширение. Бонусы никуда не денутся — повторите, когда связь вернётся.');
+    refreshBonusGateView();
+  });
+}
+
+function renderBonusWidget(box) {
+  if (bonusWidget !== null) {
+    try { window.turnstile.remove(bonusWidget); } catch { /* уже снят */ }
+    bonusWidget = null;
+  }
+  setBonusGate('ready');
+  try {
     bonusWidget = window.turnstile.render(box, {
       sitekey: config.turnstile_site_key,
       theme: 'dark',
-      callback: (token) => { bonusToken = token; refreshBonusButtons(); },
-      'expired-callback': () => { bonusToken = null; refreshBonusButtons(); },
-      'error-callback': () => { bonusToken = null; refreshBonusButtons(); },
+      callback: (token) => { bonusToken = token; setBonusGate('done'); refreshBonusButtons(); refreshBonusGateView(); },
+      'expired-callback': () => { bonusToken = null; setBonusGate('ready', ''); refreshBonusButtons(); refreshBonusGateView(); },
+      'timeout-callback': () => { bonusToken = null; setBonusGate('ready', ''); refreshBonusButtons(); refreshBonusGateView(); },
+      // Ошибка виджета — это не «вы робот». Чаще всего ключ Turnstile не привязан
+      // к домену (на превью так и есть) или challenge не дожил до ответа сети.
+      // Гасим молчание словом и кнопкой повтора, а не серой кнопкой «Claim».
+      'error-callback': (err) => {
+        bonusToken = null;
+        setBonusGate('error', turnstileErrorText(err));
+        refreshBonusButtons();
+        refreshBonusGateView();
+      },
     });
+  } catch {
+    setBonusGate('error', 'Виджет проверки не запустился на этом браузере. Попробуйте перезагрузить страницу.');
+    refreshBonusButtons();
+    refreshBonusGateView();
+  }
+}
+
+/**
+ * Что Turnstile имел в виду под своей ошибкой. Коды приходят и строкой, и
+ * объектом — Cloudflare нигде не обещает формат, поэтому разбираем оба.
+ *
+ * Смысл ровно один: «сбой» — это не обвинение игрока в роботизме. Домен без
+ * ключа, блокировщик, сеть — всё это лечится повтором или другим адресом, и
+ * игрок обязан увидеть что именно попробовать.
+ */
+function turnstileErrorText(err) {
+  const raw = typeof err === 'string' ? err : String((err && (err.code || err.message)) || '');
+  const code = raw ? ` (код ${raw})` : '';
+  // 600010 — invalid sitekey / hostname не в списке виджета.
+  if (/600010|400010|300020/.test(raw)) {
+    return `Этот адрес не настроен для проверки Cloudflare${code}. На боевом домене всё работает; здесь можно повторить или перезагрузить страницу.`;
+  }
+  // 300030 — несколько виджетов на странице; 110700 — challenge истёк в сети.
+  if (/300030/.test(raw)) {
+    return `Проверка уже открыта в другом окне${code}. Закройте лишнюю вкладку и повторите.`;
+  }
+  return `Проверка не дошла до конца${code} — обычно это сеть или блокировщик скриптов. Попробуйте ещё раз, бонусы никуда не денутся.`;
+}
+
+/** «Повторить» из состояния ошибки: пробуем и скрипт, и виджет заново. */
+function retryBonusGate() {
+  setBonusGate('loading');
+  refreshBonusGateView();
+  if (bonusWidget !== null && window.turnstile) {
+    try { window.turnstile.remove(bonusWidget); } catch { /* уже снят */ }
+    bonusWidget = null;
+  }
+  const box = document.getElementById('turnstile-claim');
+  if (window.turnstile && box) { renderBonusWidget(box); return Promise.resolve(); }
+  turnstileScript = null;
+  return mountBonusGateAsync(box);
+}
+
+function mountBonusGateAsync(box) {
+  return ensureTurnstileScript().then(() => {
+    const target = box || document.getElementById('turnstile-claim');
+    if (window.turnstile && target) renderBonusWidget(target);
+    else {
+      setBonusGate('error', 'Проверка всё ещё не загружается. Проверьте связь или отключите блокировщик скриптов.');
+      refreshBonusGateView();
+    }
   }).catch(() => {
     turnstileScript = null;
+    setBonusGate('error', 'Не удалось загрузить проверку Cloudflare: нет связи или её блокирует расширение.');
+    refreshBonusGateView();
   });
+}
+
+/**
+ * Обновить только блок шлюза, не перерисовывая весь экран: перерисовка убила бы
+ * живой виджет, и игрок не досмотрел быchallenge до конца.
+ */
+function refreshBonusGateView() {
+  const host = document.querySelector('.bonus-check');
+  if (!host) return;
+  const fresh = bonusGateBlock();
+  if (fresh) host.replaceWith(fresh);
+  refreshBonusButtons();
 }
 
 /** Кнопки бонусов активны только со свежим токеном (и когда таймер позволил). */
@@ -497,18 +648,27 @@ function refreshBonusButtons() {
   const claimLeft = left(state?.nextClaimAt);
   for (const btn of document.querySelectorAll('[data-claim]')) {
     btn.disabled = blocked || claimLeft > 0 || !!state?.frozen;
+    btn.title = blocked
+      ? (bonusGate === 'error' ? 'Сначала пройдите проверку «я человек»' : 'Нужно подтвердить, что вы человек')
+      : '';
   }
   for (const btn of document.querySelectorAll('[data-box-button][data-free="1"]')) {
     if (btn.dataset.busy === '1') continue;
     btn.disabled = blocked || !!state?.frozen;
+    btn.title = blocked ? 'Нужно подтвердить, что вы человек' : '';
   }
 }
 
 /** Токен одноразовый: после любого бонусного действия просим подтверждение заново. */
 function resetBonusGate() {
   bonusToken = null;
+  setBonusGate(window.turnstile ? 'ready' : 'loading');
   if (bonusWidget !== null && window.turnstile) {
-    try { window.turnstile.reset(bonusWidget); } catch { /* виджет уже снят */ }
+    // reset() возвращает виджет в исходное состояние. Убираем его совсем: на
+    // некоторых браузерах reset после ошибки оставляет мёртвый iframe, и кнопка
+    // выглядит живой, а токен не приходит никогда.
+    try { window.turnstile.remove(bonusWidget); } catch { /* виджет уже снят */ }
+    bonusWidget = null;
   }
   refreshBonusButtons();
 }
@@ -867,10 +1027,40 @@ function tutorialCard() {
     el('button', { type: 'button', class: 'primary', onClick: finish }, 'Понятно, поехали'));
 }
 
+/** Активные рейсы всегда массив: раньше сервер отдавал один, и второй борт
+ * флота оставался невидимкой. Одиночный объект от старого API тоже принимается. */
+function activeExpeditions() {
+  const a = state?.expeditions?.active;
+  if (Array.isArray(a)) return a;
+  return a ? [a] : [];
+}
+
+/** Корабль, под который планируем рейс: выбранный игроком или первый свободный. */
+function flightShipId() {
+  const picked = (state?.ships || []).find((s) => s.id === window.__ship);
+  // Выбор живёт до перезагрузки страницы, а корабль за это время мог улететь:
+  // занятому борту планет не планируем, берём первого свободного.
+  if (picked && picked.status === 'idle' && picked.durability > 0) return picked.id;
+  const idle = (state?.ships || []).find((s) => s.status === 'idle' && s.durability > 0);
+  return idle ? idle.id : (state?.ships?.[0]?.id || null);
+}
+
+/** Свободные корабли: те, что можно отправить прямо сейчас. */
+function idleShips() {
+  return (state?.ships || []).filter((s) => s.status === 'idle' && s.durability > 0);
+}
+
+/** Смена корабля — серверный запрос: варианты рейса и радиус считает сервер. */
+function pickShip(id) {
+  window.__ship = id;
+  loadGame().then(render);
+}
+
 function renderBridge() {
   const season = state.season;
   const ship = state.ships[0];
-  const active = state.expeditions.active;
+  const actives = activeExpeditions();
+  const active = actives[0] || null;
   const claimLeft = left(state.nextClaimAt);
   const b = state.balances;
   return el('div', { class: 'screen' },
@@ -878,15 +1068,17 @@ function renderBridge() {
       shipArt(ship?.type || 'scout'),
       el('div', { class: 'hero-copy' },
         el('span', { class: 'badge' }, 'Мостик'),
-        el('h2', {}, active ? 'Рейс в пути' : 'Готовы к прыжку?'),
+        el('h2', {}, actives.length > 1 ? `${actives.length} рейса в пути` : active ? 'Рейс в пути' : 'Готовы к прыжку?'),
         el('p', { class: 'muted' }, active
-          ? `${active.planet} · до финиша ${fmtLeft(left(active.endsAt))}`
-          : 'Выберите планету, отправьте корабль и привезите ресурсы.'),
+          ? actives.length > 1
+            ? `${actives.length} бортов · ближайший финиш через ${fmtLeft(Math.min(...actives.map((a) => left(a.endsAt))))}`
+            : `${active.planet} · до финиша ${fmtLeft(left(active.endsAt))}`
+          : 'Выберите планету и корабль — свободные борта могут лететь одновременно.'),
         el('button', {
           type: 'button',
           class: active ? 'cta cta-ghost' : 'cta',
           onClick: () => setView('flight'),
-        }, active ? 'Открыть рейс' : 'Начать экспедицию'),
+        }, actives.length > 1 ? `Открыть рейсы (${actives.length})` : active ? 'Открыть рейс' : 'Начать экспедицию'),
       ),
     ),
     levelBar(),
@@ -928,39 +1120,54 @@ function renderBridge() {
   );
 }
 
-function renderFlight() {
-  const active = state.expeditions.active;
-  const ship = (active && state.ships.find((s) => s.id === active.shipId)) || state.ships[0] || null;
-  if (active) {
-    const remain = left(active.endsAt);
-    const kids = [
-      shipArt(ship?.type || 'scout'),
-      el('h2', {}, active.status === 'waiting_choice' ? 'Событие в пути' : 'Рейс'),
-      el('p', {}, `${active.planet} · ${active.kind}`),
+/**
+ * Один рейс: карточка с таймером, выбором корабля, событием и отменой.
+ * Вынесено из «Рейса» в функцию, потому что карточек теперь несколько —
+ * по числу кораблей в воздухе.
+ */
+function expeditionCard(x) {
+  const ship = state.ships.find((s) => s.id === x.shipId);
+  const remain = left(x.endsAt);
+  const kids = [
+    el('div', { class: 'expedition-head' },
+      el('div', { class: 'expedition-who' },
+        el('img', { src: shipArtSrc(ship?.type || 'scout'), alt: '', width: '56', height: '28', class: 'expedition-ship', loading: 'lazy' }),
+        el('div', {},
+          el('h3', {},
+            x.status === 'waiting_choice' ? 'Событие в пути' : 'Рейс',
+            el('span', { class: 'badge' }, ship ? ship.name : x.shipId)),
+          el('p', { class: 'muted' }, `${x.planet} · ${x.kind}`))),
       remain > 0
-        ? el('p', { class: 'muted', 'data-prefix': 'До финиша ', 'data-until': active.endsAt }, `До финиша ${fmtLeft(remain)}. Награду начислит сервер.`)
-        : el('p', { class: 'muted' }, 'Время вышло. Обновляем результат…'),
+        ? el('p', { class: 'muted', 'data-prefix': 'До финиша ', 'data-until': x.endsAt }, `До финиша ${fmtLeft(remain)}`)
+        : el('p', { class: 'muted' }, 'Время вышло. Обновляем результат…')),
     ];
-    if (active.event) {
-      kids.push(el('div', { class: 'block' },
-        el('h3', {}, active.event.title),
-        el('p', {}, active.event.text),
-        el('div', { class: 'choices' }, ...active.event.choices.map((c) =>
-          el('button', {
-            type: 'button',
-            disabled: state.frozen ? '' : null,
-            onClick: () => doChoose(active.id, c.id),
-          }, `${c.label}${c.safe ? ' · тише' : ' · риск'}`),
-        )),
-      ));
-    }
-    if (Date.now() <= active.cancelUntil) {
-      kids.push(el('button', { type: 'button', class: 'ghost', disabled: state.frozen ? '' : null, onClick: () => doCancel(active.id) }, 'Отменить (вернётся половина топлива)'));
-    }
-    if (active.reward) kids.push(rewardBlock(active.reward));
-    if (note) kids.push(el('p', { class: 'ok' }, note));
-    return el('div', {}, ...kids);
+  if (x.event) {
+    kids.push(el('div', { class: 'block' },
+      el('h3', {}, x.event.title),
+      el('p', {}, x.event.text),
+      el('div', { class: 'choices' }, ...x.event.choices.map((c) =>
+        el('button', {
+          type: 'button',
+          disabled: state.frozen ? '' : null,
+          onClick: () => doChoose(x.id, c.id),
+        }, `${c.label}${c.safe ? ' · тише' : ' · риск'}`),
+      )),
+    ));
   }
+  if (Date.now() <= x.cancelUntil) {
+    kids.push(el('button', { type: 'button', class: 'ghost', disabled: state.frozen ? '' : null, onClick: () => doCancel(x.id) }, 'Отменить (вернётся половина топлива)'));
+  }
+  if (x.reward) kids.push(rewardBlock(x.reward));
+  return el('div', { class: `block expedition-card${x.event ? ' has-event' : ''}` }, ...kids);
+}
+
+function renderFlight() {
+  const actives = activeExpeditions();
+  const idle = idleShips();
+  // Планируем рейс по кораблю, который выбрал игрок (window.__ship). Сервер
+  // считает под него планеты и варианты, поэтому оценки всегда про тот борт,
+  // который реально полетит, а не всегда про первый в ангаре.
+  const ship = idle.find((sh) => sh.id === flightShipId()) || idle[0] || null;
   const last = state.expeditions.recent[0];
   // state.planets приходит с сервера; пустой массив — страховка от старого API,
   // иначе вкладка «Рейс» падала бы на filter и экран оставался пустым.
@@ -1006,6 +1213,22 @@ function renderFlight() {
     );
   }));
 
+  // Выбор корабля. Пока свободных бортов много, «Старт» должен быть понятен:
+  // летит тот, что подсвечен, а остальные остаются на земле и ждут своей пары.
+  const picker = idle.length
+    ? el('div', { class: 'ship-picker' },
+        el('span', { class: 'picker-label' }, 'Корабль'),
+        ...idle.map((sh) => el('button', {
+          type: 'button',
+          class: `ship-chip${sh.id === ship?.id ? ' selected' : ''}`,
+          'aria-pressed': sh.id === ship?.id ? 'true' : 'false',
+          onClick: () => pickShip(sh.id),
+        },
+          el('img', { src: shipArtSrc(sh.type), alt: '', width: '40', height: '20', class: 'chip-art', loading: 'lazy' }),
+          el('span', {}, sh.name),
+          el('em', {}, `${sh.durability}%`))))
+    : null;
+
   const detail = selected ? el('div', { class: 'planet-detail' },
     planetArt(selected, true),
     el('div', { class: 'planet-detail-info' },
@@ -1017,9 +1240,12 @@ function renderFlight() {
     ),
   ) : null;
 
-  return el('div', {},
+  const planner = el('div', { class: 'flight-plan' },
     shipArt(ship?.type || 'scout'),
-    el('div', { class: 'screen-title' }, el('h2', {}, 'Куда летим'), el('span', { class: 'badge' }, 'Экспедиция')),
+    el('div', { class: 'screen-title' },
+      el('h2', {}, 'Куда летим'),
+      el('span', { class: 'badge' }, actives.length ? `${actives.length} в пути · ${idle.length} свободных` : 'Экспедиция')),
+    picker,
     grid,
     detail,
     el('div', { class: 'choices kinds' }, ...['short', 'medium', 'long'].map((k) => {
@@ -1039,10 +1265,17 @@ function renderFlight() {
       class: 'cta',
       disabled: !opt || !ship || state.frozen || state.balances.fuel < (opt?.fuel ?? 99) || ship.durability <= 0 ? '' : null,
       onClick: () => doStart(ship?.id, selected?.id, kind),
-    }, 'Старт'),
+    }, idle.length > 1 ? `Старт · ${ship?.name || ''}` : 'Старт'),
     ship && ship.durability > 0 && ship.durability <= 70 ? el('p', { class: 'error' }, 'Прочность низкая. Ниже 50% ремонт закрыт: нет alloy_plate.') : null,
-    last?.reward ? rewardBlock(last.reward, 'Прошлый результат уже начислен') : null,
+    !idle.length ? el('p', { class: 'muted' }, 'Свободных кораблей нет: все борта в рейсе или требуют ремонта. Дождитесь возвращения — и можно лететь дальше.') : null,
+    idle.length > 1 ? el('p', { class: 'muted' }, `Свободных бортов: ${idle.length}. Каждый может лететь своей планетой одновременно с остальными.`) : null,
+  );
+
+  return el('div', {},
+    actives.length ? el('div', { class: 'flight-live' }, ...actives.map((x) => expeditionCard(x))) : null,
+    planner,
     note ? el('p', { class: note.startsWith('Ошибка') ? 'error' : 'ok' }, note) : null,
+    last?.reward ? rewardBlock(last.reward, 'Прошлый результат уже начислен') : null,
   );
 }
 
@@ -1083,47 +1316,66 @@ function fmtDuration(ms) {
   return `${Math.round(ms / 60000)} мин`;
 }
 
-// Активный патруль: машина летает и возвращается либо с новой машиной, либо ни с
-// чем. Ни ASTRA, ни ресурсов — иначе звеном можно было бы фармить мир в обход рейсов.
+/**
+ * Борта звена в воздухе. Их несколько — до `slots` сразу, и каждый тащит свою
+ * закладку. Сдаётся всё одной кнопкой: гонять игрока по карточкам незачем.
+ */
 function planePatrolBlock() {
   const p = state.planes;
-  const patrol = p && p.patrol;
-  if (!patrol) return null;
-  const ready = patrol.ready;
-  const chance = Math.round(patrol.findChance * 1000) / 10;
-  return el('div', { class: `block plane-patrol${ready ? ' is-ready' : ''}` },
-    el('div', { class: 'plane-patrol-sky' },
-      el('img', {
-        src: patrol.sprite, alt: '', width: '64', height: '64', class: 'plane-patrol-art', loading: 'lazy',
-      })),
-    el('div', { class: 'plane-patrol-info' },
-      el('h3', {}, `${patrol.name} в патруле`, el('span', { class: 'badge' }, patrol.rarityName || patrol.rarity)),
-      el('p', { class: 'muted' }, `Шанс находки за вылет: ${chance} %`),
-      // Когда патруль вернулся, таймер не показываем: updateTimers переписал бы
-      // его в «Вернулась: 0:00» и оставил бы нули висеть до перерисовки.
-      ready
-        ? el('p', { class: 'ok' }, 'Машина вернулась — заберите находку')
-        : el('p', {
-          class: 'muted',
-          'data-until': patrol.endsAt,
-          'data-prefix': 'Вернётся через ',
-        }, ''),
-      el('button', {
-        type: 'button',
-        disabled: state.frozen || !ready ? '' : null,
-        onClick: () => doClaimPatrol(),
-      }, ready ? 'Забрать находку' : 'Ещё летит')),
-    el('span', { class: 'plane-timer', 'data-patrol-ready': '1', 'data-until': patrol.endsAt }));
+  const list = p.active || (p.patrol ? [p.patrol] : []);
+  if (!list.length) return null;
+  const readyCount = list.filter((x) => x.ready).length;
+  return el('div', { class: `block plane-patrol${readyCount ? ' is-ready' : ''}` },
+    el('div', { class: 'plane-patrol-head' },
+      el('h3', {}, 'Звено в воздухе',
+        el('span', { class: 'badge' }, `${list.length}/${p.slots || 1}`)),
+      readyCount
+        ? el('button', {
+          type: 'button',
+          class: 'primary',
+          disabled: state.frozen ? '' : null,
+          onClick: () => doClaimPatrol(),
+        }, `Забрать ${readyCount > 1 ? `${readyCount} борта` : 'находку'}`)
+        : null),
+    el('div', { class: 'plane-patrol-list' }, ...list.map((patrol) => {
+      const chance = Math.round(patrol.findChance * 1000) / 10;
+      return el('div', { class: `plane-patrol-row${patrol.ready ? ' is-ready' : ''}` },
+        el('span', { class: 'plane-patrol-sky' },
+          el('img', { src: patrol.sprite, alt: '', width: '48', height: '48', class: 'plane-patrol-art', loading: 'lazy' })),
+        el('div', { class: 'plane-patrol-info' },
+          el('p', { class: 'plane-patrol-name' }, patrol.name,
+            el('span', { class: 'badge' }, patrol.rarityName || patrol.rarity)),
+          el('p', { class: 'muted' }, `Закладка: ${patrol.salvageText || 'ресурсы'} · опыт ${patrol.xp} · находка новой машины ${chance} %`),
+          // Когда борт вернулся, таймер не показываем: updateTimers переписал бы
+          // его в «Вернётся через 0:00» и оставил нули висеть до перерисовки.
+          patrol.ready
+            ? el('p', { class: 'ok' }, 'Вернулась — заберите добычу')
+            : el('p', {
+              class: 'muted',
+              'data-until': patrol.endsAt,
+              'data-prefix': 'Вернётся через ',
+            }, '')),
+        el('span', { class: 'plane-timer', 'data-patrol-ready': '1', 'data-until': patrol.endsAt }));
+    })));
 }
 
 function planeShelf() {
   const p = state.planes;
   if (!p || !p.models) return null;
-  const busy = !!p.patrol;
+  const slots = p.slots || 1;
+  // Полка собрана — и это надо сказать честно: патруль по-прежнему приносит
+  // закладку, но искать ему больше нечего.
+  const complete = p.total > 0 && (p.found || 0) >= p.total;
+  const free = p.freeSlots != null ? p.freeSlots : Math.max(0, slots - (p.flying || 0));
   const cells = p.models.map((m) => {
     const chance = Math.round(m.findChance * 1000) / 10;
+    const busy = !!m.flying;
+    const blocked = state.frozen || busy || free <= 0;
+    const label = busy ? 'В патруле'
+      : free <= 0 ? 'Слотов нет'
+        : `В патруль · ${fmtDuration(m.patrolMs)}`;
     return el('div', {
-      class: `plane-slot rarity-${m.rarity || 'common'}${m.count ? ' is-found' : ' is-locked'}`,
+      class: `plane-slot rarity-${m.rarity || 'common'}${m.count ? ' is-found' : ' is-locked'}${busy ? ' is-flying' : ''}`,
     },
       el('img', {
         src: m.sprite || `/sprites/planes/${m.id}.png`,
@@ -1132,23 +1384,34 @@ function planeShelf() {
       el('span', { class: 'plane-name' }, m.count ? m.name : '???'),
       el('span', { class: 'plane-meta' },
         m.count
-          ? `${m.rarityName || m.rarity}${m.count > 1 ? ` ×${m.count}` : ''} · ${chance} %`
+          ? `${m.rarityName || m.rarity}${m.count > 1 ? ` ×${m.count}` : ''} · находка новой ${chance} %`
           : m.hint),
+      m.count
+        ? el('span', { class: 'plane-salvage' },
+            `+${m.salvageText || 'ресурсы'} · ${m.xp} опыта`)
+        : null,
       m.count
         ? el('button', {
           type: 'button',
           class: 'ghost plane-fly-btn',
-          disabled: state.frozen || busy ? '' : null,
+          disabled: blocked ? '' : null,
           onClick: () => doStartPatrol(m.id),
-        }, busy ? 'Занято' : `В патруль · ${fmtDuration(m.patrolMs)}`)
+        }, label)
         : null);
   });
   return el('div', { class: 'block plane-block' },
     el('h3', {}, 'Авиазвено',
       el('span', { class: 'badge' }, `${p.found}/${p.total}`),
+      el('span', { class: 'badge' }, `слоты ${(p.flying || 0)}/${slots}`),
       patrolCountBadge(p)),
     el('p', { class: 'muted' },
-      'Машины из боксов. Своя машина выходит в патруль и иногда возвращается с ещё одной — но ни ASTRA, ни ресурсов звено не даёт и ячейки под корабли не занимает. Это коллекция.'),
+      `Машины из боксов. Свободный борт выходит в патруль и возвращается с закладкой ресурсов и опыта; шанса на ASTRA нет — валюту дают рейсы. В воздухе до ${slots} бортов, ячейки под корабли звено не занимает.`),
+    el('p', { class: 'muted' },
+      'Повторных машин боксы и патрули не выдают: приходит только та модель, которой у вас ещё нет.'),
+    complete
+      ? el('p', { class: 'ok' },
+          'Звено собрано целиком: патрули по-прежнему приносят закладку и опыт, но находить больше нечего.')
+      : null,
     planePatrolBlock(),
     el('div', { class: 'plane-grid' }, ...cells));
 }
@@ -2474,14 +2737,20 @@ function boxCard(b) {
         el('span', { class: `badge${b.price > 0 ? ' badge-paid' : ''}` }, b.price > 0 ? `${b.price} ASTRA` : 'бесплатно')),
       el('p', { class: 'muted' }, b.hint),
       el('p', { class: 'muted' }, `Ресурсов за открытие: ${b.units[0]}–${b.units[1]}` + (b.price > 0 ? '' : ' · ресурсы, не ASTRA')),
-      // Шансы машин — отдельная строка, и они маленькие нарочно.
+      // Шансы машин — отдельная строка, и они маленькие нарочно. Повторов бокс
+      // не выдаёт, поэтому честно показываем, сколько моделей ступени ещё не
+      // собрано: при «0 из 4» шанса на машину нет, и это надо сказать заранее.
       (b.planeChances || []).length
         ? el('p', { class: 'muted box-plane-chances' },
           'Машина звена: ',
           ...b.planeChances.map((c, i) => [
             i > 0 ? ' · ' : null,
-            `${c.rarityName.toLowerCase()} ${Math.round(c.chance * 10000) / 100} %`,
+            `${c.rarityName.toLowerCase()} ${Math.round(c.chance * 10000) / 100} %`
+              + (c.fresh != null ? ` (${c.fresh} из ${c.models} не собрано)` : ''),
           ].filter(Boolean)).flat())
+        : null,
+      boxData?.planesAllOwned
+        ? el('p', { class: 'muted box-plane-chances' }, 'Коллекция звена собрана целиком — бокс отдаёт только ресурсы.')
         : null,
       locked
         ? el('p', { class: 'box-timer', 'data-until': String(b.nextOpenAt), 'data-open-box': b.id }, '')
@@ -2672,7 +2941,10 @@ function welcomeNote(data) {
 }
 
 async function loadGame() {
-  const { status, data } = await authed('/me');
+  // Для экрана «Рейс» просим состояние под выбранный корабль: сервер считает
+  // радиус, топливо и оценку награды именно для него.
+  const ship = view === 'flight' ? flightShipId() : null;
+  const { status, data } = await authed(`/me${ship ? `?ship=${encodeURIComponent(ship)}` : ''}`);
   if (status === 401) { openAuth('login'); return; }
   if (status !== 200) {
     // 0 — сеть, истёкший токен уже обработан выше. Не сбрасываем экран молча.
@@ -2731,7 +3003,16 @@ async function act(scope, path, body) {
   }
 
   idemDone(scope);
-  if (status >= 400) note = `Ошибка: ${errText(data.error)}`;
+  if (status >= 400) {
+    note = `Ошибка: ${errText(data.error)}`;
+    // Сервер отверг токен — протух, одноразовый, не с того домена. Если его не
+    // сбросить, игрок жал бы «Забрать» и получал ту же ошибку по кругу: код
+    // Turnstile живёт секунды, а не до перезагрузки страницы.
+    if (String(data?.error || '').startsWith('turnstile')) {
+      resetBonusGate();
+      mountBonusGate();
+    }
+  }
   else note = 'Готово';
   // Короткий сигнал: без него действие в другой вкладке выглядит «зависшим».
   if (view !== 'arena') sfx(status >= 400 ? 'lose' : 'pick');
@@ -2811,11 +3092,21 @@ function doOpenBox(boxId) {
   });
 }
 function doStartPatrol(plane) { return act(`patrol:${plane}`, '/planes/patrol', { plane }); }
+// Сдача всего патруля сразу: сервер забирает все вернувшиеся борта, поэтому
+// ключ идемпотентности привязан к числу бортов в воздухе, а не к одному id.
 function doClaimPatrol() {
-  const id = state.planes?.patrol?.id || 0;
+  const id = (state.planes?.active?.length || 0) + ':' + (state.planes?.patrol?.id || 0);
   return act(`patrol-claim:${id}`, '/planes/patrol/claim', {}).then((res) => {
-    const found = res && res.status < 400 ? res.data?.found : null;
-    note = found ? `Патруль нашёл машину: ${found.name}` : 'Патруль вернулся без находки';
+    if (!res || res.status >= 400) { render(); return; }
+    const data = res.data || {};
+    const parts = [];
+    if (data.claimed) parts.push(`бортов сдано: ${data.claimed}`);
+    const salvage = (data.salvage || []).map((r) => `${r.amount} ${r.name}`).join(', ');
+    if (salvage) parts.push(`+${salvage}`);
+    if (data.xp) parts.push(`+${data.xp} опыта`);
+    const fresh = (data.foundList || []).filter((f) => f.firstTime).map((f) => f.name);
+    if (fresh.length) parts.push(`находка: ${fresh.join(', ')}`);
+    note = parts.length ? `Патруль: ${parts.join(' · ')}` : 'Патруль вернулся без находки';
     render();
   });
 }
@@ -2898,8 +3189,10 @@ for (const b of document.querySelectorAll('[data-soon]')) b.addEventListener('cl
 setInterval(() => {
   clock += 1;
   if (state) updateTimers();
-  const active = state?.expeditions?.active;
-  if (active && left(active.endsAt) === 0 && clock % 5 === 0) loadGame();
+  // Любое завершение — сигнал перезапросить /me: наград там сразу несколько,
+  // и «в пути» обязано перестать считаться, пока игрок смотрит на экран.
+  const arrived = activeExpeditions().some((a) => left(a.endsAt) === 0);
+  if (arrived && clock % 5 === 0) loadGame();
 }, 1000);
 
 (async () => {

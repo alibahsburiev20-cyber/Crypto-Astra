@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DAY_MS, REPAIR_ASTRA_PER_PERCENT, START_ASTRA, START_FUEL } from '../../src/shared/constants';
 import { PLANET_BY_ID, EVENTS } from '../../src/shared/gameData';
-import { getBalance } from '../../src/world/balances';
+import { applyDelta, getBalance } from '../../src/world/balances';
 import { verifyLedger } from '../../src/world/ledger';
 import { runDueJobs } from '../../src/world/jobs';
 import { enqueue } from '../../src/world/scheduler';
@@ -9,7 +9,8 @@ import {
   computeReward, durabilityLoss, fuelCost, levelFromXp, repairCost, seedMultiplier, xpThreshold,
 } from '../../src/world/modules/expeditionMath';
 import { regenPlan, bumpDaily, isFrozen, runLedgerVerify } from '../../src/world/modules/maintenance';
-import { cancelExpedition, chooseExpeditionEvent, finishExpedition, openExpeditionEvent, startExpedition, timeoutExpeditionEvent } from '../../src/world/modules/expeditions';
+import { cancelExpedition, chooseExpeditionEvent, finishExpedition, listExpeditions, openExpeditionEvent, startExpedition, timeoutExpeditionEvent } from '../../src/world/modules/expeditions';
+import { buildState } from '../../src/world/modules/state';
 import { claim } from '../../src/world/modules/claim';
 import { createPlayer } from '../../src/world/modules/players';
 import { applyDurability } from '../../src/world/modules/progress';
@@ -99,6 +100,138 @@ describe('формулы этапа 1', () => {
   });
 });
 
+describe('флот летает параллельно', () => {
+  /**
+   * Добавить корабль напрямую: верфь в этом тесте не проверяется, важен рейс.
+   * Прочность — через журнал, как при выдаче: иначе сверка увидит 100 против 0
+   * и мир «замёрз бы» на расхождении прямо в тесте.
+   */
+  function addShip(sql: SqlStorage, id: string, type: string): string {
+    sql.exec(`INSERT INTO ships (id, player_id, type, durability, status) VALUES (?, 'p1', ?, 0, 'idle')`, id, type);
+    applyDurability(sql, { playerId: 'p1', shipId: id, delta: 100, reason: 'ship_delivery', sourceRef: 'test' }, T0);
+    return id;
+  }
+
+  /** Топливо на несколько параллельных рейсов: списание тоже идёт через журнал. */
+  function grantFuel(sql: SqlStorage, tx: <T>(fn: () => T) => T, amount: number): void {
+    tx(() => applyDelta(sql, { playerId: 'p1', asset: 'fuel', delta: amount, reason: 'fuel_purchase', sourceRef: 'test' }, T0));
+  }
+
+  it('несколько кораблей — несколько рейсов, и каждый видит свою планету', () => {
+    const { sql, tx } = makeWorld();
+    tx(() => createPlayer(sql, 'p1', T0));
+    const scout = shipId(sql);
+    const hauler = addShip(sql, 'ship-2', 'hauler');
+    const miner = addShip(sql, 'ship-3', 'miner');
+    grantFuel(sql, tx, 20);
+
+    tx(() => startExpedition(sql, 'p1', 'k1', { shipId: scout, planet: 'ferra', kind: 'short' }, T0));
+    tx(() => startExpedition(sql, 'p1', 'k2', { shipId: hauler, planet: 'cinder', kind: 'short' }, T0));
+    tx(() => startExpedition(sql, 'p1', 'k3', { shipId: miner, planet: 'lumen', kind: 'short' }, T0));
+
+    expect(sql.exec('SELECT COUNT(*) AS c FROM expeditions').toArray()[0].c).toBe(3);
+    // Топливо кончилось ровно на суммарный расход: 1 + 2 + 2.
+    expect(getBalance(sql, 'p1', 'fuel')).toBe(START_FUEL + 20 - 5);
+    const list = listExpeditions(sql, 'p1');
+    expect(list.active.length).toBe(3);
+    expect(list.activeCount).toBe(3);
+    // Порядок — по старту, и каждый рейс привязан к своему кораблю и планете.
+    expect(list.active.map((e) => `${e.shipId}:${e.planet}`))
+      .toEqual([`${scout}:ferra`, `ship-2:cinder`, `ship-3:lumen`]);
+    expect(sql.exec(`SELECT status FROM ships WHERE id = 'ship-2'`).toArray()[0].status).toBe('flying');
+    expect(verifyLedger(sql).ok).toBe(true);
+  });
+
+  it('тот же корабль дважды не улетает, свободный — улетает', () => {
+    const { sql, tx } = makeWorld();
+    tx(() => createPlayer(sql, 'p1', T0));
+    const scout = shipId(sql);
+    addShip(sql, 'ship-2', 'hauler');
+    grantFuel(sql, tx, 20);
+    tx(() => startExpedition(sql, 'p1', 'k1', { shipId: scout, planet: 'ferra', kind: 'short' }, T0));
+    expect(() => tx(() => startExpedition(sql, 'p1', 'k2', { shipId: scout, planet: 'cinder', kind: 'short' }, T0)))
+      .toThrow(/ship_busy/);
+    expect(() => tx(() => startExpedition(sql, 'p1', 'k3', { shipId: 'ship-2', planet: 'cinder', kind: 'short' }, T0)))
+      .not.toThrow();
+    expect(listExpeditions(sql, 'p1').activeCount).toBe(2);
+  });
+
+  it('отмена одного рейса не трогает остальные', () => {
+    const { sql, tx } = makeWorld();
+    tx(() => createPlayer(sql, 'p1', T0));
+    const scout = shipId(sql);
+    addShip(sql, 'ship-2', 'hauler');
+    grantFuel(sql, tx, 20);
+    tx(() => startExpedition(sql, 'p1', 'k1', { shipId: scout, planet: 'ferra', kind: 'medium' }, T0));
+    tx(() => startExpedition(sql, 'p1', 'k2', { shipId: 'ship-2', planet: 'cinder', kind: 'medium' }, T0));
+    const first = String(sql.exec(`SELECT id FROM expeditions WHERE ship_id = ?`, scout).toArray()[0].id);
+
+    tx(() => cancelExpedition(sql, 'p1', 'c1', first, T0 + 60_000));
+    const left = listExpeditions(sql, 'p1');
+    expect(left.activeCount).toBe(1);
+    expect(left.active[0].shipId).toBe('ship-2');
+    expect(String(sql.exec(`SELECT status FROM ships WHERE id = ?`, scout).toArray()[0].status)).toBe('idle');
+    expect(String(sql.exec(`SELECT status FROM ships WHERE id = 'ship-2'`).toArray()[0].status)).toBe('flying');
+    expect(verifyLedger(sql).ok).toBe(true);
+  });
+
+  it('оба рейса финишируют независимо и оба приносят награду', () => {
+    const { sql, tx } = makeWorld();
+    tx(() => createPlayer(sql, 'p1', T0));
+    const scout = shipId(sql);
+    addShip(sql, 'ship-2', 'hauler');
+    grantFuel(sql, tx, 20);
+    tx(() => startExpedition(sql, 'p1', 'k1', { shipId: scout, planet: 'ferra', kind: 'short' }, T0));
+    tx(() => startExpedition(sql, 'p1', 'k2', { shipId: 'ship-2', planet: 'cinder', kind: 'short' }, T0 + 1000));
+    const ids = sql.exec('SELECT id FROM expeditions ORDER BY started_at').toArray().map((r) => String(r.id));
+    for (const id of ids) tx(() => finishExpedition(sql, id, T0 + 60 * 60 * 1000));
+    expect(sql.exec(`SELECT COUNT(*) AS c FROM expeditions WHERE status = 'completed'`).toArray()[0].c).toBe(2);
+    expect(sql.exec(`SELECT COUNT(*) AS c FROM ships WHERE status = 'idle'`).toArray()[0].c).toBe(2);
+    expect(getBalance(sql, 'p1', 'points')).toBeGreaterThan(0);
+    expect(verifyLedger(sql).ok).toBe(true);
+  });
+
+  it('список активных — массив: второй рейс не прячется за первым', () => {
+    const { sql, tx } = makeWorld();
+    tx(() => createPlayer(sql, 'p1', T0));
+    const one = listExpeditions(sql, 'p1');
+    expect(one.active).toEqual([]);
+    expect(one.activeCount).toBe(0);
+    addShip(sql, 'ship-2', 'hauler');
+    grantFuel(sql, tx, 20);
+    tx(() => startExpedition(sql, 'p1', 'k1', { shipId: shipId(sql), planet: 'ferra', kind: 'short' }, T0));
+    tx(() => startExpedition(sql, 'p1', 'k2', { shipId: 'ship-2', planet: 'cinder', kind: 'short' }, T0));
+    const two = listExpeditions(sql, 'p1');
+    expect(Array.isArray(two.active)).toBe(true);
+    expect(two.active.length).toBe(2);
+  });
+
+  it('/me считает планеты под выбранный корабль, а не только под первый', () => {
+    const { sql, tx } = makeWorld();
+    tx(() => createPlayer(sql, 'p1', T0));
+    tx(() => setLevel(sql, 'p1', 12));
+    const scout = shipId(sql);
+    const explorer = addShip(sql, 'ship-exp', 'explorer');
+    const byScout = buildState(sql, 'p1', T0, false, scout);
+    const byExplorer = buildState(sql, 'p1', T0, false, explorer);
+    // Vesper — сектор 3: скаут туда не долетает, разведчик долетает.
+    const vesperScout = byScout.planets.find((p: { id: string }) => p.id === 'vesper')!;
+    const vesperExplorer = byExplorer.planets.find((p: { id: string }) => p.id === 'vesper')!;
+    expect(vesperScout.locked).toBe(true);
+    expect(vesperScout.lock).toMatch(/не долетает/);
+    expect(vesperExplorer.locked).toBe(false);
+    expect(vesperExplorer.options.length).toBe(3);
+    // Топливо считается по выбранному корпусу: у explorer расход 1, у scout — 1,
+    // а на средней дистанции оба платят по 2; важнее другое — оценки свои у каждого.
+    expect(byScout.planets.find((p: { id: string }) => p.id === 'ferra')!.options[0].fuel)
+      .toBe(byExplorer.planets.find((p: { id: string }) => p.id === 'ferra')!.options[0].fuel);
+    // Несуществующий корабль не ломает состояние: сервер откатывается к первому.
+    const broken = buildState(sql, 'p1', T0, false, 'no-such-ship');
+    expect(broken.planets.find((p: { id: string }) => p.id === 'vesper')!.locked).toBe(true);
+    // И без параметра — как раньше: считает по первому кораблю.
+    expect(buildState(sql, 'p1', T0, false).planets.find((p: { id: string }) => p.id === 'vesper')!.locked).toBe(true);
+  });
+});
 describe('экспедиция', () => {
   it('старт списывает топливо один раз, повтор ключа ничего не меняет', () => {
     const { sql, tx } = makeWorld();

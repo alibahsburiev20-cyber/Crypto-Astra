@@ -108,7 +108,39 @@ describe('клиент бонусной проверки', () => {
     expect(app).toContain("{ turnstileToken: bonusToken }");
     // Одноразовость: после любого бонусного действия прошим заново.
     expect(app).toContain('resetBonusGate()');
-    expect(app).toContain('window.turnstile.reset(bonusWidget)');
+    // Сброс — это remove(), а не reset(): после ошибки reset оставляет мёртвый
+    // iframe, и токен после него не приходит никогда.
+    expect(app).toContain('window.turnstile.remove(bonusWidget)');
+    expect(app).not.toContain('window.turnstile.reset(bonusWidget)');
+    // Отказ сервера по шлюзу обязан вернуть виджет в исходное состояние, иначе
+    // игрок жмёт «Забрать» и получает ту же ошибку до перезагрузки страницы.
+    expect(app).toContain("String(data?.error || '').startsWith('turnstile')");
+  });
+
+  it('сбой проверки — это состояние с объяснением и повтором, а не молчаливая ошибка', () => {
+    // Класс состояния на блоке: CSS рисует рамку по факту, а не по догадке.
+    expect(app).toContain('is-${bonusGate}');
+    // Ошибка: объяснение + кнопка повтора + перезагрузка страницы.
+    const gate = app.slice(app.indexOf('function bonusGateBlock()'), app.indexOf('/** Навешиваем виджет'));
+    expect(gate).toContain('Повторить проверку');
+    expect(gate).toContain('location.reload()');
+    expect(gate).toContain('Загружаем проверку');
+    // Контейнер живёт между перерисовками: живой challenge нельзя рвать re-render'ом.
+    expect(app).toContain('const bonusGateHost =');
+    expect(app.slice(app.indexOf('function mountBonusGate()'), app.indexOf('function renderBonusWidget')).includes('box.firstChild'),
+      'живой виджет должен переживать перерисовку экрана').toBe(true);
+    // Ошибку колбэка показываем с кодом: по нему видно, домен это или сеть.
+    expect(app).toContain("'error-callback': (err)");
+    expect(app).toContain('function turnstileErrorText(err)');
+    // Разные коды — разные подсказки: «домен не настроен» и «другая вкладка».
+    expect(app).toContain('600010');
+    expect(app).toContain('300030');
+    expect(app).toContain('бонусы никуда не денутся');
+    // И на форме входа сбой виджета тоже объясняется, а не молчит.
+    expect(app).toContain("$('#auth-error').textContent = turnstileErrorText(err)");
+    expect(app).toContain('Подтверждение истекло — отметьте заново');
+    expect(css).toContain('.bonus-check.is-error');
+    expect(css).toContain('.ts-wrap.is-hidden');
   });
 
   it('кнопка бонуса спит, пока нет токена; бесплатный бокс помечен data-free', () => {

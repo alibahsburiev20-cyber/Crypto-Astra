@@ -140,7 +140,7 @@ export async function route(request: Request, env: Env): Promise<Response> {
       const a = await requireAuth(request, env);
       // Частотный лимит: чтение и запись считаются отдельно.
       await enforceUserLimit(env, a.userId, m !== 'GET');
-      if (m === 'GET' && p === '/me') return await me(env, a);
+      if (m === 'GET' && p === '/me') return await me(env, a, url.searchParams.get('ship'));
       if (m === 'GET' && p === '/profile') return await profile(env, a);
       if (m === 'POST' && p === '/profile/callsign') return await profileCallsign(request, env, a);
       if (m === 'POST' && p === '/profile/style') return await profileStyle(request, env, a);
