@@ -127,6 +127,9 @@ export function getResource(sql: SqlStorage, playerId: string, resource: string)
   return r.length ? Number(r[0].amount) : 0;
 }
 
+/** Как часто сверяем журнал мира. Минута-в-минуту не нужно, час — достаточно. */
+export const VERIFY_INTERVAL_MS = 60 * 60 * 1000;
+
 export function addResource(sql: SqlStorage, playerId: string, resource: string, amount: number, now: number, sourceRef?: string): void {
   if (amount <= 0) return;
   applyResourceDelta(sql, { playerId, resource, delta: amount, reason: 'resource_gain', sourceRef: sourceRef ?? null }, now);
@@ -144,7 +147,14 @@ export function regenPlan(runAt: number, now: number, have: number, cap: number)
 
 export function ensureMaintenance(sql: SqlStorage, now: number): void {
   const has = (kind: string) => sql.exec(`SELECT 1 FROM jobs WHERE kind = ? AND status = 'pending' LIMIT 1`, kind).toArray().length > 0;
-  if (!has('ledger_verify')) enqueue(sql, 'ledger_verify', now + 5 * 60 * 1000, {});
+  if (!has('ledger_verify')) {
+    // Первую сверку делаем скоро: так ошибка в свежем мире видна в тот же день.
+    // Дальше — раз в час: полный пересчёт журнала на каждом шаге не нужен, а
+    // каждое пробуждение мира стоит времени Durable Object.
+    const last = sql.exec(`SELECT value FROM meta WHERE key = 'last_verify_at'`).toArray()[0]?.value;
+    const everVerified = Number(last ?? 0) > 0;
+    enqueue(sql, 'ledger_verify', now + (everVerified ? VERIFY_INTERVAL_MS : 5 * 60 * 1000), {});
+  }
   if (!has('idem_cleanup')) enqueue(sql, 'idem_cleanup', now + 24 * 60 * 60 * 1000, {});
   ensureSeasonJobs(sql, now);
   const players = sql.exec('SELECT id FROM players').toArray();
@@ -189,7 +199,7 @@ export function runLedgerVerify(sql: SqlStorage, now: number): void {
   );
   set('frozen', report.ok ? '0' : '1');
   if (!report.ok) set('frozen_seq', String(report.brokenAtSeq ?? ''));
-  enqueue(sql, 'ledger_verify', now + 24 * 60 * 60 * 1000, {});
+  enqueue(sql, 'ledger_verify', now + VERIFY_INTERVAL_MS, {});
 }
 
 export function runIdemCleanup(sql: SqlStorage, now: number): void {

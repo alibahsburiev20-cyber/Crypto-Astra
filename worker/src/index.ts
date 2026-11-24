@@ -10,6 +10,7 @@ import { usdtContracts } from './pay/tron/contracts';
 import { cleanupSessions } from './auth/sessions';
 import type { Env } from './env';
 import { route } from './http/router';
+import { withBudget } from './ops/guard';
 import { WorldLobby } from './lobby/WorldLobby';
 import { SITE_FILES } from './static/site';
 import { World } from './world/World';
@@ -62,7 +63,9 @@ export default {
       const file = staticResponse(url.pathname, request.method);
       if (file) return Promise.resolve(file);
     }
-    return route(request, env);
+    // Считаем бюджет и, если время плохое, отвечаем понятным 503 вместо того,
+    // чтобы упереться в лимит Cloudflare и получить ошибку 1027.
+    return withBudget(request, env, () => route(request, env));
   },
   // Часовой cron — страховка, если будильник мира не сработал. Сверка и рейсы живут в alarm мира.
   async scheduled(controller: ScheduledController, env: Env): Promise<void> {

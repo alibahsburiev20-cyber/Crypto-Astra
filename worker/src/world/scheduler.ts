@@ -45,9 +45,79 @@ export function parsePayload<T>(raw: string): T {
 
 /** Ближайший run_at среди pending-задач. null — задач нет, будильник можно снять. */
 export function nextAlarmAt(sql: SqlStorage): number | null {
-  const row = sql.exec(`SELECT MIN(run_at) AS t FROM jobs WHERE status = 'pending'`).toArray()[0];
-  const raw = row?.t;
+  return minRunAt(sql);
+}
+
+function minRunAt(sql: SqlStorage, kinds?: readonly string[]): number | null {
+  const rows = kinds
+    ? sql.exec(
+      `SELECT MIN(run_at) AS t FROM jobs WHERE status = 'pending' AND kind IN (${kinds.map(() => '?').join(', ')})`,
+      ...kinds,
+    ).toArray()
+    : sql.exec(`SELECT MIN(run_at) AS t FROM jobs WHERE status = 'pending'`).toArray();
+  const raw = rows[0]?.t;
   if (raw === null || raw === undefined) return null;
   const t = Number(raw);
   return Number.isFinite(t) ? t : null;
+}
+
+/** Ближайшая задача, которая влияет на игру (см. `CRITICAL_KINDS`). */
+export function nextCriticalAt(sql: SqlStorage): number | null {
+  return minRunAt(sql, CRITICAL_KINDS);
+}
+
+/** Ближайшая служебная задача: сверка, уборка, регенерация топлива. */
+export function nextMaintenanceAt(sql: SqlStorage): number | null {
+  const marks = CRITICAL_KINDS.map(() => '?').join(', ');
+  const rows = sql.exec(
+    `SELECT MIN(run_at) AS t FROM jobs WHERE status = 'pending' AND kind NOT IN (${marks})`,
+    ...CRITICAL_KINDS,
+  ).toArray();
+  const raw = rows[0]?.t;
+  if (raw === null || raw === undefined) return null;
+  const t = Number(raw);
+  return Number.isFinite(t) ? t : null;
+}
+
+// --- Сон мира ---------------------------------------------------------------
+//
+// Мир просыпается по будильнику (alarm) и по часовому cron. Каждое пробуждение
+// стоит времени Durable Object, а на бесплатном плане его 13 000 GB-секунд в
+// сутки на всё. Поэтому, когда в мире давно никого не было, будим его только
+// под задачи, которые влияют на игру (рейс, крафт, сезон), а служебные
+// (сверка журнала, уборка идемпотентности, регенерация топлива) отдаём
+// часовому cron — они и так догоняются «пачкой» при следующем пробуждении.
+
+/** Сколько тишины считаем «в мире никого нет». */
+export const IDLE_AFTER_MS = 10 * 60_000;
+
+/** Задачи, которые нельзя отложить: от них зависит то, что видит игрок. */
+export const CRITICAL_KINDS = [
+  'expedition_finish',
+  'expedition_event',
+  'expedition_event_timeout',
+  'craft_finish',
+  'season_close',
+] as const;
+
+/**
+ * Когда будить мир.
+ *
+ * `criticalAt` — ближайшая играющая задача, `maintenanceAt` — ближайшая
+ * служебная. Возвращает `null`, если будить нечего.
+ *
+ * В тишине служебные задачи игнорируются: их догонит cron, а каждая лишняя
+ * побудка — это потраченное время объекта.
+ */
+export function decideWakeAt(
+  now: number,
+  lastActivityAt: number,
+  criticalAt: number | null,
+  maintenanceAt: number | null,
+): number | null {
+  const idle = now - Math.max(0, lastActivityAt) >= IDLE_AFTER_MS;
+  if (idle) return criticalAt;
+  if (criticalAt === null) return maintenanceAt;
+  if (maintenanceAt === null) return criticalAt;
+  return Math.min(criticalAt, maintenanceAt);
 }
