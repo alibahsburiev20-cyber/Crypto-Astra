@@ -9,17 +9,29 @@ application/json; charset=utf-8`. Ответы не кэшируются (`Cache
 | Метод | Путь | Ответ |
 |---|---|---|
 | GET | `/health` | `{ ok, service, build, now }` — `build` из `[vars].APP_BUILD`, `now` в миллисекундах |
-| GET | `/config` | `{ turnstile_site_key, login_turnstile_after, server_time }` |
+| GET | `/config` | `{ turnstile_site_key, server_time, ads }` |
 | POST | `/batch` | пачка игровых действий (до 10): `{ops:[{op, idem, body}]}` → `{results:[{op, status, data}], blockedAt, retryAfter}`; деньги, вход, админка и сам `/batch` в пачку не входят |
 | GET | `/ops/status` | `{ ok, mode, used, limit, remaining, day, retryAfter, blocked }` — режим бережливости: `full` / `thrifty` / `lite` / `sleep` |
 | POST | `/auth/register` | `{ access_token, user: { id, world_id } }` + refresh-cookie |
-| POST | `/auth/login` | то же; может вернуть `turnstile_required` |
+| POST | `/auth/login` | то же |
 | POST | `/auth/refresh` | новый `access_token` + ротированная cookie |
 | POST | `/auth/logout` | `{ ok: true }`, cookie очищается |
 
-`/auth/register` принимает `email`, `password`, необязательные `ref` (id мира
-пригласившего) и `turnstileToken`. `/auth/login` — `email`, `password`,
-`turnstileToken` при требовании проверки.
+`/auth/register` принимает `email`, `password` и необязательный `ref` (id мира
+пригласившего). `/auth/login` — `email`, `password`. Проверки «я человек» на входе
+и при регистрации нет: Turnstile остался только там, где выдаётся бонус
+(`POST /claim`, бесплатные `POST /boxes/open`).
+
+Против фейковых аккаунтов работает проверка почты: жёсткий формат, список
+одноразовых доменов, наличие MX-записи (DNS-over-HTTPS) и нормализация алиасов
+(`a+shop@gmail.com` = `a@gmail.com`, точки внутри Gmail не значимы) — в
+`users.email` лежит канонический адрес, поэтому UNIQUE сам отсекает «второй аккаунт
+тем же ящиком». Отказ: 400 `bad_email`, 400 `disposable_email`, 400 `no_mx`,
+503 `email_check_unavailable` (DNS не ответил — повторите), 409 `email_taken`,
+429 `too_many_signup_from_domain` (более 7 регистраций в час с незнакомого домена;
+крупным почтовикам потолок не мешает). MX и потолок на домен выключаются только
+явно — `SIGNUP_GUARD = "off"` для локального запуска и e2e; формат, список
+одноразовых доменов и нормализация алиасов работают всегда.
 
 | Метод | Путь | Назначение |
 |---|---|---|
@@ -204,7 +216,7 @@ contract }`. Адрес выводится детерминированно из
 | `unauthorized` | 401 | нет или протух access-токен |
 | `no_session` / `session_reuse` | 401 | refresh-cookie нет / повторное использование |
 | `invalid_credentials` | 401 | неверная пара email/пароль (email не раскрывается) |
-| `turnstile_required` | 403 | нужен токен Turnstile |
+| `turnstile_required` | 403 | нужен токен Turnstile (только бонусные маршруты) |
 | `turnstile_failed` | 403 | токен не прошёл siteverify |
 | `too_many_attempts` | 429 | сработал лимит частоты; есть `Retry-After` |
 | `too_early` / `daily_limit` | 429 | Claim раньше 15 минут / суточный лимит |

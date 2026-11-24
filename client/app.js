@@ -15,6 +15,11 @@ const ERRORS = {
   payload_too_large: 'Запрос слишком большой',
   bad_idem_key: 'Слишком короткий ключ повторения — обновите страницу',
   turnstile_failed: 'Проверка «я человек» не пройдена — подтвердите ещё раз',
+  bad_email: 'Адрес выглядит выдуманным — напишите настоящую почту',
+  disposable_email: 'Одноразовые ящики не подходят — нужна настоящая почта',
+  no_mx: 'Этот домен не принимает письма — возьмите другой адрес',
+  email_check_unavailable: 'Проверка почты не ответила — попробуйте ещё раз через минуту',
+  too_many_signup_from_domain: 'С этого домена уже много регистраций — попробуйте позже',
   unauthorized: 'Нужно войти заново',
   no_session: 'Сессия истекла, войдите заново',
   ship_not_found: 'Корабль не найден',
@@ -209,14 +214,12 @@ let boxStage = null;
 // Turnstile включается только если сервер отдал site key в /config.
 // Без ключей (локальная разработка) виджет не грузится вообще.
 let config = { turnstile_site_key: null };
-let turnstileToken = null;
-let turnstileWidget = null;
 let turnstileScript = null;
-let loginNeedsTurnstile = false;
-// Бонусный шлюз (этап 6): Claim и бесплатные боксы сервер выдаёт только с
-// одноразовым токеном Turnstile. Виджет живёт прямо в разделе, токен — в
-// bonusToken; после любого бонусного действия он сбрасывается, потому что
-// Cloudflare одноразовый.
+// Шлюз «я человек» — ТОЛЬКО вокруг бонусов (этап 6): Claim и бесплатные боксы
+// сервер выдаёт по одноразовому токену Turnstile. Виджет живёт прямо в разделе,
+// токен — в bonusToken; после любого бонусного действия он сбрасывается, потому
+// что Cloudflare одноразовый. Со входа и регистрации проверка снята: там вместо
+// неё сервер проверяет почту (docs/SECURITY.md, «Регистрация»).
 let bonusToken = null;
 let bonusWidget = null;
 /**
@@ -428,7 +431,6 @@ function openAuth(m) {
 
 function closeAuth() {
   show('landing');
-  resetTurnstile();
 }
 
 function setMode(m) {
@@ -438,13 +440,14 @@ function setMode(m) {
   $('#auth-submit').textContent = m === 'register' ? 'Зарегистрироваться' : 'Войти';
   $('#password').autocomplete = m === 'register' ? 'new-password' : 'current-password';
   $('#auth-error').textContent = '';
-  refreshTurnstileVisibility();
 }
 
 async function loadConfig() {
   const res = await request('/config').catch(() => null);
   if (res?.status === 200) config = res.data;
-  refreshTurnstileVisibility();
+  // Site key приезжает асинхронно: как только он есть, бонусный шлюз перерисовывается
+  // и может ставить виджет (до этого он бы просто не знал, что включаться надо).
+  refreshBonusGateView();
 }
 
 /** Скрипт Turnstile грузится один раз на страницу и переиспользуется формами. */
@@ -461,44 +464,6 @@ function ensureTurnstileScript() {
     });
   }
   return turnstileScript;
-}
-
-function showTurnstile() {
-  const box = $('#turnstile');
-  if (!config.turnstile_site_key) return false;
-  box.hidden = false;
-  if (turnstileWidget !== null) return true;
-  ensureTurnstileScript().then(() => {
-    if (!window.turnstile || turnstileWidget !== null || box.hidden) return;
-    turnstileWidget = window.turnstile.render(box, {
-      sitekey: config.turnstile_site_key,
-      theme: 'dark',
-      callback: (token) => { turnstileToken = token; },
-      'expired-callback': () => {
-        turnstileToken = null;
-        const box = $('#turnstile');
-        if (box && !box.hidden) $('#auth-error').textContent = 'Подтверждение истекло — отметьте заново';
-      },
-      'error-callback': (err) => {
-        turnstileToken = null;
-        // Тот же принцип, что и в бонусном шлюзе: сбой внешнего сервиса — это не
-        // «вы робот» и не пустая форма, а строчка с понятным следующим шагом.
-        $('#auth-error').textContent = turnstileErrorText(err);
-      },
-    });
-  }).catch(() => {
-    // Сбросить промис, чтобы следующая попытка снова попробовала загрузить скрипт.
-    turnstileScript = null;
-    $('#auth-error').textContent = 'Не удалось загрузить проверку Cloudflare';
-  });
-  return true;
-}
-
-function resetTurnstile() {
-  turnstileToken = null;
-  if (turnstileWidget !== null && window.turnstile) {
-    try { window.turnstile.reset(turnstileWidget); } catch { /* виджет уже снят */ }
-  }
 }
 
 /** Включён ли шлюз: сервер отдал site key — значит секрет настроен и требует. */
@@ -685,17 +650,6 @@ function resetBonusGate() {
   refreshBonusButtons();
 }
 
-function refreshTurnstileVisibility() {
-  const box = $('#turnstile');
-  const need = Boolean(config.turnstile_site_key) && (mode === 'register' || loginNeedsTurnstile);
-  if (!need) {
-    box.hidden = true;
-    resetTurnstile();
-    return;
-  }
-  showTurnstile();
-}
-
 function left(ts) { return ts ? Math.max(0, ts - (Date.now() + serverOffset)) : 0; }
 
 function updateTimers() {
@@ -714,6 +668,17 @@ function updateTimers() {
     const until = Number(n.getAttribute('data-until'));
     const prefix = n.getAttribute('data-prefix') || '';
     n.textContent = prefix + fmtLeft(left(until));
+  }
+  // Claim: подтверждение показываем только когда бонус можно забрать. Значит в
+  // момент, когда таймер дошёл до нуля, блок нужно доставить в размеченный слот —
+  // иначе игрок смотрит на пустой слот и ждёт, пока он сам появится (не появится).
+  if (!claimLeft && bonusGateOn() && !bonusToken && !document.querySelector('.bonus-check')) {
+    const slot = document.querySelector('[data-gate-slot]');
+    const block = slot ? bonusGateBlock() : null;
+    if (block) {
+      slot.append(block);
+      mountBonusGate();
+    }
   }
   // Патруль: как только таймер дошёл до нуля, перезапрашиваем состояние — иначе
   // кнопка «Забрать» оставалась бы мёртвой до перезагрузки страницы.
@@ -1106,7 +1071,10 @@ function renderBridge() {
           disabled: claimLeft > 0 || state.frozen || (bonusGateOn() && !bonusToken) ? '' : null,
           onClick: doClaim,
         }, el('img', { src: '/icons/ui/claim.png', alt: '', width: '22', height: '22', class: 'icon-sm' }), 'Забрать'),
-        bonusGateBlock(),
+        // Пока таймер не истёк, подтверждение не нужно: нечего показывать. Слот
+        // остаётся в разметке — updateTimers положит в него блок, как только Claim
+        // станет доступен, и игроку не придётся ждать перезагрузки страницы.
+        el('div', { 'data-gate-slot': '' }, claimLeft > 0 ? null : bonusGateBlock()),
       ),
       el('div', { class: 'block' },
         el('h3', {}, 'Корабль'),
@@ -1951,7 +1919,7 @@ function renderBonus() {
         disabled: claimLeft > 0 || state.frozen || (bonusGateOn() && !bonusToken) ? '' : null,
         onClick: doClaim,
       }, 'Забрать бонус'),
-      bonusGateBlock(),
+      el('div', { 'data-gate-slot': '' }, claimLeft > 0 ? null : bonusGateBlock()),
     ),
     el('div', { class: 'panel-grid' },
       el('div', { class: 'block' }, el('h3', {}, 'Шкала уровня'), levelBar(true),
@@ -3145,28 +3113,21 @@ $('#auth-form').addEventListener('submit', async (e) => {
   btn.disabled = true;
   $('#auth-error').textContent = '';
   const body = { email: $('#email').value, password: $('#password').value };
-  if (config.turnstile_site_key && turnstileToken) body.turnstileToken = turnstileToken;
   const { status, data } = await request(`/auth/${mode}`, { method: 'POST', body });
   btn.disabled = false;
-  resetTurnstile();
   if (status === 200) {
     token = data.access_token;
     try {
       const em = ($('#email')?.value || '').trim();
       if (em) localStorage.setItem('astra:callsign', em.split('@')[0]);
     } catch { /* приватный режим */ }
-    loginNeedsTurnstile = false;
     $('#password').value = '';
     await loadGame();
     return;
   }
-  if (data.turnstile_required) {
-    loginNeedsTurnstile = true;
-    refreshTurnstileVisibility();
-  }
-  $('#auth-error').textContent = data.error === 'turnstile_required'
-    ? 'Подтвердите, что вы не робот, и отправьте ещё раз'
-    : errText(data.error);
+  // Отказ обязан назвать причину: «почта не настоящая» и «повторите позже» —
+  // это разные действия, и игрок не должен гадать.
+  $('#auth-error').textContent = errText(data.error);
 });
 $('#logout').addEventListener('click', async () => {
   await request('/auth/logout', { method: 'POST' });

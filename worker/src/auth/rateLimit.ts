@@ -6,12 +6,25 @@ import { sha256Hex } from '../shared/sha256';
 
 export const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 export const LOGIN_BLOCK_MS = 15 * 60 * 1000;
-export const LOGIN_IP_MAX = 10;
-export const LOGIN_TURNSTILE_AFTER = 3;
+// Пять неудач на 15 минут. Раньше порог был 10, но тогда после третьей попытки
+// вход требовал Turnstile; капчу с входа сняли (она осталась только на бонусах),
+// значит планку нужно ужесточить самому счётчику.
+export const LOGIN_IP_MAX = 5;
+/** Не больше 15 неудач на один адрес за 15 минут: это стопор для перебора с
+ *  десятков разных IP, где счётчик по IP бессилен. Владелец адреса при атаке
+ *  подождёт 10 минут — осознанный обмен «запирать на время» вместо «открыто всем». */
+export const LOGIN_EMAIL_MAX = 15;
+export const LOGIN_EMAIL_BLOCK_MS = 10 * 60 * 1000;
 
 export const REGISTER_WINDOW_MS = 60 * 60 * 1000;
 export const REGISTER_BLOCK_MS = 60 * 60 * 1000;
 export const REGISTER_IP_MAX = 10;
+/**
+ * Восемь регистраций в час на один «неизвестный» домен: седьмая проходит, восьмая
+ * уже получает 429. Крупные почтовики не считаем — там миллионы людей, и лимит бил
+ * бы по ним (см. KNOWN_PROVIDERS в `auth/emailGuard.ts`).
+ */
+export const REGISTER_DOMAIN_MAX = 8;
 
 export interface LimitState {
   attempts: number;
@@ -22,14 +35,17 @@ export interface LimitState {
 export interface LimitPolicy {
   windowMs: number;
   blockMs: number;
-  /** Infinity — блокировка не ставится, счётчик нужен только для эскалации Turnstile. */
+  /** Сколько попыток допускается в окне, прежде чем включается блокировка. */
   max: number;
 }
 
 export const LOGIN_IP_POLICY: LimitPolicy = { windowMs: LOGIN_WINDOW_MS, blockMs: LOGIN_BLOCK_MS, max: LOGIN_IP_MAX };
-// По email жёсткой блокировки нет: иначе чужой перебор мог бы запереть владельца адреса.
-export const LOGIN_EMAIL_POLICY: LimitPolicy = { windowMs: LOGIN_WINDOW_MS, blockMs: LOGIN_BLOCK_MS, max: Infinity };
+export const LOGIN_EMAIL_POLICY: LimitPolicy = { windowMs: LOGIN_WINDOW_MS, blockMs: LOGIN_EMAIL_BLOCK_MS, max: LOGIN_EMAIL_MAX };
 export const REGISTER_IP_POLICY: LimitPolicy = { windowMs: REGISTER_WINDOW_MS, blockMs: REGISTER_BLOCK_MS, max: REGISTER_IP_MAX };
+// Потолок на домен считается тем же счётчиком, что и IP: таблица одна, смысл тот же.
+export const REGISTER_DOMAIN_POLICY: LimitPolicy = {
+  windowMs: REGISTER_WINDOW_MS, blockMs: REGISTER_BLOCK_MS, max: REGISTER_DOMAIN_MAX,
+};
 
 /** Чистая функция: новое состояние счётчика после попытки. */
 export function bump(prev: LimitState | null, now: number, policy: LimitPolicy): LimitState {
@@ -57,6 +73,11 @@ export function loginKeys(ip: string | null, email: string): string[] {
 export function registerKeys(ip: string | null): string[] {
   const who = ip && ip.trim() ? ip.trim() : 'unknown';
   return [`register_ip:${who}`];
+}
+
+/** Ключ суточного потолка регистраций на домен ('unknown' — чтобы пустой домен не сливался в один счётчик). */
+export function registerDomainKey(domain: string): string {
+  return `register_domain:${domain || 'unknown'}`;
 }
 
 export function ipOf(request: Request): string | null {

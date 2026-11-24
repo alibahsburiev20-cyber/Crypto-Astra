@@ -2,11 +2,14 @@ import { signJwt } from '../auth/jwt';
 import { requireSecret } from '../auth/guards';
 import { hashPassword, verifyPassword } from '../auth/password';
 import {
-  LOGIN_EMAIL_POLICY, LOGIN_IP_POLICY, LOGIN_TURNSTILE_AFTER, REGISTER_IP_POLICY,
-  clearAttempts, currentBlock, ipOf, loginKeys, readState, recordAttempt, registerKeys,
+  LOGIN_EMAIL_POLICY, LOGIN_IP_POLICY, REGISTER_DOMAIN_POLICY, REGISTER_IP_POLICY,
+  clearAttempts, currentBlock, ipOf, loginKeys, recordAttempt, registerDomainKey, registerKeys,
 } from '../auth/rateLimit';
 import { createSession, revokeSession, rotateSession } from '../auth/sessions';
-import { checkTurnstile, turnstileEnabled } from '../auth/turnstile';
+import {
+  canonicalEmail, domainAcceptsMail, emailProblem, isKnownProvider, signupGuardEnabled,
+} from '../auth/emailGuard';
+import { turnstileEnabled } from '../auth/turnstile';
 import { WORLD_CAPACITY } from '../shared/constants';
 import { adsConfig } from '../ads/config';
 import type { Env } from '../env';
@@ -32,8 +35,9 @@ export function config(env: Env): Response {
   const siteKey = turnstileEnabled(env) && env.TURNSTILE_SITE_KEY ? env.TURNSTILE_SITE_KEY.trim() : '';
   return json(
     {
+      // site key нужен только бонусному шлюзу (Claim и бесплатные боксы): вход и
+      // регистрация проверку больше не требуют.
       turnstile_site_key: siteKey || null,
-      login_turnstile_after: LOGIN_TURNSTILE_AFTER,
       server_time: Date.now(),
       ads: adsConfig(env),
     },
@@ -49,16 +53,50 @@ async function issue(env: Env, userId: string, worldId: string, now: number): Pr
 }
 
 // Регистрация по шагам из концепции (II.2):
-// 1) учётная запись pending, 2) резерв места в WorldLobby, 3) World.createPlayer, 4) active + подтверждение места.
+// 1) проверка почты, 2) учётная запись pending, 3) резерв места в WorldLobby,
+// 4) World.createPlayer, 5) active + подтверждение места.
+//
+// В `users.email` кладём канонический адрес (без `+хвоста`, для Gmail — без
+// точек), поэтому UNIQUE сам отсекает «второй аккаунт тем же ящиком».
 export async function register(request: Request, env: Env): Promise<Response> {
   const body = await readJson(request);
+  // Формат и списки проверяем до счётчиков и до «мягкого» `creds`: мусорный
+  // адрес не должен ни тратить попытки с IP, ни дёргать DNS, ни получать
+  // размытое «invalid_email» вместо внятной причины отказа.
+  const typed = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
+  const problem = emailProblem(typed);
+  if (problem) throw new ApiError(400, problem);
   const { email, password } = creds(body);
   const now = Date.now();
+  const key = canonicalEmail(email);
+  const domain = key.slice(key.lastIndexOf('@') + 1);
 
-  // Частоту считаем до Turnstile: иначе неудачные проверки можно слать без ограничений.
+  // Частоту считаем до дорогой проверки MX: иначе по DNS можно бить без ограничений.
   const gate = await recordAttempt(env.DB, registerKeys(ipOf(request)), now, REGISTER_IP_POLICY);
   if (gate.retryAfterSec > 0) throw new ApiError(429, 'too_many_attempts', gate.retryAfterSec);
-  await checkTurnstile(env, request, body);
+
+  // Строгий контур: MX и потолок на домен. В локальном режиме и e2e он выключен
+  // (там нет DNS, а регистрироваться приходится много раз в час); формат адреса,
+  // список помоек и нормализация алиасов работают всегда.
+  const strict = signupGuardEnabled(env);
+
+  // Потолок регистраций на домен — только для незнакомых почтовиков: у Gmail или
+  // mail.ru лимит бил бы по живым людям. Считается до MX, чтобы выдуманный домен
+  // не гоняли через DNS сотнями.
+  if (strict && !isKnownProvider(domain)) {
+    const perDomain = await recordAttempt(env.DB, [registerDomainKey(domain)], now, REGISTER_DOMAIN_POLICY);
+    if (perDomain.retryAfterSec > 0) {
+      throw new ApiError(429, 'too_many_signup_from_domain', perDomain.retryAfterSec);
+    }
+  }
+
+  // Домен обязан принимать почту: `a@b.cc` и выдуманные адреса отсекаются здесь.
+  // Капчу «я человек» с регистрации сняли — она осталась только там, где выдаётся
+  // бонус, а против фейковых аккаунтов работает проверка почты.
+  if (strict) {
+    const mx = await domainAcceptsMail(domain);
+    if (!mx.ok) throw new ApiError(mx.reason === 'no_mx' ? 400 : 503, mx.reason ?? 'email_check_unavailable');
+  }
 
   const userId = crypto.randomUUID();
   const passwordHash = await hashPassword(password);
@@ -66,7 +104,7 @@ export async function register(request: Request, env: Env): Promise<Response> {
   try {
     await env.DB
       .prepare(`INSERT INTO users (id, email, password_hash, status, created_at) VALUES (?, ?, ?, 'pending', ?)`)
-      .bind(userId, email, passwordHash, now)
+      .bind(userId, key, passwordHash, now)
       .run();
   } catch (e) {
     if (String(e).includes('UNIQUE')) throw new ApiError(409, 'email_taken');
@@ -130,21 +168,15 @@ export async function login(request: Request, env: Env): Promise<Response> {
   const body = await readJson(request);
   const { email, password } = creds(body);
   const now = Date.now();
-  const keys = loginKeys(ipOf(request), email);
+  // Счётчики ведутся по каноническому адресу: перебор `a+1@`, `a+2@`, `a@` — это
+  // один и тот же ящик, и тратить он должен один лимит, а не десять.
+  const key = canonicalEmail(email);
+  const keys = loginKeys(ipOf(request), key);
 
   const blocked = await currentBlock(env.DB, keys, now);
   if (blocked > 0) throw new ApiError(429, 'too_many_attempts', blocked);
 
-  // После трёх неудач по этому email или с этого IP просим Turnstile (II.9).
-  const [ipState, emailState] = await Promise.all([readState(env.DB, keys[0]), readState(env.DB, keys[1])]);
-  const requireTurnstile = turnstileEnabled(env)
-    && Math.max(ipState?.attempts ?? 0, emailState?.attempts ?? 0) >= LOGIN_TURNSTILE_AFTER;
-  if (requireTurnstile) await checkTurnstile(env, request, body);
-
-  const row = await env.DB
-    .prepare('SELECT id, password_hash, world_id, status FROM users WHERE email = ?')
-    .bind(email)
-    .first<{ id: string; password_hash: string | null; world_id: string | null; status: string }>();
+  const row = await findUser(env, key, email);
 
   const ok = row?.password_hash ? await verifyPassword(password, row.password_hash) : (await verifyPassword(password, DUMMY_HASH), false);
   if (!row || !ok || row.status !== 'active' || !row.world_id) {
@@ -152,13 +184,29 @@ export async function login(request: Request, env: Env): Promise<Response> {
     const mail = await recordAttempt(env.DB, [keys[1]], now, LOGIN_EMAIL_POLICY);
     const retry = Math.max(ip.retryAfterSec, mail.retryAfterSec);
     if (retry > 0) throw new ApiError(429, 'too_many_attempts', retry);
-    const attempts = Math.max(ip.states[0].attempts, mail.states[0].attempts);
-    const nextTurnstile = turnstileEnabled(env) && attempts >= LOGIN_TURNSTILE_AFTER;
-    return json({ error: 'invalid_credentials', turnstile_required: nextTurnstile }, 401);
+    return json({ error: 'invalid_credentials' }, 401);
   }
 
-  await clearAttempts(env.DB, keys);
+  await clearAttempts(env.DB, [...keys, ...loginKeys(ipOf(request), email)]);
   return issue(env, row.id, row.world_id, Date.now());
+}
+
+/**
+ * Аккаунт по адресу. Ищем по канонической форме, а если её нет — по той, что
+ * прислали: аккаунты, созданные до нормализации, могли остаться с `+хвостом` или
+ * точками внутри Gmail, и их владельцы не должны потерять вход.
+ */
+async function findUser(
+  env: Env, key: string, raw: string,
+): Promise<{ id: string; password_hash: string | null; world_id: string | null; status: string } | null> {
+  const sql = 'SELECT id, password_hash, world_id, status FROM users WHERE email = ?';
+  const found = await env.DB.prepare(sql).bind(key).first<{
+    id: string; password_hash: string | null; world_id: string | null; status: string;
+  }>();
+  if (found || key === raw) return found;
+  return env.DB.prepare(sql).bind(raw).first<{
+    id: string; password_hash: string | null; world_id: string | null; status: string;
+  }>();
 }
 
 export async function refresh(request: Request, env: Env): Promise<Response> {

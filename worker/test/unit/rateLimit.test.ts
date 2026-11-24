@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
-  LOGIN_EMAIL_POLICY, LOGIN_IP_POLICY, REGISTER_IP_POLICY,
-  blockedFor, bump, loginKeys, registerKeys,
+  LOGIN_EMAIL_BLOCK_MS, LOGIN_EMAIL_POLICY, LOGIN_BLOCK_MS, LOGIN_IP_POLICY,
+  REGISTER_DOMAIN_MAX, REGISTER_DOMAIN_POLICY, REGISTER_IP_POLICY,
+  blockedFor, bump, loginKeys, registerDomainKey, registerKeys,
 } from '../../src/auth/rateLimit';
 import { sha256Hex } from '../../src/shared/sha256';
 
@@ -40,12 +41,34 @@ describe('bump', () => {
     expect(after.blockedUntil).toBe(0);
   });
 
-  it('политика без блокировки (email) не запирает владельца адреса', () => {
+  it('перебор по одному адресу запирает адрес ненадолго, а не навсегда', () => {
+    // Распределённый перебор — десятки IP на один ящик: счётчик по IP бессилен, и
+    // после того как капчу со входа сняли, это единственное, что его тормозит.
+    // Блокировка короткая (10 минут против 15 у IP), чтобы владелец адреса не
+    // сидел запертым весь день, если его адрес решили выдать за чужой.
     let s = null as ReturnType<typeof bump> | null;
-    for (let i = 0; i < 50; i++) s = bump(s, T0 + i, LOGIN_EMAIL_POLICY);
-    expect(s?.attempts).toBe(50);
+    for (let i = 0; i < LOGIN_EMAIL_POLICY.max - 1; i++) s = bump(s, T0 + i, LOGIN_EMAIL_POLICY);
     expect(s?.blockedUntil).toBe(0);
-    expect(blockedFor(s, T0)).toBe(0);
+    const at = T0 + LOGIN_EMAIL_POLICY.max - 1;
+    s = bump(s, at, LOGIN_EMAIL_POLICY);
+    expect(s?.attempts).toBe(LOGIN_EMAIL_POLICY.max);
+    expect((s?.blockedUntil ?? 0) - at).toBe(LOGIN_EMAIL_POLICY.blockMs);
+    expect(LOGIN_EMAIL_BLOCK_MS).toBeLessThan(LOGIN_BLOCK_MS);
+    expect(blockedFor(s, T0)).toBeGreaterThanOrEqual(LOGIN_EMAIL_BLOCK_MS);
+    // Окно короче блокировки быть не должно, иначе счётчик обнулился бы раньше,
+    // чем снялся бы запрет, и «мягкость» превратилась бы в дыру.
+    expect(LOGIN_EMAIL_POLICY.windowMs).toBeGreaterThanOrEqual(LOGIN_EMAIL_POLICY.blockMs);
+  });
+
+  it('потолок на домен регистрации считается тем же счётчиком', () => {
+    let s = null as ReturnType<typeof bump> | null;
+    for (let i = 1; i < REGISTER_DOMAIN_MAX; i++) s = bump(s, T0, REGISTER_DOMAIN_POLICY);
+    expect(s?.blockedUntil).toBe(0);
+    s = bump(s, T0, REGISTER_DOMAIN_POLICY);
+    expect((s?.blockedUntil ?? 0) - T0).toBe(REGISTER_DOMAIN_POLICY.blockMs);
+    expect(registerDomainKey('web.de')).toBe('register_domain:web.de');
+    // Пустой домен не должен сливаться в один общий счётчик со всеми сразу.
+    expect(registerDomainKey('')).toBe('register_domain:unknown');
   });
 
   it('регистрация блокируется на час', () => {

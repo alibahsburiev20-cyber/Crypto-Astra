@@ -139,9 +139,8 @@ describe('клиент бонусной проверки', () => {
     expect(app).toContain('600010');
     expect(app).toContain('300030');
     expect(app).toContain('бонусы никуда не денутся');
-    // И на форме входа сбой виджета тоже объясняется, а не молчит.
-    expect(app).toContain("$('#auth-error').textContent = turnstileErrorText(err)");
-    expect(app).toContain('Подтверждение истекло — отметьте заново');
+    // На форме входа объяснять больше нечего: капчи там нет (см. ниже), и
+    // единственный виджет на странице — бонусный.
     expect(css).toContain('.bonus-check.is-error');
     expect(css).toContain('.ts-wrap.is-hidden');
   });
@@ -189,5 +188,39 @@ describe('цена бокса и бейджи не вылезают за кон�
     expect(css).toContain('.bonus-check');
     expect(css).toContain('.ts-host');
     expect(css.slice(css.indexOf('.ts-host'), css.indexOf('.ts-host') + 120)).toContain('min-height: 68px');
+  });
+});
+
+describe('шлюз «я человек» — только там, где бонус', () => {
+  const auth = read('worker/src/routes/auth.ts');
+  const app = read('client/app.js');
+  const html = read('client/index.html');
+
+  it('вход и регистрация проверку не требуют', () => {
+    // Капча осталась платой за выдачу бонуса. На входе она мешала людям, а от
+    // перебора защищают счётчики: 5 неудач на IP и 15 на адрес за 15 минут.
+    expect(auth).not.toContain('checkTurnstile');
+    expect(auth).not.toContain('turnstile_required');
+    expect(auth).not.toContain('login_turnstile_after');
+  });
+
+  it('у формы входа нет ни контейнера виджета, кода состояния', () => {
+    expect(html).not.toContain('id="turnstile"');
+    expect(app).not.toContain('showTurnstile');
+    expect(app).not.toContain('refreshTurnstileVisibility');
+    expect(app).not.toContain('resetTurnstile()');
+    // Единственный виджет на странице — бонусный.
+    expect(app.match(/turnstile-claim/g)!.length).toBeGreaterThan(0);
+  });
+
+  it('подтверждение показывается только когда бонус уже можно забрать', () => {
+    // Пока таймер Claim идёт, виджет не рисуем: «появляется везде» — это про такие случаи.
+    expect(app.match(/data-gate-slot/g)?.length).toBeGreaterThanOrEqual(3);
+    expect(app.match(/claimLeft > 0 \? null : bonusGateBlock\(\)/g)?.length).toBe(2);
+    // А как только таймер истёк, блок обязан появиться сам, без перезагрузки.
+    expect(app).toContain("!document.querySelector('.bonus-check')");
+    expect(app.slice(app.indexOf('function updateTimers()')).includes('mountBonusGate();')).toBe(true);
+    // А в боксах — только если в каталоге есть бесплатный бокс.
+    expect(app).toContain('data.boxes.some((b) => b.price === 0)');
   });
 });
