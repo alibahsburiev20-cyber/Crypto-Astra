@@ -10,6 +10,7 @@
     "test": "vitest run",
     "embed": "node scripts/embed-client.mjs",
     "build:minigame": "node scripts/build-minigame.mjs",
+    "build:arcade": "node scripts/build-arcade.mjs",
     "check": "npm run typecheck && npm run typecheck:scripts && npm test",
     "seed": "tsx scripts/seed-local.ts",
     "simulate": "tsx scripts/simulate-economy.ts",

@@ -63,8 +63,8 @@ same-origin. Цена — общий риск: ошибка в маршруте 
 | `worker/src/http` | маршрутизация, ответы, cookie |
 | `worker/src/auth` | PBKDF2, JWT, сессии, Turnstile, лимиты частоты |
 | `worker/src/lobby` | `WorldLobby` |
-| `worker/src/world` | `World`, Ledger, балансы, jobs, модули (claim, expeditions, upkeep, state) |
-| `worker/src/shared` | константы, каталог игры, SHA-256, кодирование |
+| `worker/src/world` | `World`, Ledger, балансы, jobs, модули (claim, expeditions, upkeep, state, minigame, arcade) |
+| `worker/src/shared` | константы, каталог игры, SHA-256, кодирование, правила мини-игр (`minigame.ts`, `arcade.ts` — один код на сервер и браузер) |
 | `worker/migrations/d1` | миграции глобальной D1 |
 | `worker/schema/world` | справочная схема мира (рабочая — `world/schema.ts`) |
 | `worker/test` | unit и e2e тесты |

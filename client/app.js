@@ -29,6 +29,7 @@ const ERRORS = {
   server_sleep: 'Сервер бережёт себя до полуночи UTC: прогресс сохранён, зайдите позже',
   server_lite: 'Сейчас высокая нагрузка: этот раздел временно недоступен, попробуйте позже',
   bad_run: 'Забег не найден, начните новый',
+  bad_game: 'Такой игры в аркаде нет — обнови страницу',
   run_not_found: 'Забег не найден, начните новый',
   run_expired: 'Забег просрочен: попытка сгорела',
   bad_trace: 'Трасса не прошла проверку: попытка сгорела',
@@ -199,6 +200,9 @@ let arenaData = null;
 let arenaRun = null;
 let arenaResult = null;
 let arenaRaf = 0;
+// Флаги загрузки — как в аркаде: ошибка ответа не должна запускать цикл запросов.
+let arenaLoading = false;
+let arenaError = '';
 const arenaKeys = { left: false, right: false };
 // Разница «серверное время − часы устройства». Все таймеры считаются по серверу,
 // иначе при сбитых часах Claim и рейс выглядят недоступными.
@@ -1955,9 +1959,15 @@ const ARENA_Y = 560;
 const ARENA_MAX_SPEED = 900;
 
 async function loadArena() {
-  const res = await authed('/minigame');
-  if (res.status === 200) arenaData = res.data;
-  else note = ERRORS[res.data?.error] || 'Не удалось загрузить арену';
+  if (arenaLoading) return;
+  arenaLoading = true;
+  try {
+    const res = await authed('/minigame');
+    if (res.status === 200) { arenaData = res.data; arenaError = ''; }
+    else arenaError = ERRORS[res.data?.error] || 'Не удалось загрузить арену';
+  } finally {
+    arenaLoading = false;
+  }
   if (view === 'arena') render();
 }
 
@@ -2056,8 +2066,14 @@ function arenaHud() {
 
 function renderArena() {
   if (!arenaData) {
-    loadArena();
-    return el('div', { class: 'screen' }, el('p', { class: 'muted' }, 'Загружаем арену…'));
+    if (!arenaLoading && !arenaError) loadArena();
+    return el('div', { class: 'screen' },
+      el('p', { class: 'muted' }, arenaError ? 'Арена сейчас не отвечает.' : 'Загружаем арену…'),
+      arenaError ? el('p', { class: 'error' }, arenaError) : null,
+      arenaError ? el('button', {
+        type: 'button', class: 'ghost',
+        onClick: () => { arenaError = ''; loadArena(); },
+      }, 'Повторить') : null);
   }
   const a = arenaData;
   const running = !!arenaRun;
@@ -2480,6 +2496,1130 @@ document.addEventListener('pointermove', (e) => {
   if (x >= 0 && x <= 1000) arenaRun.targetX = x;
 });
 
+// ── Аркада: десять мини-игр (этап 18) ───────────────────────────────────────
+//
+// Общее правило для всех десяти: браузер рисует и собирает ввод, а счёт считает
+// сервер. Поэтому сюда из /arcade-sim.js (тот же код, что в воркере) приходят
+// только поля и правила — «я набрал 600 очков» на сервер не отправляется.
+// Отправка одна: трасса/списки ходов в /arcade/finish.
+
+const ARCADE_W = 1000;
+const ARCADE_H = 620;
+const ARCADE_SAMPLE_MS = 40;
+
+/** Как игра снимает ввод: `axis` — позиция по сетке, `dirs`/`moves` — списки, `dom` — поле кнопками. */
+const ARCADE_INPUT = {
+  maze: 'keys', sudoku: 'dom', memory: 'dom', sequence: 'dom', reaction: 'pointer',
+  runner: 'axis-y', breakout: 'axis-x', snake: 'dirs', aim: 'shots', catch: 'axis-x',
+};
+
+/** Спрайты, нужные игре. Список — источник истины для предзагрузки. */
+const ARCADE_SPRITES = {
+  common: ['/sprites/bg/arcade.png'],
+  maze: ['/sprites/arcade/wall.png', '/sprites/arcade/exit.png', '/sprites/arcade/cell.png'],
+  sudoku: ['/sprites/arcade/cell.png'],
+  memory: ['/sprites/arcade/card_back.png', '/sprites/arcade/card_open.png', '/sprites/arcade/gem.png',
+    '/sprites/arcade/food.png', '/sprites/arcade/crate.png', '/sprites/arcade/rock.png',
+    '/sprites/arcade/debris.png', '/sprites/arcade/brick.png', '/sprites/arcade/ball.png',
+    '/sprites/arcade/target.png', '/sprites/arcade/drone.png', '/sprites/arcade/node_1.png'],
+  sequence: ['/sprites/arcade/node_1.png', '/sprites/arcade/node_2.png', '/sprites/arcade/node_3.png', '/sprites/arcade/node_4.png'],
+  reaction: ['/sprites/arcade/beacon.png'],
+  runner: ['/sprites/arcade/rock.png', '/sprites/arcade/drone.png', '/sprites/arcade/gem.png', '/sprites/arcade/runner_hero.png'],
+  breakout: ['/sprites/arcade/ball.png', '/sprites/arcade/brick.png', '/sprites/arcade/paddle.png'],
+  snake: ['/sprites/arcade/snake_head.png', '/sprites/arcade/snake_body.png', '/sprites/arcade/food.png'],
+  aim: ['/sprites/arcade/target.png'],
+  catch: ['/sprites/arcade/hook.png', '/sprites/arcade/crate.png', '/sprites/arcade/debris.png'],
+};
+
+let arcadeData = null;
+let arcadeGameId = null;
+let arcadeRun = null;
+let arcadeResult = null;
+let arcadeRaf = 0;
+let arcadeSimPromise = null;
+// Одна попытка загрузки на экран: без флага ошибка ответа превращалась бы в цикл
+// «render → loadArcade → ошибка → render», который долбит сервер без паузы.
+let arcadeLoading = false;
+let arcadeError = '';
+let arcadeArt = null;
+let arcadeArtKey = '';
+let arcadeArtPromise = null;
+const arcadeKeys = { up: false, right: false, down: false, left: false };
+
+function arcadeSim() {
+  // Тот же модуль, что считает на сервере: грузим один раз.
+  if (!arcadeSimPromise) arcadeSimPromise = import('/arcade-sim.js');
+  return arcadeSimPromise;
+}
+
+function arcadeGame(id) {
+  return arcadeData?.games.find((g) => g.id === id) ?? null;
+}
+
+function arcadeAssets(id) {
+  const key = `${id}`;
+  const files = [...(ARCADE_SPRITES.common ?? []), ...(ARCADE_SPRITES[id] ?? [])];
+  if (arcadeArtPromise && arcadeArtKey === key) return arcadeArtPromise;
+  arcadeArtKey = key;
+  const load = (src) => new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(null);
+    img.src = src;
+  });
+  arcadeArtPromise = Promise.all(files.map(load)).then((images) => {
+    const byName = {};
+    images.forEach((img, i) => { if (img) byName[files[i]] = img; });
+    arcadeArt = byName;
+    return byName;
+  });
+  return arcadeArtPromise;
+}
+
+const artOf = (src) => arcadeArt?.[src] ?? null;
+
+async function loadArcade() {
+  if (arcadeLoading) return;
+  arcadeLoading = true;
+  try {
+    const res = await authed('/arcade');
+    if (res.status === 200) { arcadeData = res.data; arcadeError = ''; }
+    else arcadeError = ERRORS[res.data?.error] || 'Не удалось загрузить аркаду';
+  } finally {
+    arcadeLoading = false;
+  }
+  if (view === 'arcade') render();
+}
+
+function arcadeStopLoop() {
+  if (arcadeRaf) cancelAnimationFrame(arcadeRaf);
+  arcadeRaf = 0;
+}
+
+/** Осталось до конца раунда: по серверному времени, а не по часам телефона. */
+function arcadeLeft() {
+  if (!arcadeRun) return 0;
+  return Math.max(0, arcadeRun.endsAt - (Date.now() + serverOffset));
+}
+
+async function arcadeOpen(id) {
+  arcadeGameId = id;
+  arcadeResult = null;
+  arcadeStopLoop();
+  arcadeRun = null;
+  render();
+}
+
+async function arcadeStartRun() {
+  if (!arcadeGameId || !arcadeData) return;
+  const scope = `arcade-run:${arcadeGameId}:${Date.now()}`;
+  const res = await authed('/arcade/start', {
+    method: 'POST',
+    headers: { 'Idempotency-Key': idemKey(scope) },
+    body: { game: arcadeGameId },
+  });
+  if (res.status !== 200) {
+    arcadeResult = { error: res.data?.error || 'internal' };
+    idemDone(scope);
+    render();
+    return;
+  }
+  idemDone(scope);
+  const d = res.data;
+  arcadeResult = null;
+  arcadeRun = {
+    runId: d.runId,
+    game: d.game,
+    seed: d.seed >>> 0,
+    runMs: d.runMs,
+    endsAt: d.endsAt,
+    startedAt: Date.now() + serverOffset,
+    t0: Date.now() + serverOffset,
+    axis: [], dirs: [], moves: [], taps: [], shots: [], presses: [],
+    answers: new Array(81).fill(0),
+    nextSampleAt: 0,
+    finished: false,
+    // Локальное состояние поля: только для отрисовки.
+    st: { x: 500, targetX: 500, dir: 1, cells: [], reveal: -1, seqStep: 0, flash: 0, sel: -1, booms: [] },
+  };
+  await arcadeAssets(d.game);
+  const sim = await arcadeSim();
+  await arcadePrepare(sim);
+  render();
+}
+
+/** Разминка состояния: поле/колода/раскладка строятся из зерна тем же кодом, что и на сервере. */
+async function arcadePrepare(sim) {
+  const run = arcadeRun;
+  if (!run) return;
+  const id = run.game;
+  if (id === 'maze') {
+    run.st.grid = sim.makeMaze(run.seed);
+    run.st.cursor = 0;
+    run.st.cols = run.st.grid.cols;
+    run.st.rows = run.st.grid.rows;
+  } else if (id === 'sudoku') {
+    const p = sim.makeSudoku(run.seed);
+    run.st.givens = p.grid;
+    run.st.solution = p.solution;
+    run.answers = p.grid.slice();
+  } else if (id === 'memory') {
+    run.st.deck = sim.makeMemoryDeck(run.seed);
+    run.st.opened = [];
+    run.st.solved = new Array(run.st.deck.length).fill(false);
+  } else if (id === 'sequence') {
+    run.st.want = sim.makeSequence(run.seed);
+    run.st.showing = true;
+    run.st.pos = 0;
+    arcadeSequenceShow();
+  } else if (id === 'reaction') {
+    run.st.targets = sim.makeReactionTargets(run.seed);
+    run.st.duration = sim.reactionDuration(run.st.targets);
+    run.runMs = run.st.duration;
+  } else if (id === 'runner') {
+    run.st.track = sim.makeRunnerTrack(run.seed);
+  } else if (id === 'breakout') {
+    run.st.state = sim.makeBreakoutState(run.seed);
+  } else if (id === 'snake') {
+    run.st.state = sim.makeSnakeState(run.seed);
+    run.st.cell = sim.SNAKE_CELL;
+    run.st.cols = sim.SNAKE_COLS;
+    run.st.rows = sim.SNAKE_ROWS;
+  } else if (id === 'aim') {
+    run.st.targets = sim.makeAimTargets(run.seed);
+  } else if (id === 'catch') {
+    run.st.field = sim.makeCatchField(run.seed);
+  }
+}
+
+function arcadeSequenceShow() {
+  const run = arcadeRun;
+  if (!run || run.finished || run.game !== 'sequence') return;
+  const want = run.st.want;
+  // Показываем уровень: 3 + уже пройденные сигналы.
+  const len = Math.min(want.length, simLevelLength(run));
+  let i = 0;
+  run.st.showing = true;
+  const tick = () => {
+    if (!arcadeRun || arcadeRun.finished) return;
+    if (i >= len) {
+      arcadeRun.st.showing = false;
+      arcadeRun.st.flash = 0;
+      arcadeRefreshBoard();
+      return;
+    }
+    arcadeRun.st.flash = want[i] + 1;
+    arcadeRefreshBoard();
+    setTimeout(() => {
+      if (!arcadeRun) return;
+      arcadeRun.st.flash = 0;
+      arcadeRefreshBoard();
+      i += 1;
+      setTimeout(tick, 160);
+    }, 460);
+  };
+  setTimeout(tick, 400);
+}
+
+function simLevelLength(run) {
+  const solved = run.st.level ?? 0;
+  return 3 + solved;
+}
+
+/** Перерисовка только DOM-полей (судоку, пары, цепь): canvas живёт своим циклом. */
+function arcadeRefreshBoard() {
+  if (!arcadeRun || !['sudoku', 'memory', 'sequence'].includes(arcadeRun.game)) return;
+  const host = document.getElementById('arcade-board');
+  if (!host) return;
+  host.replaceChildren(arcadeBoardInner(arcadeRun.game));
+}
+
+async function arcadeSubmit(extra = {}) {
+  const run = arcadeRun;
+  if (!run || run.finished) return;
+  run.finished = true;
+  arcadeStopLoop();
+  arcadePadTrace(run);
+  const body = { runId: run.runId, ...extra };
+  const mode = ARCADE_INPUT[run.game];
+  if (mode === 'axis-x' || mode === 'axis-y') {
+    body.axis = run.axis;
+    body.stepMs = ARCADE_SAMPLE_MS;
+  } else if (mode === 'dirs') body.dirs = run.dirs;
+  else if (mode === 'shots') body.shots = run.shots;
+  else if (mode === 'keys') body.moves = run.moves;
+  else if (mode === 'pointer') body.taps = run.taps;
+  if (run.game === 'sudoku') body.answers = run.answers;
+  if (run.game === 'memory') body.moves = run.moves;
+  if (run.game === 'sequence') body.presses = run.presses;
+  const scope = `arcade-finish:${run.runId}`;
+  const res = await authed('/arcade/finish', {
+    method: 'POST',
+    headers: { 'Idempotency-Key': idemKey(scope) },
+    body,
+  });
+  if (res.status === 200) idemDone(scope);
+  arcadeResult = res.status === 200 ? res.data : { error: res.data?.error || 'bad_trace' };
+  if (res.status === 200) sfx(res.data?.result?.win ? 'win' : 'lose');
+  arcadeRun = null;
+  render();
+  // Данные раздела не обнуляем: карточка результата должна остаться на экране,
+  // а свежий счётчик попыток принесёт loadArcade.
+  await loadArcade();
+  await loadGame();
+}
+
+// ── Цикл canvas-игр ─────────────────────────────────────────────────────────
+
+function arcadeMount() {
+  const canvas = document.getElementById('arcade-canvas');
+  if (canvas) {
+    arcadeDrawFrame(canvas, 0);
+    if (!arcadeRun || arcadeRun.finished) return;
+  }
+  if (!arcadeRun || arcadeRun.finished) return;
+  arcadeStopLoop();
+  const step = () => {
+    if (!arcadeRun || arcadeRun.finished) return;
+    const node = document.getElementById('arcade-canvas');
+    if (node) arcadeFrame(node);
+    arcadeRaf = requestAnimationFrame(step);
+  };
+  arcadeRaf = requestAnimationFrame(step);
+}
+
+/** Один шаг: снимает трассу, двигает локальную симуляцию и рисует. */
+function arcadeFrame(canvas) {
+  const run = arcadeRun;
+  if (!run) return;
+  const t = Math.min(run.runMs, Date.now() + serverOffset - run.t0);
+  const mode = ARCADE_INPUT[run.game];
+  const dt = Math.max(0, Math.min(120, t - (run.st.lastT ?? t)));
+  run.st.lastT = t;
+  if (mode === 'axis-x') arcadeSteer(run, dt, run.game === 'breakout' ? 1100 : 900);
+  if (mode === 'axis-x' || mode === 'axis-y') {
+    while (run.nextSampleAt <= t) {
+      const value = run.game === 'runner' ? (run.st.jumpY ?? 0) : run.st.x;
+      run.axis.push(Math.round(value * 10));
+      run.nextSampleAt += ARCADE_SAMPLE_MS;
+    }
+  } else if (mode === 'dirs') {
+    while (run.nextSampleAt <= t) {
+      run.dirs.push(run.st.dir);
+      run.st.step = (run.st.step ?? 0) + 1;
+      run.nextSampleAt += run.game === 'snake' ? 150 : ARCADE_SAMPLE_MS;
+    }
+  }
+  if (run.game === 'runner') arcadeRunnerPhysics(run, t);
+  if (run.game === 'snake') arcadeSnakeAdvance(run);
+  if (run.game === 'breakout') arcadeBreakoutAdvance(run, t);
+  arcadeDrawFrame(canvas, t);
+  const timeEl = document.querySelector('[data-arcade-time]');
+  if (timeEl) timeEl.textContent = fmtLeft(Math.max(0, run.runMs - t));
+  const scoreEl = document.querySelector('[data-arcade-score]');
+  if (scoreEl) scoreEl.textContent = String(arcadeLiveScore(run));
+  if (t >= run.runMs) arcadeFinishRun();
+  else if (arcadeLeft() <= 0) arcadeSubmit({});
+}
+
+/**
+ * Добивка сетки: сервер сверяет трассу с длиной раунда, а вкладка могла
+ * притормозить. Хвост повторяет последнюю позицию — то есть «игрок стоял»,
+ * что и есть правда для замершего кадра.
+ */
+function arcadePadTrace(run) {
+  const mode = ARCADE_INPUT[run.game];
+  if (mode === 'axis-x' || mode === 'axis-y') {
+    const need = Math.ceil(run.runMs / ARCADE_SAMPLE_MS) + 1;
+    const last = run.axis.length ? run.axis[run.axis.length - 1] : 0;
+    while (run.axis.length < need) run.axis.push(last);
+  } else if (mode === 'dirs') {
+    const need = Math.ceil(run.runMs / 150) + 1;
+    const last = run.dirs.length ? run.dirs[run.dirs.length - 1] : run.st.dir;
+    while (run.dirs.length < need) run.dirs.push(last);
+  }
+}
+
+/** Авто-финиш: у таймера и у сервера один ориентир — конец раунда. */
+function arcadeFinishRun() {
+  if (!arcadeRun || arcadeRun.finished) return;
+  arcadeSubmit({});
+}
+
+/** Платформа и крюк едут за пальцем, но не быстрее физического предела. */
+function arcadeSteer(run, dt, maxSpeed) {
+  const target = run.st.targetX ?? run.st.x;
+  const step = (maxSpeed * dt) / 1000;
+  const dx = target - run.st.x;
+  run.st.x = Math.max(0, Math.min(ARCADE_W, run.st.x + Math.max(-step, Math.min(step, dx))));
+}
+
+function arcadeLiveScore(run) {
+  const st = run.st;
+  if (run.game === 'maze') return String(st.cursor === (st.grid ? st.grid.cols * st.grid.rows - 1 : -1) ? 'выход!' : `шагов: ${run.moves.length}`);
+  if (run.game === 'memory') return `пары: ${(st.openedCount ?? 0)}`;
+  if (run.game === 'sudoku') return `верно: ${st.checked ?? 0}`;
+  if (run.game === 'sequence') return `уровень: ${st.level ?? 0}`;
+  if (run.game === 'reaction') return `попаданий: ${st.hits ?? 0}`;
+  if (run.game === 'runner') return `чисто: ${st.passed ?? 0} · пробоин: ${st.crashes ?? 0}`;
+  if (run.game === 'breakout') return `щит: ${st.state?.destroyed ?? 0} · жизни: ${st.state?.lives ?? 3}`;
+  if (run.game === 'snake') return `фракции: ${st.state?.eaten ?? 0}`;
+  if (run.game === 'aim') return `попаданий: ${st.hits ?? 0}`;
+  if (run.game === 'catch') return `груз: ${st.picked ?? 0}`;
+  return '';
+}
+
+// ── Локальная физика (только для картинки: решение всё равно за сервером) ───
+
+function arcadeRunnerPhysics(run, t) {
+  const st = run.st;
+  if (st.jumpAt == null) { st.jumpY = 0; return; }
+  const p = (t - st.jumpAt) / 1000;
+  const g = 2400;
+  const v0 = 900;
+  const y = v0 * p - (g * p * p) / 2;
+  if (y <= 0 || p > 0.8) {
+    st.jumpY = 0;
+    st.jumpAt = null;
+  } else {
+    st.jumpY = y;
+  }
+}
+
+function arcadeSnakeAdvance(run) {
+  const st = run.st;
+  const step = Math.floor(((Date.now() + serverOffset) - run.t0) / 150);
+  if (st.advanced === step) return;
+  st.advanced = step;
+  const sim = arcadeSimRef;
+  if (!sim || !st.state) return;
+  st.state = sim.stepSnake(st.state, run.st.dir, run.seed);
+  if (st.state.food >= 0) arcadeSnakeAdvance.noop = true;
+  if (st.state.dead) arcadeSubmit({});
+}
+
+let arcadeSimRef = null;
+arcadeSim().then((m) => { arcadeSimRef = m; }).catch(() => { /* модуль догрузится на следующем шаге */ });
+
+function arcadeBreakoutAdvance(run, t) {
+  const sim = arcadeSimRef;
+  const st = run.st;
+  if (!sim || !st.state) return;
+  const last = st.lastT ?? run.t0;
+  const dt = Math.max(0, Math.min(120, t - last));
+  st.lastT = t;
+  if (!st.state.over) sim.stepBreakout(st.state, dt, run.st.x);
+  if (st.state.over) arcadeSubmit({});
+}
+
+// ── Отрисовка ────────────────────────────────────────────────────────────────
+
+function arcadeDrawFrame(canvas, t) {
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  const run = arcadeRun;
+  ctx.clearRect(0, 0, ARCADE_W, ARCADE_H);
+  const bg = artOf('/sprites/bg/arcade.png');
+  if (bg) ctx.drawImage(bg, 0, 0, ARCADE_W, ARCADE_H);
+  else {
+    const g = ctx.createLinearGradient(0, 0, 0, ARCADE_H);
+    g.addColorStop(0, '#081026');
+    g.addColorStop(1, '#050a15');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, ARCADE_W, ARCADE_H);
+  }
+  if (!run) return;
+  const game = run.game;
+  if (game === 'maze') arcadeDrawMaze(ctx, run);
+  else if (game === 'reaction') arcadeDrawReaction(ctx, run, t);
+  else if (game === 'runner') arcadeDrawRunner(ctx, run, t);
+  else if (game === 'breakout') arcadeDrawBreakout(ctx, run);
+  else if (game === 'snake') arcadeDrawSnake(ctx, run);
+  else if (game === 'aim') arcadeDrawAim(ctx, run, t);
+  else if (game === 'catch') arcadeDrawCatch(ctx, run, t);
+}
+
+function arcadeDrawMaze(ctx, run) {
+  const g = run.st.grid;
+  if (!g) return;
+  const cw = Math.floor(ARCADE_W / (g.cols + 1));
+  const ch = Math.floor(ARCADE_H / (g.rows + 1));
+  const size = Math.min(cw, ch);
+  const ox = (ARCADE_W - size * g.cols) / 2;
+  const oy = (ARCADE_H - size * g.rows) / 2;
+  const wall = artOf('/sprites/arcade/wall.png');
+  const cellArt = artOf('/sprites/arcade/cell.png');
+  const exit = artOf('/sprites/arcade/exit.png');
+  for (let i = 0; i < g.mask.length; i += 1) {
+    const x = i % g.cols;
+    const y = Math.floor(i / g.cols);
+    const px = ox + x * size;
+    const py = oy + y * size;
+    if (cellArt) ctx.drawImage(cellArt, px, py, size, size);
+    ctx.strokeStyle = '#7fa8ff';
+    ctx.lineWidth = 3;
+    const m = g.mask[i];
+    ctx.beginPath();
+    if (m & 1) { ctx.moveTo(px, py); ctx.lineTo(px + size, py); }
+    if (m & 2) { ctx.moveTo(px + size, py); ctx.lineTo(px + size, py + size); }
+    if (m & 4) { ctx.moveTo(px, py + size); ctx.lineTo(px + size, py + size); }
+    if (m & 8) { ctx.moveTo(px, py); ctx.lineTo(px, py + size); }
+    ctx.stroke();
+    if (i === g.mask.length - 1 && exit) ctx.drawImage(exit, px + 4, py + 4, size - 8, size - 8);
+    if (wall && (m & 1) === 0 && false) ctx.drawImage(wall, px, py, size, size);
+  }
+  const cx = run.st.cursor % g.cols;
+  const cy = Math.floor(run.st.cursor / g.cols);
+  ctx.fillStyle = '#7de2b0';
+  ctx.beginPath();
+  ctx.arc(ox + cx * size + size / 2, oy + cy * size + size / 2, size * 0.24, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function arcadeDrawReaction(ctx, run, t) {
+  const targets = run.st.targets ?? [];
+  const beacon = artOf('/sprites/arcade/beacon.png');
+  for (const target of targets) {
+    const active = t >= target.at && t <= target.at + target.window;
+    const done = (run.st.done ?? new Set()).has(target.at);
+    const size = active ? 150 + Math.sin(t / 60) * 16 : 96;
+    ctx.save();
+    ctx.globalAlpha = done ? 0.25 : active ? 1 : 0.4;
+    const x = ARCADE_W / 2 - size / 2;
+    const y = ARCADE_H / 2 - size / 2;
+    if (beacon) ctx.drawImage(beacon, x, y, size, size);
+    else {
+      ctx.fillStyle = active ? '#ffcf6b' : '#3a4a70';
+      ctx.beginPath();
+      ctx.arc(ARCADE_W / 2, ARCADE_H / 2, size / 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+}
+
+function arcadeDrawRunner(ctx, run, t) {
+  const track = run.st.track;
+  if (!track) return;
+  const ground = ARCADE_H - 90;
+  ctx.strokeStyle = 'rgba(140,180,255,0.55)';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(0, ground + 4);
+  ctx.lineTo(ARCADE_W, ground + 4);
+  ctx.stroke();
+  const px = 160;
+  for (const e of track.events) {
+    const x = px + ((e.t - t) / 1000) * 520;
+    if (x < -80 || x > ARCADE_W + 80) continue;
+    const src = e.kind === 'rock' ? '/sprites/arcade/rock.png'
+      : e.kind === 'drone' ? '/sprites/arcade/drone.png' : '/sprites/arcade/gem.png';
+    const img = artOf(src);
+    const y = e.kind === 'rock' ? ground - e.y : ground - e.y - 40;
+    const size = e.kind === 'gem' ? 48 : 64;
+    if (img) ctx.drawImage(img, x - size / 2, y, size, e.kind === 'drone' ? 48 : size);
+    else {
+      ctx.fillStyle = e.kind === 'rock' ? '#8fa4cf' : e.kind === 'drone' ? '#ff7b7b' : '#66e6ff';
+      ctx.fillRect(x - size / 2, y, size, size);
+    }
+  }
+  const hero = artOf('/sprites/arcade/runner_hero.png');
+  const y = ground - 76 - (run.st.jumpY ?? 0);
+  if (hero) ctx.drawImage(hero, px - 28, y, 56, 76);
+  else {
+    ctx.fillStyle = '#cfe1ff';
+    ctx.fillRect(px - 18, y, 36, 72);
+  }
+}
+
+function arcadeDrawBreakout(ctx, run) {
+  const st = run.st.state;
+  if (!st) return;
+  const brick = artOf('/sprites/arcade/brick.png');
+  for (let i = 0; i < st.bricks.length; i += 1) {
+    if (!st.bricks[i]) continue;
+    const col = i % 10;
+    const row = Math.floor(i / 10);
+    const x = 20 + col * 96;
+    const y = 90 + row * 36;
+    if (brick) ctx.drawImage(brick, x, y, 96, 36);
+    else {
+      ctx.fillStyle = '#ff9ac4';
+      ctx.fillRect(x, y, 94, 34);
+    }
+  }
+  const ball = artOf('/sprites/arcade/ball.png');
+  if (ball) ctx.drawImage(ball, st.bx - 12, st.by - 12, 24, 24);
+  else {
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(st.bx, st.by, 9, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  const pad = artOf('/sprites/arcade/paddle.png');
+  if (pad) ctx.drawImage(pad, run.st.x - 66, 560, 132, 22);
+  else {
+    ctx.fillStyle = '#9fc7ff';
+    ctx.fillRect(run.st.x - 62, 560, 124, 20);
+  }
+}
+
+function arcadeDrawSnake(ctx, run) {
+  const st = run.st.state;
+  const cell = run.st.cell ?? 40;
+  if (!st) return;
+  const ox = (ARCADE_W - cell * run.st.cols) / 2;
+  const oy = (ARCADE_H - cell * run.st.rows) / 2;
+  const head = artOf('/sprites/arcade/snake_head.png');
+  const body = artOf('/sprites/arcade/snake_body.png');
+  const food = artOf('/sprites/arcade/food.png');
+  ctx.strokeStyle = 'rgba(140,180,255,0.35)';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(ox, oy, cell * run.st.cols, cell * run.st.rows);
+  if (st.food >= 0 && food) {
+    ctx.drawImage(food, ox + (st.food % run.st.cols) * cell, oy + Math.floor(st.food / run.st.cols) * cell, cell, cell);
+  }
+  st.body.forEach((idx, i) => {
+    const x = ox + (idx % run.st.cols) * cell;
+    const y = oy + Math.floor(idx / run.st.cols) * cell;
+    const img = i === 0 ? head : body;
+    if (img) ctx.drawImage(img, x, y, cell, cell);
+    else {
+      ctx.fillStyle = i === 0 ? '#7de2b0' : '#57b98c';
+      ctx.fillRect(x + 2, y + 2, cell - 4, cell - 4);
+    }
+  });
+}
+
+function arcadeDrawAim(ctx, run, t) {
+  const targets = run.st.targets ?? [];
+  const img = artOf('/sprites/arcade/target.png');
+  for (const target of targets) {
+    const age = t - target.t;
+    if (age < 0 || age > 900) continue;
+    const size = target.r * 2 * (1 - age / 3000);
+    const alpha = Math.max(0.15, 1 - age / 900);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    if (img) ctx.drawImage(img, target.x - size / 2, target.y - size / 2, size, size);
+    else {
+      ctx.strokeStyle = '#ff7b7b';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.arc(target.x, target.y, size / 2, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+  for (const shot of run.st.recentShots ?? []) {
+    if (t - shot.at > 420) continue;
+    ctx.strokeStyle = shot.hit ? '#7de2b0' : 'rgba(255,120,120,0.8)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(shot.x - 12, shot.y - 12);
+    ctx.lineTo(shot.x + 12, shot.y + 12);
+    ctx.moveTo(shot.x + 12, shot.y - 12);
+    ctx.lineTo(shot.x - 12, shot.y + 12);
+    ctx.stroke();
+  }
+}
+
+function arcadeDrawCatch(ctx, run, t) {
+  const field = run.st.field;
+  if (!field) return;
+  ctx.strokeStyle = 'rgba(143,211,255,0.5)';
+  ctx.setLineDash([10, 8]);
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(0, 520);
+  ctx.lineTo(ARCADE_W, 520);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  for (const item of field.items) {
+    const y = 520 - (item.t - t) * 0.42;
+    if (y < -60 || y > ARCADE_H + 60) continue;
+    const src = item.kind === 'cargo' ? '/sprites/arcade/crate.png' : '/sprites/arcade/debris.png';
+    const img = artOf(src);
+    const size = item.kind === 'cargo' ? 56 : 64;
+    if (img) ctx.drawImage(img, item.x - size / 2, y - size / 2, size, size);
+    else {
+      ctx.fillStyle = item.kind === 'cargo' ? '#a8845c' : '#8fa4cf';
+      ctx.fillRect(item.x - 22, y - 22, 44, 44);
+    }
+  }
+  const hook = artOf('/sprites/arcade/hook.png');
+  if (hook) ctx.drawImage(hook, run.st.x - 36, 470, 72, 72);
+  else {
+    ctx.fillStyle = '#8fd3ff';
+    ctx.fillRect(run.st.x - 30, 500, 60, 16);
+  }
+}
+
+// ── DOM-поля: судоку, пары, сигнальная цепь ─────────────────────────────────
+
+function arcadeBoardInner(id) {
+  const run = arcadeRun;
+  if (id === 'sudoku') return arcadeSudoku(run);
+  if (id === 'memory') return arcadeMemory(run);
+  if (id === 'sequence') return arcadeSequence(run);
+  return null;
+}
+
+function arcadeSudoku(run) {
+  const givens = run.st.givens ?? new Array(81).fill(0);
+  const cells = [];
+  for (let i = 0; i < 81; i += 1) {
+    const given = givens[i] !== 0;
+    const btn = el('button', {
+      type: 'button',
+      class: `arcade-cell${given ? ' is-given' : ''}${run.st.sel === i ? ' is-sel' : ''}`,
+      disabled: given ? '' : null,
+      'aria-label': `Клетка ${Math.floor(i / 9) + 1}-${(i % 9) + 1}`,
+      onClick: () => {
+        run.st.sel = i;
+        arcadeRefreshBoard();
+      },
+    }, String(run.answers[i] !== 0 ? run.answers[i] : (given ? givens[i] : '')));
+    cells.push(btn);
+  }
+  const pad = [];
+  for (let d = 1; d <= 9; d += 1) {
+    pad.push(el('button', {
+      type: 'button', class: 'ghost arcade-digit',
+      onClick: () => {
+        if (run.st.sel < 0 || givens[run.st.sel] !== 0) return;
+        run.answers[run.st.sel] = d;
+        // Живая подсказка «сколько верно»: solution клиента не знает, поэтому
+        // считаем только непротиворечивость строки/столбца/блока.
+        run.st.checked = run.answers.filter((v, i) => v !== 0 && v === (run.st.solution?.[i] ?? -1)).length;
+        arcadeRefreshBoard();
+      },
+    }, String(d)));
+  }
+  pad.push(el('button', {
+    type: 'button', class: 'ghost arcade-digit',
+    onClick: () => {
+      if (run.st.sel < 0 || givens[run.st.sel] !== 0) return;
+      run.answers[run.st.sel] = 0;
+      arcadeRefreshBoard();
+    },
+  }, 'Стереть'));
+  return el('div', { class: 'arcade-sudoku' },
+    el('div', { class: 'arcade-grid9' }, ...cells),
+    el('div', { class: 'arcade-pad' }, ...pad),
+    el('p', { class: 'muted' }, 'Клик по клетке, затем цифра. Сданное поле сверяет сервер: правильная раскладка здесь одна.'));
+}
+
+function arcadeMemory(run) {
+  const deck = run.st.deck ?? [];
+  const faces = ['/sprites/arcade/gem.png', '/sprites/arcade/food.png', '/sprites/arcade/crate.png',
+    '/sprites/arcade/rock.png', '/sprites/arcade/debris.png', '/sprites/arcade/brick.png',
+    '/sprites/arcade/ball.png', '/sprites/arcade/target.png', '/sprites/arcade/drone.png', '/sprites/arcade/node_1.png'];
+  const cards = deck.map((sprite, i) => {
+    const open = run.st.opened.includes(i) || run.st.solved[i];
+    return el('button', {
+      type: 'button',
+      class: `arcade-card${open ? ' is-open' : ''}${run.st.solved[i] ? ' is-done' : ''}`,
+      'aria-label': `Карта ${(i % 10) + 1}-${Math.floor(i / 10) + 1}`,
+      onClick: () => arcadeMemoryPick(run, i),
+    }, el('img', {
+      src: open ? (faces[sprite] ?? faces[0]) : '/sprites/arcade/card_back.png',
+      alt: '', width: '56', height: '56', loading: 'lazy',
+    }));
+  });
+  return el('div', { class: 'arcade-cards' }, ...cards);
+}
+
+function arcadeMemoryPick(run, i) {
+  if (run.st.solved[i] || run.st.lock) return;
+  if (run.st.opened.includes(i)) return;
+  run.st.opened.push(i);
+  run.moves.push(i);
+  sfx('pick');
+  if (run.st.opened.length < 2) {
+    arcadeRefreshBoard();
+    return;
+  }
+  const [a, b] = run.st.opened;
+  run.st.lock = true;
+  const match = run.st.deck[a] === run.st.deck[b];
+  if (match) {
+    run.st.solved[a] = true;
+    run.st.solved[b] = true;
+    run.st.openedCount = (run.st.openedCount ?? 0) + 1;
+    sfx('win');
+  }
+  setTimeout(() => {
+    if (!arcadeRun) return;
+    arcadeRun.st.opened = [];
+    arcadeRun.st.lock = false;
+    const done = arcadeRun.st.solved.every(Boolean);
+    arcadeRefreshBoard();
+    if (done) arcadeSubmit({});
+  }, match ? 240 : 760);
+  arcadeRefreshBoard();
+}
+
+function arcadeSequence(run) {
+  const nodes = [];
+  const sprites = ['/sprites/arcade/node_1.png', '/sprites/arcade/node_2.png', '/sprites/arcade/node_3.png', '/sprites/arcade/node_4.png'];
+  for (let i = 0; i < 4; i += 1) {
+    nodes.push(el('button', {
+      type: 'button',
+      class: `arcade-node${run.st.flash === i + 1 ? ' is-flash' : ''}`,
+      'aria-label': `Узел ${i + 1}`,
+      disabled: run.st.showing ? '' : null,
+      onClick: () => arcadeSequencePress(run, i),
+    }, el('img', { src: sprites[i], alt: '', width: '72', height: '72', loading: 'lazy' })));
+  }
+  return el('div', { class: 'arcade-sequence' },
+    el('div', { class: 'arcade-nodes' }, ...nodes),
+    el('p', { class: 'muted' }, run.st.showing
+      ? 'Смотри на узлы: сейчас повторим сигнал.'
+      : `Повтори последовательность. Уровень ${run.st.level ?? 0} из 12.`));
+}
+
+function arcadeSequencePress(run, i) {
+  if (run.st.showing) return;
+  const want = run.st.want ?? [];
+  const pos = run.presses.length;
+  run.presses.push(i);
+  run.st.flash = i + 1;
+  setTimeout(() => { if (arcadeRun) { arcadeRun.st.flash = 0; arcadeRefreshBoard(); } }, 160);
+  if (want[pos] !== i) {
+    sfx('lose');
+    arcadeSubmit({});
+    return;
+  }
+  sfx('pick');
+  // Прессы накопительные: сервер сверяет префикс всей последовательности,
+  // поэтому «сбросить список после уровня» означало бы потерять зачёт.
+  const levelEnd = 3 + (run.st.level ?? 0) - 1;
+  if (pos === levelEnd) {
+    run.st.level = (run.st.level ?? 0) + 1;
+    arcadeRefreshBoard();
+    arcadeSequenceShow();
+    if (run.st.level >= 12) arcadeSubmit({});
+    return;
+  }
+  arcadeRefreshBoard();
+}
+
+// ── Экран «Аркада» ──────────────────────────────────────────────────────────
+
+function arcadeTier(tier, total) {
+  // Прогресс — общие победы в аркаде против порога ступени. Раньше здесь стояло
+  // `Math.min(tier.wins, 75) / tier.wins`, и полоса всегда была полной: игрок
+  // видел «почти готово», не сыграв ни одного забега.
+  const pct = Math.max(0, Math.min(100, Math.round((Math.min(total, tier.wins) / tier.wins) * 100)));
+  const fill = el('div', { class: 'level-bar-fill' });
+  fill.style.width = `${pct}%`;
+  return el('div', { class: `arena-tier${tier.awarded ? ' is-done' : ''}` },
+    el('div', { class: 'arena-tier-head' },
+      el('b', {}, `${tier.wins} побед`),
+      el('span', { class: 'muted' }, tier.awarded ? 'медаль получена' : `+${tier.xp} XP`)),
+    el('div', { class: 'level-bar' }, fill),
+    el('p', { class: 'muted' }, tier.title));
+}
+
+/** Разбор серверного detail в одну строку. Числа приходят с сервера, текст — наш. */
+function arcadeDetailText(game, detail) {
+  const d = detail ?? {};
+  const n = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  if (game === 'maze') return `шагов ${n(d.steps)} из ${n(d.shortest)} возможных`;
+  if (game === 'sudoku') return `верно ${n(d.correct)} из ${n(d.cells)} клеток`;
+  if (game === 'memory') return `${n(d.matched)} пар за ${n(d.turns)} ходов`;
+  if (game === 'sequence') return `уровень ${n(d.level)} (${n(d.correct)} сигналов)`;
+  if (game === 'reaction') return `${n(d.hits)} попаданий, средняя реакция ${n(d.avg_ms)} мс`;
+  if (game === 'runner') return `${n(d.passed)} чистых, ${n(d.gems)} грузов, ${n(d.crashes)} пробоин`;
+  if (game === 'breakout') return `щит: ${n(d.destroyed)} из ${n(d.bricks)}, срывов ${n(d.lost)}`;
+  if (game === 'snake') return `${n(d.eaten)} фракций, длина ${n(d.length)}`;
+  if (game === 'aim') return `${n(d.hits)} из ${n(d.targets)}, промахов ${n(d.misses)}`;
+  if (game === 'catch') return `${n(d.picked)} из ${n(d.cargo)} грузов, пробоин ${n(d.hits)}`;
+  return '';
+}
+
+function arcadeResultCard(r) {
+  if (!r || r.error) {
+    return el('p', { class: 'error' }, ERRORS[r?.error] || 'Забег не засчитан');
+  }
+  const res = r.result ?? {};
+  const bad = !res.ok;
+  return el('div', { class: `arena-result${res.win ? ' is-win' : ''}${bad ? ' is-bad' : ''}` },
+    el('h3', {}, bad ? 'Забег не засчитан' : res.win ? `Победа · ${res.score} очков` : `${res.score} очков`),
+    el('p', { class: 'muted' }, bad
+      ? 'Сервер не принял ввод: попытка сгорела, награды нет. Это защита от подбора ответов.'
+      : arcadeDetailText(r.game, res.detail)),
+    !bad ? el('p', {}, `Опыт: +${r.rewards?.xp ?? 0} XP${r.rewards?.capped ? ' (суточный потолок аркады выбран)' : ''}`) : null,
+    ...(r.awards ?? []).map((a) => el('p', { class: 'arena-award' },
+      `Медаль «${a.title}» · +${a.xp} XP`)));
+}
+
+function arcadeTile(g) {
+  return el('div', { class: 'arcade-tile' },
+    el('img', { class: 'arcade-tile-art', src: g.sprite, alt: '', width: '64', height: '64', loading: 'lazy' }),
+    el('div', { class: 'arcade-tile-body' },
+      el('h4', {}, g.title),
+      el('p', { class: 'muted' }, g.rules),
+      el('p', { class: 'arcade-tile-meta' },
+        el('span', {}, g.kind === 'logic' ? 'голова' : 'реакция'),
+        el('span', {}, `лучший счёт ${g.best}`),
+        el('span', {}, `${g.wins} побед из ${g.runs} забегов`)),
+      el('p', { class: 'muted' }, `Управление: ${g.controls} · раунд ${Math.round(g.runMs / 1000)} с`)),
+    el('button', {
+      type: 'button', class: 'cta cta-small',
+      disabled: arcadeData.attempts.left <= 0 ? '' : null,
+      onClick: () => { arcadeGameId = g.id; arcadeResult = null; arcadeStartRun(); },
+    }, arcadeData.attempts.left > 0 ? 'Играть' : 'Попыток нет'));
+}
+
+function arcadeHud() {
+  return el('div', { class: 'arena-hud' },
+    el('span', {}, el('b', { 'data-arcade-time': '' }, '0:00')),
+    el('span', {}, el('b', { 'data-arcade-score': '' }, '—')),
+    soundToggle());
+}
+
+function arcadeStage(game) {
+  const running = !!arcadeRun;
+  const needsCanvas = ['maze', 'reaction', 'runner', 'breakout', 'snake', 'aim', 'catch'].includes(game.id);
+  const domBoard = ['sudoku', 'memory', 'sequence'].includes(game.id);
+  return el('div', { class: 'arena-stage arcade-stage' },
+    running ? arcadeHud() : null,
+    needsCanvas
+      ? el('canvas', {
+        class: 'arena-canvas', id: 'arcade-canvas', width: '1000', height: '620',
+        'aria-label': `Поле игры «${game.title}»`,
+      })
+      : el('div', { class: 'arcade-board', id: 'arcade-board' }, running ? arcadeBoardInner(game.id) : null),
+    running
+      ? el('div', { class: 'arcade-running-bar' },
+        el('span', { class: 'muted' }, game.controls),
+        domBoard
+          ? el('button', { type: 'button', class: 'ghost', onClick: () => arcadeSubmit({}) }, 'Сдать результат')
+          : el('button', { type: 'button', class: 'ghost', onClick: () => arcadeSubmit({}) }, 'Закончить'))
+      : el('div', { class: 'arena-overlay' },
+        el('h3', {}, game.title),
+        el('p', { class: 'muted' }, game.rules),
+        el('p', { class: 'muted' }, `Управление: ${game.controls}. Счёт и победа — на совести сервера: он пересчитывает твой ввод по зерну забега.`),
+        el('button', {
+          type: 'button', class: 'cta', 'data-arcade-start': '',
+          disabled: arcadeData.attempts.left <= 0 ? '' : null,
+          onClick: arcadeStartRun,
+        }, arcadeData.attempts.left > 0 ? 'Начать забег' : 'Попытки на сегодня кончились')),
+    running
+      ? el('p', { class: 'muted arena-hint' }, 'Ушёл из забега — попытка сгорает. Ответы принимает сервер до конца раунда.')
+      : null);
+}
+
+function renderArcade() {
+  if (!arcadeData) {
+    if (!arcadeLoading && !arcadeError) loadArcade();
+    return el('div', { class: 'screen' },
+      el('p', { class: 'muted' }, arcadeError ? 'Аркада сейчас не отвечает.' : 'Загружаем аркаду…'),
+      arcadeError ? el('p', { class: 'error' }, arcadeError) : null,
+      arcadeError ? el('button', {
+        type: 'button', class: 'ghost',
+        onClick: () => { arcadeError = ''; loadArcade(); },
+      }, 'Повторить') : null);
+  }
+  const a = arcadeData;
+  const game = arcadeGame(arcadeGameId);
+  const xpPct = Math.min(100, Math.round((a.today.xp / (a.caps.xp || 1)) * 100));
+  const xpFill = el('div', { class: 'level-bar-fill' });
+  xpFill.style.width = `${xpPct}%`;
+  const weekPct = Math.min(100, Math.round((a.weekly.wins / (a.weekly.target || 1)) * 100));
+  const weekFill = el('div', { class: 'level-bar-fill' });
+  weekFill.style.width = `${weekPct}%`;
+  return el('div', { class: 'screen' },
+    el('div', { class: 'arena-hero' },
+      el('span', { class: 'badge' }, 'Аркада'),
+      el('h2', {}, 'Десять мини-игр'),
+      el('p', { class: 'muted' },
+        `Поле, колода, лабиринт и трасса строятся из серверного зерна. Награда — опыт${a.attempts.premium ? ' (Premium +4 попытки)' : ''}: ASTRA аркада не выдаёт.`),
+      el('div', { class: 'arena-stats' },
+        el('span', {}, 'попыток сегодня: ', el('b', {}, `${a.attempts.left}/${a.attempts.limit}`)),
+        el('span', {}, 'побед всего: ', el('b', {}, String(a.wins))),
+        el('span', {}, 'лучший счёт: ', el('b', {}, String(a.best))),
+        el('span', {}, 'опыт за день: ', el('b', {}, `${a.today.xp}/${a.caps.xp} XP`))),
+      el('div', { class: 'level-bar' }, xpFill)),
+
+    game ? null : el('div', { class: 'arcade-catalog' }, ...a.games.map(arcadeTile)),
+    game ? el('div', { class: 'arcade-open' },
+      el('div', { class: 'arcade-open-head' },
+        el('img', { src: game.sprite, alt: '', width: '40', height: '40' }),
+        el('h3', {}, game.title),
+        el('button', {
+          type: 'button', class: 'ghost',
+          onClick: () => { arcadeStopLoop(); arcadeRun = null; arcadeOpen(null); },
+        }, 'К каталогу')),
+      arcadeResult ? arcadeResultCard(arcadeResult) : null,
+      arcadeStage(game)) : null,
+
+    el('div', { class: 'panel-grid' },
+      el('div', { class: 'block' },
+        el('h3', {}, 'Медали аркады'),
+        el('p', { class: 'muted' }, 'Опыт за медали не входит в суточный потолок: это разовые достижения.'),
+        ...a.tiers.map((t) => arcadeTier(t, a.wins)),
+        el('div', { class: `arcade-allten${a.allTen.awarded ? ' is-done' : ''}` },
+          el('img', { src: '/sprites/arcade/medal_arcade_all.png', alt: '', width: '28', height: '28', class: 'icon-sm' }),
+          el('div', {},
+            el('b', {}, 'Десять игр — десять побед'),
+            el('p', { class: 'muted' }, a.allTen.awarded
+              ? `Медаль получена · +${a.allTen.xp} XP`
+              : `Победи в каждой игре каталога: ${a.allTen.have}/${a.allTen.need}.`)))),
+      el('div', { class: 'block' },
+        el('h3', {}, 'Неделя в аркаде'),
+        el('p', { class: 'muted' }, `${a.weekly.target} побед за календарную неделю (UTC) → +${a.weekly.xp} XP разово.`),
+        el('div', { class: 'level-bar' }, weekFill),
+        el('p', { class: 'muted' }, a.weekly.awarded ? 'Неделя закрыта, медаль выдана.' : `Сейчас ${a.weekly.wins}/${a.weekly.target}.`)),
+      el('div', { class: 'block' },
+        el('h3', {}, 'Последние забеги'),
+        a.recent.length
+          ? el('table', { class: 'arena-table' },
+            el('thead', {}, el('tr', {}, el('th', {}, 'Игра'), el('th', {}, 'Счёт'), el('th', {}, 'Итог'), el('th', {}, 'XP'))),
+            el('tbody', {}, ...a.recent.map((r) => el('tr', {},
+              el('td', {}, arcadeGame(r.game)?.title ?? r.game),
+              el('td', {}, String(r.score)),
+              el('td', {}, r.win ? 'победа' : arcadeDetailText(r.game, r.detail) || 'без победы'),
+              el('td', {}, `+${r.xp}`)))))
+          : el('p', { class: 'muted' }, 'Ещё ни одного засчитанного забега.')),
+      el('div', { class: 'block' },
+        el('h3', {}, 'Лидерборд аркады'),
+        a.leaderboard?.length
+          ? el('table', { class: 'arena-table' },
+            el('thead', {}, el('tr', {}, el('th', {}, '#'), el('th', {}, 'Пилот'), el('th', {}, 'Побед'), el('th', {}, 'Лучший'))),
+            el('tbody', {}, ...a.leaderboard.map((row) => el('tr', { class: row.isMe ? 'is-me' : '' },
+              el('td', {}, String(row.rank)),
+              el('td', { class: frameClass(row.frame) }, row.label,
+                row.premium ? el('span', { class: 'badge' }, 'Premium') : null),
+              el('td', {}, String(row.wins)),
+              el('td', {}, String(row.best))))))
+          : el('p', { class: 'muted' }, 'Побед пока нет. Первая — самая вкусная.'))),
+    el('p', { class: 'muted arcade-note' },
+      'Правила для всех десяти: попытка тратится на старте, кривой или физически невозможный ввод не засчитывается, а не «подбирается» бесплатно. '
+      + `Суточный потолок опыта — ${a.caps.xp} XP.`));
+}
+
+// ── Ввод: клавиши, мышь, палец ───────────────────────────────────────────────
+// Слушатели вешаются один раз: после каждой перерисовки их число не растёт.
+
+const ARCADE_DIR_CODES = {
+  ArrowUp: 0, w: 0, 'ц': 0,
+  ArrowRight: 1, d: 1, 'в': 1,
+  ArrowDown: 2, s: 2, 'ы': 2,
+  ArrowLeft: 3, a: 3, 'ф': 3,
+};
+
+function arcadePointer(event, canvas) {
+  const rect = canvas.getBoundingClientRect();
+  if (!rect.width) return null;
+  const x = ((event.clientX - rect.left) / rect.width) * ARCADE_W;
+  const y = ((event.clientY - rect.top) / rect.height) * ARCADE_H;
+  if (x < 0 || x > ARCADE_W || y < 0 || y > ARCADE_H) return null;
+  return { x: Math.round(x), y: Math.round(y) };
+}
+
+window.addEventListener('keydown', (e) => {
+  if (view !== 'arcade' || !arcadeRun || arcadeRun.finished) return;
+  const run = arcadeRun;
+  const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  if (run.game === 'maze') {
+    const d = ARCADE_DIR_CODES[key];
+    if (d == null) return;
+    e.preventDefault();
+    run.moves.push(d);
+    const g = run.st.grid;
+    const x = run.st.cursor % g.cols;
+    const y = Math.floor(run.st.cursor / g.cols);
+    const wall = [1, 2, 4, 8][d];
+    if (g.mask[run.st.cursor] & wall) {
+      // Сквозь стену не пройти: попытка обрывается, как и на сервере.
+      sfx('hit');
+      arcadeSubmit({});
+      return;
+    }
+    const nx = x + [0, 1, 0, -1][d];
+    const ny = y + [-1, 0, 1, 0][d];
+    run.st.cursor = ny * g.cols + nx;
+    sfx('pick');
+    if (run.st.cursor === g.cols * g.rows - 1) arcadeSubmit({});
+    return;
+  }
+  if (run.game === 'snake') {
+    const d = ARCADE_DIR_CODES[key];
+    if (d == null) return;
+    e.preventDefault();
+    run.st.dir = d;
+    return;
+  }
+  if (run.game === 'runner' && (key === ' ' || key === 'ArrowUp' || key === 'w')) {
+    e.preventDefault();
+    if (run.st.jumpAt == null) {
+      run.st.jumpAt = Math.min(run.runMs, Date.now() + serverOffset - run.t0);
+      sfx('pick');
+    }
+  }
+  if (run.game === 'reaction' && key === ' ') {
+    e.preventDefault();
+    arcadeReactTap(run);
+  }
+});
+
+function arcadeReactTap(run) {
+  const t = Date.now() + serverOffset - run.t0;
+  run.taps.push(Math.round(t));
+  sfx('pick');
+  const canvas = document.getElementById('arcade-canvas');
+  if (canvas) arcadeDrawFrame(canvas, t);
+}
+
+document.addEventListener('pointermove', (e) => {
+  const run = arcadeRun;
+  if (!run || run.finished) return;
+  if (run.game !== 'breakout' && run.game !== 'catch') return;
+  const canvas = document.getElementById('arcade-canvas');
+  if (!canvas) return;
+  const p = arcadePointer(e, canvas);
+  if (p) run.st.targetX = p.x;
+});
+
+document.addEventListener('pointerdown', (e) => {
+  const run = arcadeRun;
+  if (!run || run.finished || view !== 'arcade') return;
+  const canvas = document.getElementById('arcade-canvas');
+  if (!canvas || e.target !== canvas) return;
+  const p = arcadePointer(e, canvas);
+  if (!p) return;
+  const t = Math.round(Date.now() + serverOffset - run.t0);
+  if (run.game === 'aim') {
+    run.shots.push({ t, x: p.x, y: p.y });
+    const hit = (run.st.targets ?? []).some((target) => (
+      t >= target.t && t <= target.t + 900 && Math.hypot(p.x - target.x, p.y - target.y) <= target.r + 10
+    ));
+    run.st.recentShots = [...(run.st.recentShots ?? []), { at: t, x: p.x, y: p.y, hit }].slice(-24);
+    run.st.hits = (run.st.hits ?? 0) + (hit ? 1 : 0);
+    sfx(hit ? 'win' : 'hit');
+    if (run.shots.length >= 18) arcadeSubmit({});
+    return;
+  }
+  if (run.game === 'reaction') {
+    arcadeReactTap(run);
+    return;
+  }
+  if (run.game === 'runner') {
+    if (run.st.jumpAt == null) {
+      run.st.jumpAt = t;
+      sfx('pick');
+    }
+    return;
+  }
+  if (run.game === 'catch' || run.game === 'breakout') {
+    run.st.targetX = p.x;
+    run.st.x = p.x;
+  }
+});
+
 function renderMissions() {
   const data = socialData;
   if (!data) {
@@ -2853,12 +3993,15 @@ function render() {
                 : view === 'guild' ? renderGuild()
                   : view === 'bonus' ? renderBonus()
                     : view === 'boxes' ? renderBoxes()
-                    : view === 'arena' ? renderArena()
+                      : view === 'arena' ? renderArena()
+                        : view === 'arcade' ? renderArcade()
             : view === 'wallet' ? renderWallet()
             : view === 'ledger' ? renderLedger() : renderBridge();
   panel.append(body);
   // Арена живёт на canvas: цикл перевешиваем на свежий элемент после перерисовки.
   if (view === 'arena') arenaMount();
+  // Аркада — тот же приём: у каждого своей игры свой цикл и свой canvas.
+  if (view === 'arcade') arcadeMount();
   // Виджет «я человек» живёт в разметке экрана — ставим его после каждой перерисовки.
   if (view === 'bridge' || view === 'boxes' || view === 'bonus') mountBonusGate();
   for (const btn of document.querySelectorAll('[data-view]')) btn.classList.toggle('active', btn.dataset.view === view);
@@ -3098,6 +4241,7 @@ function setView(v) {
   if (v === 'bonus') loadPayAccount();
   if (v === 'boxes') loadBoxes();
   if (v === 'arena') { arenaResult = null; if (!arenaData) loadArena(); }
+  if (v === 'arcade') { arcadeResult = null; if (!arcadeData) loadArcade(); }
   // Рейтинг в /me не лежит: при входе в раздел подтягиваем полный отчёт.
   if (v === 'season') loadSeason();
   if (v === 'missions') loadSocial();
