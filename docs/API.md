@@ -357,11 +357,19 @@ curl -s -X POST https://<worker>/claim \
 | --- | --- | --- | --- |
 | GET | `/admin/world` | — | `world`, `frozen`, `totals`, `verify`, `players[]` |
 | POST | `/admin/world/freeze` | `{ frozen: boolean }` | `frozen` |
-| POST | `/admin/world/grant` | `{ playerId, astra, reason }` | `granted`, `astra` |
+| POST | `/admin/world/grant` | `{ player, astra, reason }` | `granted`, `astra`, `world`, `playerId`, `resolvedBy` |
 
 `verify` — сверка журнала: `{ ok, rows, brokenAtSeq?, mismatches? }`. `totals` —
 `players`, `astra`, `points`, `ships`, `adventures`. Начисление принимает
 `astra` от −100000 до 100000, не ноль и не дробь (`bad_amount`), требует
-непустую причину и пишет строку в `admin_log`; отрицательная сумма работает как
-списание и упадёт с `insufficient_funds`, если баланса не хватает. Ошибки:
-`unauthorized` (401), `bad_world`, `player_not_found` (404).
+непустую причину (`reason_required`) и пишет строку в `admin_log`; отрицательная
+сумма работает как списание и упадёт с `insufficient_funds`, если баланса не
+хватает. Ошибки: `admin_token_required` (401), `admin_forbidden` (403),
+`admin_disabled` (503), `bad_world`, `bad_target`, `bad_amount`,
+`reason_required`, `ambiguous_player` (409), `player_not_found` (404).
+
+`player` — это id игрока, **начало** id (как в списке админки, от 4 символов) или
+email; старое поле `playerId` принимается для совместимости. Мир определяется по
+самому игроку из D1 (`users.world_id`), а не по `?world=`, — поэтому начисление
+не улетает в чужой мир. `?world=` используется только как запасной вариант, если
+игрока нет в D1. `resolvedBy` — `email`, `id`, `prefix` или `world`.

@@ -20,12 +20,35 @@ async function call(path, options = {}) {
     headers: {
       'X-Admin-Token': token(),
       'X-Admin-Email': email(),
-      'Content-Type': 'application/json',
+      // Content-Type только при теле: на GET лишний заголовок ломает CORS-предпроверку.
+      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
       ...(options.headers || {}),
     },
   });
   const data = await res.json().catch(() => ({}));
   return { status: res.status, data };
+}
+
+// Коды отказа с сервера — в человеческий текст. Раньше любая ошибка показывалась
+// как «Причина обязательна», поэтому настоящая причина (не тот мир, нет игрока,
+// не задан ADMIN_TOKEN) была не видна.
+const ERROR_TEXT = {
+  admin_disabled: 'ADMIN_TOKEN не задан в секретах Worker — добавьте секрет и задеплойте.',
+  admin_forbidden: 'Токен не совпал с ADMIN_TOKEN.',
+  admin_email_forbidden: 'Почта не привязана: нужен email из секрета ADMIN_EMAIL.',
+  admin_token_required: 'Введите токен.',
+  too_many_attempts: 'Слишком много неверных попыток с этого адреса. Подождите 15 минут — блокировка снимется сама.',
+  bad_world: 'Мир пишется латиницей: w1.',
+  bad_target: 'Укажите игрока: полный id, начало id или email.',
+  bad_amount: 'Сумма — целое число от 1 до 100 000 (минус — списание).',
+  reason_required: 'Заполните причину.',
+  player_not_found: 'Игрок не найден ни в одном мире. Проверьте id или email.',
+  ambiguous_player: 'Под это начало id подходит несколько игроков — введите id целиком или email.',
+  bad_request: 'Проверьте поля: игрок, сумма, причина.',
+};
+function errorText(data, status) {
+  const code = data && data.error;
+  return ERROR_TEXT[code] || `Отказ: ${code || status}.`;
 }
 
 // ── Пул: сводка и добавление записи ────────────────────────────────────────
@@ -259,18 +282,45 @@ $('#pool-add').addEventListener('click', addPoolEntry);
 $('#pay-stop').addEventListener('click', () => setStop(true));
 $('#pay-resume').addEventListener('click', () => setStop(false));
 
-$('#grant').addEventListener('click', async () => {
-  const body = {
-    playerId: $('#grant-player').value.trim(),
-    astra: Number($('#grant-amount').value),
-    reason: $('#grant-reason').value.trim(),
-  };
-  const { status, data } = await call('/admin/world/grant', { method: 'POST', body: JSON.stringify(body) });
-  setText('#grant-status', status === 201 || status === 200
-    ? `Начислено ${data.granted} ASTRA. Баланс: ${data.astra}.`
-    : `Отказ: ${data.error || status}. Причина обязательна.`);
-  load();
-});
+async function grant() {
+  const player = $('#grant-player').value.trim();
+  const astra = Number($('#grant-amount').value);
+  const reason = $('#grant-reason').value.trim();
+  const btn = $('#grant');
+  if (!player) { setText('#grant-status', ERROR_TEXT.bad_target); return; }
+  if (!reason) { setText('#grant-status', ERROR_TEXT.reason_required); return; }
+  btn.disabled = true;
+  setText('#grant-status', 'Начисляем…');
+  try {
+    const { status, data } = await call('/admin/world/grant', {
+      method: 'POST',
+      body: JSON.stringify({ player, astra, reason }),
+    });
+    if (status === 200 || status === 201) {
+      const where = data.world ? ` Мир ${data.world}.` : '';
+      const by = data.resolvedBy === 'email' ? ' (нашли по email)'
+        : data.resolvedBy === 'prefix' ? ' (нашли по началу id)' : '';
+      setText('#grant-status', `Готово: ${data.granted > 0 ? '+' : ''}${data.granted} ASTRA игроку ${data.playerId}${by}. Баланс: ${data.astra}.${where}`);
+      $('#grant-reason').value = '';
+      load();
+    } else {
+      setText('#grant-status', errorText(data, status));
+    }
+  } catch (e) {
+    setText('#grant-status', `Сеть недоступна: ${e.message}. Повторите — запрос не дошёл.`);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+$('#grant').addEventListener('click', grant);
+for (const sel of ['#grant-player', '#grant-amount', '#grant-reason']) {
+  $(sel).addEventListener('keydown', (e) => { if (e.key === 'Enter') grant(); });
+}
+
+// Форму начисления показываем сразу: сервер всё равно проверит токен. Раньше она
+// открывалась только после успешного /admin/world, и при сбое её не было вовсе.
+$('#grant-block').hidden = false;
 
 // Email подставляем из прошлой вкладки: токен придётся ввести заново.
 $('#email').value = email();

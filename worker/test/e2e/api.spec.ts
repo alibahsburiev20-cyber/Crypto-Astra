@@ -82,6 +82,50 @@ if (!BASE) {
       state.shipId = String(me.data.ships[0].id);
     });
 
+    // Жалоба владельца: «не могу начислить другому монеты, даже причину пишу».
+    // Проверяем ровно его сценарий: игрок зарегистрирован, оператор пишет email и
+    // причину — начисление обязано пройти в тот мир, где игрок реально живёт.
+    it('админ начисляет ASTRA по email и по началу id', async () => {
+      const byEmail = await api('/admin/world/grant?world=w1', {
+        method: 'POST', auth: false, admin: true,
+        body: { player: email, astra: 250, reason: 'e2e: компенсация' },
+      });
+      expect(byEmail.status).toBe(200);
+      expect(byEmail.data.world).toBe(state.worldId);
+      expect(byEmail.data.resolvedBy).toBe('email');
+      const playerId = String(byEmail.data.playerId);
+      expect(byEmail.data.granted).toBe(250);
+
+      const byPrefix = await api('/admin/world/grant?world=w1', {
+        method: 'POST', auth: false, admin: true,
+        body: { player: playerId.slice(0, 8), astra: 5, reason: 'e2e: начало id' },
+      });
+      expect(byPrefix.status).toBe(200);
+      expect(byPrefix.data.playerId).toBe(playerId);
+      expect(byPrefix.data.resolvedBy === 'prefix' || byPrefix.data.resolvedBy === 'id').toBe(true);
+
+      const me = await api('/me');
+      expect(me.data.balances.astra).toBe(500 + 250 + 5);
+
+      // Отрицательная сумма — списание. Заодно возвращаем баланс к исходному,
+      // чтобы последующие проверки в файле оставались предсказуемыми.
+      const back = await api('/admin/world/grant?world=w1', {
+        method: 'POST', auth: false, admin: true,
+        body: { player: email, astra: -255, reason: 'e2e: откат начисления' },
+      });
+      expect(back.status).toBe(200);
+      expect(back.data.granted).toBe(-255);
+      expect((await api('/me')).data.balances.astra).toBe(500);
+
+      // Без причины — понятный код, а не «что-то сломалось».
+      const noReason = await api('/admin/world/grant', {
+        method: 'POST', auth: false, admin: true,
+        body: { player: email, astra: 10 },
+      });
+      expect(noReason.status).toBe(400);
+      expect(noReason.data.error).toBe('reason_required');
+    });
+
     it('Claim игнорирует суммы из тела и идемпотентен', async () => {
       const a = await api('/claim', { method: 'POST', key: state.claimKey, body: { astra: 999999, fuel: 999 } });
       expect(a.status).toBe(200);

@@ -81,8 +81,8 @@
 
     <section class="block" id="grant-block" hidden>
       <h2>Ручное начисление</h2>
-      <p class="muted">Каждая выдача пишется в журнал мира с причиной и попадает в <code>admin_log</code>.</p>
-      <label>Игрок <input id="grant-player" size="40" autocomplete="off" placeholder="id игрока"></label>
+      <p class="muted">Игрока ищем по id, началу id (как в списке) или email — мир определится сам. Каждая выдача пишется в журнал мира с причиной и попадает в <code>admin_log</code>.</p>
+      <label>Игрок <input id="grant-player" size="40" autocomplete="off" placeholder="id, начало id или email"></label>
       <label>ASTRA <input id="grant-amount" type="number" value="100" step="1"></label>
       <label>Причина <input id="grant-reason" size="32" autocomplete="off" placeholder="компенсация за сбой"></label>
       <button type="button" id="grant"><img src="/icons/ui/grant.png" alt="" width="18" height="18"> Начислить</button>
