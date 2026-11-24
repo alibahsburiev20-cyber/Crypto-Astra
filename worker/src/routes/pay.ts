@@ -1,6 +1,6 @@
 import type { AuthContext } from '../auth/guards';
 import type { Env } from '../env';
-import { json } from '../http/response';
+import { json, readJsonSoft } from '../http/response';
 import { ensureAddress, findAddress, signerDeriver } from '../pay/addresses';
 import { payFlags, publicFlags, walletState } from '../pay/flags';
 import { payBalanceMicro, payHistory } from '../pay/ledger';
@@ -181,12 +181,9 @@ export async function payPurchase(request: Request, env: Env, auth: AuthContext)
 }
 
 async function readJsonObject(request: Request): Promise<Record<string, unknown>> {
-  try {
-    const data = await request.json();
-    return data && typeof data === 'object' ? (data as Record<string, unknown>) : {};
-  } catch {
-    return {};
-  }
+  // Через общий читатель: он обрывает тело на 16 КиБ до парсинга. Денежные
+  // маршруты — самое место, где «а что если прислать 5 МеБ» задают не игроки.
+  return readJsonSoft(request);
 }
 
 

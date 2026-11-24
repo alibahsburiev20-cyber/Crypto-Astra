@@ -1,6 +1,6 @@
 import type { AuthContext } from '../auth/guards';
 import type { Env } from '../env';
-import { json, readJson } from '../http/response';
+import { json, readJson, readJsonSoft } from '../http/response';
 import { ApiError } from '../world/errors';
 import { checkTurnstile } from '../auth/turnstile';
 import { premiumStatus } from '../pay/shop';
@@ -13,9 +13,20 @@ function world(env: Env, a: AuthContext) {
   return env.WORLD.get(env.WORLD.idFromName(a.worldId));
 }
 
+/**
+ * Ключ идемпотентности обязан быть коротким и вразумительным.
+ *
+ * Без проверки сюда можно было положить любой текст до 8 КиБ (лимит заголовка),
+ * и он уехал бы в `idempotency_keys` как есть — лишний вес в D1 и способ
+ * замусорить таблицу записями произвольной длины. Формат тот же, что у пачки
+ * (`http/batch.ts`), чтобы клиент не встречал два разных правила.
+ */
+const IDEM_KEY = /^[A-Za-z0-9._:-]{8,64}$/;
+
 function idemKey(request: Request): string {
   const key = request.headers.get('Idempotency-Key') ?? '';
   if (!key) throw new ApiError(400, 'idempotency_key_required');
+  if (!IDEM_KEY.test(key)) throw new ApiError(400, 'bad_idem_key');
   return key;
 }
 
@@ -149,7 +160,8 @@ export async function season(env: Env, a: AuthContext): Promise<Response> {
 // умели слать пустой POST, и отсутствие токена они должны увидеть как
 // turnstile_required, а не как 400 на парсинге.
 export async function claim(request: Request, env: Env, a: AuthContext): Promise<Response> {
-  const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+  // readJsonSoft: тело больше 16 КиБ отсекается до парсинга.
+  const body = await readJsonSoft(request);
   await checkTurnstile(env, request, body);
   const key = idemKey(request);
   const r = await world(env, a).claim(a.userId, key);

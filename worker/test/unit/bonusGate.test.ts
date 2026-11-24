@@ -90,7 +90,10 @@ describe('маршруты бонусов пропускают шлюз', () => 
     // Проверка стоит до вызова мира: отказ не должен ничего начислять.
     expect(claim.indexOf('checkTurnstile')).toBeLessThan(claim.indexOf('world(env, a).claim'));
     // И тело читается мягко: пустой POST старого клиента — это 403, а не 400.
-    expect(claim).toContain('request.json().catch(() => ({}))');
+    // readJsonSoft = «мягко по форме, жёстко по размеру» (16 КиБ, потоково):
+    // прямого request.json() тут быть не должно, он съедает тело без потолка.
+    expect(claim).toContain('readJsonSoft(request)');
+    expect(claim).not.toContain('request.json()');
   });
 
   it('бесплатный бокс проверяется, платный — нет', () => {

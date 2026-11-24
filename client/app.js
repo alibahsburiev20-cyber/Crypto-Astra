@@ -13,6 +13,7 @@ const ERRORS = {
   invalid_password: 'Пароль: от 8 до 128 символов',
   bad_request: 'Некорректный запрос',
   payload_too_large: 'Запрос слишком большой',
+  bad_idem_key: 'Слишком короткий ключ повторения — обновите страницу',
   turnstile_failed: 'Проверка «я человек» не пройдена — подтвердите ещё раз',
   unauthorized: 'Нужно войти заново',
   no_session: 'Сессия истекла, войдите заново',
@@ -314,10 +315,21 @@ async function authed(path, opts) {
   return res;
 }
 
+// Ключ повторения: 8…64 символа [A-Za-z0-9._:-] — такое правило на сервере и для
+// одиночных действий, и для пачки. `randomUUID` есть только в защищённом
+// контексте, поэтому как в pay.js держим запасной вариант: без него любое
+// действие падало бы на TypeError.
+function newIdem() {
+  try {
+    if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  } catch { /* старый браузер или http — падаем на ручной ключ */ }
+  return `ui-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 function idemKey(scope) {
   const k = `idem:${scope}`;
   let v = sessionStorage.getItem(k);
-  if (!v) { v = crypto.randomUUID(); sessionStorage.setItem(k, v); }
+  if (!v) { v = newIdem(); sessionStorage.setItem(k, v); }
   return v;
 }
 function idemDone(scope) { sessionStorage.removeItem(`idem:${scope}`); }

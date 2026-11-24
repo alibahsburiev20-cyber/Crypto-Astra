@@ -44,9 +44,10 @@ export async function route(request: Request, env: Env): Promise<Response> {
     // сам /batch в пачку не складываются (см. http/batch.ts).
     if (p === '/batch' && m === 'POST') {
       await requireAuth(request, env);
-      const length = Number(request.headers.get('Content-Length') ?? '0');
-      if (Number.isFinite(length) && length > BATCH_MAX_BODY) throw new ApiError(413, 'payload_too_large');
-      const parsed = parseBatchOps(await readJson(request));
+      // Потолок пачки — BATCH_MAX_BODY, а не общий 16 КиБ: десять операций с
+      // трассой мини-игры в 16 КиБ не помещаются. Считает его сам readJson —
+      // потоком, поэтому ни вранья в `Content-Length`, ни chunked-обхода.
+      const parsed = parseBatchOps(await readJson(request, BATCH_MAX_BODY));
       if (!parsed.ok) throw new ApiError(400, parsed.error);
 
       const now = Date.now();
