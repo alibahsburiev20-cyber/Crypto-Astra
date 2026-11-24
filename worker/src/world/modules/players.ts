@@ -1,4 +1,5 @@
 import { CLAIM_INTERVAL_MS, START_ASTRA, START_FUEL, WORLD_CAPACITY } from '../../shared/constants';
+import { STARTER_PLANE } from '../../shared/gameData';
 import { applyDelta, getBalance } from '../balances';
 import { ApiError } from '../errors';
 import { ensureMaintenance } from './maintenance';
@@ -25,6 +26,13 @@ export function createPlayer(sql: SqlStorage, playerId: string, now: number): { 
   applyDurability(sql, { playerId, shipId, delta: 100, reason: 'ship_delivery', sourceRef: 'start' }, now);
   applyDelta(sql, { playerId, asset: 'astra', delta: START_ASTRA, reason: 'start_bonus', sourceRef: 'start' }, now);
   applyDelta(sql, { playerId, asset: 'fuel', delta: START_FUEL, reason: 'start_bonus', sourceRef: 'start' }, now);
+  // Стартовая машина звена. Не подарок «на удачу»: без неё патруль не запустить,
+  // и вся летающая часть звена была бы закрыта, пока из бокса что-нибудь упадёт.
+  sql.exec(
+    `INSERT INTO player_planes (player_id, plane, count, first_at, last_at) VALUES (?, ?, 1, ?, ?)
+     ON CONFLICT (player_id, plane) DO NOTHING`,
+    playerId, STARTER_PLANE, now, now,
+  );
   // Код приглашения выдаётся сразу: игрок видит его в разделе «Команда» с первого входа.
   ensureCode(sql, playerId, now);
   ensureMaintenance(sql, now);

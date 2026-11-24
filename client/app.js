@@ -105,6 +105,11 @@ const ERRORS = {
   bad_expedition: 'Проверьте планету и тип рейса',
   player_not_found: 'Игрок не найден',
   bad_box: 'Такого бокса нет',
+  bad_plane: 'Такой машины в звене нет',
+  plane_not_owned: 'Этой машины у вас ещё нет — ищите её в боксах и в патрулях',
+  patrol_busy: 'Машина уже в патруле: дождитесь возвращения',
+  patrol_flying: 'Патруль ещё не вернулся',
+  no_patrol: 'Активного патруля нет',
   box_cooldown: 'Этот бокс ещё закрыт: дождитесь таймера',
   idempotency_key_required: 'Повторите действие',
   idempotency_key_reused: 'Ключ запроса уже использован',
@@ -461,6 +466,13 @@ function updateTimers() {
     const until = Number(n.getAttribute('data-until'));
     const prefix = n.getAttribute('data-prefix') || '';
     n.textContent = prefix + fmtLeft(left(until));
+  }
+  // Патруль: как только таймер дошёл до нуля, перезапрашиваем состояние — иначе
+  // кнопка «Забрать» оставалась бы мёртвой до перезагрузки страницы.
+  for (const n of document.querySelectorAll('[data-patrol-ready]')) {
+    if (left(Number(n.getAttribute('data-until'))) > 0 || n.dataset.refresh) continue;
+    n.dataset.refresh = '1';
+    loadGame();
   }
   // Бокс: таймер вышел — кнопка должна ожить сама, без перезагрузки страницы.
   for (const n of document.querySelectorAll('[data-open-box]')) {
@@ -939,23 +951,88 @@ function planeFindLine(plane) {
 // Полка «Авиазвено»: восемь машин из боксов. Это коллекция, а не корабли —
 // ячейки гаража они не занимают и в рейсы не летают, поэтому подписи
 // «найдено 3 из 8», а не «в строю».
+// «1 патруль · 6 ч», «2 патруля», «12 патрулей» — русское склонение вручную.
+function patrolCountBadge(p) {
+  if (!p.patrols) return null;
+  const n = p.patrols;
+  const word = n % 10 === 1 && n % 100 !== 11 ? 'патруль' : (n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20)) ? 'патруля' : 'патрулей';
+  return el('span', { class: 'badge' }, `${n} ${word} · ${p.hours} ч налёта`);
+}
+
+// Патруль длится часами, поэтому показываем «6 ч», а не «360 мин».
+function fmtDuration(ms) {
+  const hours = ms / 3600000;
+  if (hours >= 1) return `${Number(hours.toFixed(1))} ч`;
+  return `${Math.round(ms / 60000)} мин`;
+}
+
+// Активный патруль: машина летает и возвращается либо с новой машиной, либо ни с
+// чем. Ни ASTRA, ни ресурсов — иначе звеном можно было бы фармить мир в обход рейсов.
+function planePatrolBlock() {
+  const p = state.planes;
+  const patrol = p && p.patrol;
+  if (!patrol) return null;
+  const ready = patrol.ready;
+  const chance = Math.round(patrol.findChance * 1000) / 10;
+  return el('div', { class: `block plane-patrol${ready ? ' is-ready' : ''}` },
+    el('div', { class: 'plane-patrol-sky' },
+      el('img', {
+        src: patrol.sprite, alt: '', width: '64', height: '64', class: 'plane-patrol-art', loading: 'lazy',
+      })),
+    el('div', { class: 'plane-patrol-info' },
+      el('h3', {}, `${patrol.name} в патруле`, el('span', { class: 'badge' }, patrol.rarityName || patrol.rarity)),
+      el('p', { class: 'muted' }, `Шанс находки за вылет: ${chance} %`),
+      // Когда патруль вернулся, таймер не показываем: updateTimers переписал бы
+      // его в «Вернулась: 0:00» и оставил бы нули висеть до перерисовки.
+      ready
+        ? el('p', { class: 'ok' }, 'Машина вернулась — заберите находку')
+        : el('p', {
+          class: 'muted',
+          'data-until': patrol.endsAt,
+          'data-prefix': 'Вернётся через ',
+        }, ''),
+      el('button', {
+        type: 'button',
+        disabled: state.frozen || !ready ? '' : null,
+        onClick: () => doClaimPatrol(),
+      }, ready ? 'Забрать находку' : 'Ещё летит')),
+    el('span', { class: 'plane-timer', 'data-patrol-ready': '1', 'data-until': patrol.endsAt }));
+}
+
 function planeShelf() {
   const p = state.planes;
   if (!p || !p.models) return null;
-  const cells = p.models.map((m) => el('div', {
-    class: `plane-slot rarity-${m.rarity || 'common'}${m.count ? ' is-found' : ' is-locked'}`,
-  },
-    el('img', {
-      src: m.sprite || `/sprites/planes/${m.id}.png`,
-      alt: '', width: '72', height: '72', class: 'plane-art', loading: 'lazy',
-    }),
-    el('span', { class: 'plane-name' }, m.count ? m.name : '???'),
-    el('span', { class: 'plane-meta' }, m.count ? `${m.rarityName || m.rarity}${m.count > 1 ? ` ×${m.count}` : ''}` : m.hint)));
+  const busy = !!p.patrol;
+  const cells = p.models.map((m) => {
+    const chance = Math.round(m.findChance * 1000) / 10;
+    return el('div', {
+      class: `plane-slot rarity-${m.rarity || 'common'}${m.count ? ' is-found' : ' is-locked'}`,
+    },
+      el('img', {
+        src: m.sprite || `/sprites/planes/${m.id}.png`,
+        alt: '', width: '72', height: '72', class: 'plane-art', loading: 'lazy',
+      }),
+      el('span', { class: 'plane-name' }, m.count ? m.name : '???'),
+      el('span', { class: 'plane-meta' },
+        m.count
+          ? `${m.rarityName || m.rarity}${m.count > 1 ? ` ×${m.count}` : ''} · ${chance} %`
+          : m.hint),
+      m.count
+        ? el('button', {
+          type: 'button',
+          class: 'ghost plane-fly-btn',
+          disabled: state.frozen || busy ? '' : null,
+          onClick: () => doStartPatrol(m.id),
+        }, busy ? 'Занято' : `В патруль · ${fmtDuration(m.patrolMs)}`)
+        : null);
+  });
   return el('div', { class: 'block plane-block' },
     el('h3', {}, 'Авиазвено',
-      el('span', { class: 'badge' }, `${p.found}/${p.total}`)),
+      el('span', { class: 'badge' }, `${p.found}/${p.total}`),
+      patrolCountBadge(p)),
     el('p', { class: 'muted' },
-      'Маленькие машины из боксов. Это коллекция: они не летают, не занимают ячейки под корабли и не приносят ASTRA — только висят в гараже.'),
+      'Машины из боксов. Своя машина выходит в патруль и иногда возвращается с ещё одной — но ни ASTRA, ни ресурсов звено не даёт и ячейки под корабли не занимает. Это коллекция.'),
+    planePatrolBlock(),
     el('div', { class: 'plane-grid' }, ...cells));
 }
 
@@ -2229,6 +2306,15 @@ function boxCard(b) {
         el('span', { class: `badge${b.price > 0 ? ' badge-paid' : ''}` }, b.price > 0 ? `${b.price} ASTRA` : 'бесплатно')),
       el('p', { class: 'muted' }, b.hint),
       el('p', { class: 'muted' }, `Ресурсов за открытие: ${b.units[0]}–${b.units[1]}` + (b.price > 0 ? '' : ' · ресурсы, не ASTRA')),
+      // Шансы машин — отдельная строка, и они маленькие нарочно.
+      (b.planeChances || []).length
+        ? el('p', { class: 'muted box-plane-chances' },
+          'Машина звена: ',
+          ...b.planeChances.map((c, i) => [
+            i > 0 ? ' · ' : null,
+            `${c.rarityName.toLowerCase()} ${Math.round(c.chance * 10000) / 100} %`,
+          ].filter(Boolean)).flat())
+        : null,
       locked
         ? el('p', { class: 'box-timer', 'data-until': String(b.nextOpenAt), 'data-open-box': b.id }, '')
         : (b.price > 0
@@ -2535,6 +2621,15 @@ function doOpenBox(boxId) {
       });
     }
     await loadBoxes();
+  });
+}
+function doStartPatrol(plane) { return act(`patrol:${plane}`, '/planes/patrol', { plane }); }
+function doClaimPatrol() {
+  const id = state.planes?.patrol?.id || 0;
+  return act(`patrol-claim:${id}`, '/planes/patrol/claim', {}).then((res) => {
+    const found = res && res.status < 400 ? res.data?.found : null;
+    note = found ? `Патруль нашёл машину: ${found.name}` : 'Патруль вернулся без находки';
+    render();
   });
 }
 function doApplyReferral(code) { return act(`ref:${code}`, '/referrals/apply', { code }).then(loadGuild); }

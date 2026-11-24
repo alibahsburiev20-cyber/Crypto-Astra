@@ -317,6 +317,24 @@ export async function boxOpen(request: Request, env: Env, a: AuthContext): Promi
   return json(await world(env, a).openBox(a.userId, idemKey(request), box));
 }
 
+// ── Авиазвено (этап 6) ──────────────────────────────────────────────────────
+// Полка и патруль. Патруль ничего не начисляет в экономику: он возвращает либо
+// машину, либо пустоту, и только через claim — как рейс, а не по таймеру.
+export async function planes(env: Env, a: AuthContext): Promise<Response> {
+  return json(await world(env, a).getPlanes(a.userId));
+}
+
+export async function planePatrolStart(request: Request, env: Env, a: AuthContext): Promise<Response> {
+  const body = await readJson(request);
+  const plane = typeof body.plane === 'string' ? body.plane : '';
+  if (!plane) throw new ApiError(400, 'bad_plane');
+  return json(await world(env, a).startPatrol(a.userId, idemKey(request), plane));
+}
+
+export async function planePatrolClaim(request: Request, env: Env, a: AuthContext): Promise<Response> {
+  return json(await world(env, a).claimPatrol(a.userId, idemKey(request)));
+}
+
 export async function garage(env: Env, a: AuthContext): Promise<Response> {
   return json(await world(env, a).getGarage(a.userId, await isPremium(env, a)));
 }
