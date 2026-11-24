@@ -45,7 +45,7 @@ export function listCraftJobs(sql: SqlStorage, playerId: string): CraftView[] {
 export function craftCatalog() {
   return RECIPE_ORDER.map((id) => {
     const r = RECIPES[id];
-    return { id, name: r.name, inputs: r.inputs, ms: r.ms, fee: r.fee };
+    return { id, name: r.name, inputs: r.inputs, ms: r.ms, fee: r.fee, tier: r.tier };
   });
 }
 

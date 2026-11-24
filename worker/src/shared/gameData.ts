@@ -156,11 +156,20 @@ export const RESOURCE_NAMES: Record<string, string> = {
   energy_cell: 'Энергоячейка',
   circuit: 'Схема',
   alloy_plate: 'Сплавная пластина',
+  helium_coolant: 'Гелиевый хладагент',
+  titanium_frame: 'Титановая рама',
+  crystal_lens: 'Кристаллическая линза',
+  astralite_core: 'Астралитовое ядро',
+  void_weave: 'Пустотное полотно',
+  quantum_matrix: 'Квантовая матрица',
 };
 
 // Крафт (этап 2, срез 3). Компоненты — такие же ресурсы: лежат в resources и
 // пишутся в журнал как res:<имя>.
-export type RecipeId = 'energy_cell' | 'circuit' | 'alloy_plate';
+export type RecipeId =
+  | 'energy_cell' | 'circuit' | 'alloy_plate'
+  | 'helium_coolant' | 'titanium_frame' | 'crystal_lens'
+  | 'astralite_core' | 'void_weave' | 'quantum_matrix';
 
 export interface Recipe {
   id: RecipeId;
@@ -169,32 +178,85 @@ export interface Recipe {
   ms: number;
   /** Плата в ASTRA. Главный поглотитель этапа: без неё крафт только печатает ресурсы. */
   fee: number;
+  /**
+   * Круг рецепта. 1 — стартовый: только ресурсы первого сектора, доступен с
+   * нулевого уровня и закрывает ремонт и первые модули. 2 — дальний: в нём
+   * редкие ресурсы секторов 2–5, поэтому он не обязателен новичку.
+   */
+  tier: 1 | 2;
 }
 
-// Все рецепты собираются из ресурсов **первого сектора** (железо, медь, кремний,
-// лёд). Это не мелочь: металл и кристаллы лежат в секторах 2+, а туда пускают с
-// 5-го уровня. Прежние рецепты (титан, гелий-3, кристалл) были недостижимы первые
-// часы игры — и пластину для ремонта нельзя было получить вообще.
-// Инвариант проверяется тестом «рецепты доступны с первого уровня».
+// Рецепты первого круга собираются из ресурсов **первого сектора** (железо, медь,
+// кремний, лёд). Это не мелочь: металл и кристаллы лежат в секторах 2+, а туда
+// пускают с 5-го уровня. Прежние рецепты (титан, гелий-3, кристалл) были
+// недостижимы первые часы игры — и пластину для ремонта нельзя было получить.
+// Инвариант проверяется тестом «рецепты первого круга доступны с первого уровня».
+//
+// Второй круг существует ради обратной задачи: гелий-3, титан, кристалл,
+// астралит, пустотный кристалл и квантовая пыль раньше только продавались на
+// рынке — в мире их ничто не потребляло. Теперь каждый редкий ресурс входит в
+// свой компонент, а компоненты нужны модулям с 4-го уровня (MODULE_LATE_LEVEL).
 export const RECIPES: Record<RecipeId, Recipe> = {
   energy_cell: {
-    id: 'energy_cell', name: 'Энергоячейка',
+    id: 'energy_cell', name: 'Энергоячейка', tier: 1,
     inputs: [{ resource: 'ice', amount: 3 }, { resource: 'silicon', amount: 2 }],
     ms: 30 * 60 * 1000, fee: 50,
   },
   circuit: {
-    id: 'circuit', name: 'Схема',
+    id: 'circuit', name: 'Схема', tier: 1,
     inputs: [{ resource: 'copper_ore', amount: 3 }, { resource: 'silicon', amount: 2 }],
     ms: 20 * 60 * 1000, fee: 40,
   },
   alloy_plate: {
-    id: 'alloy_plate', name: 'Сплавная пластина',
+    id: 'alloy_plate', name: 'Сплавная пластина', tier: 1,
     inputs: [{ resource: 'iron_ore', amount: 3 }, { resource: 'copper_ore', amount: 2 }],
     ms: 20 * 60 * 1000, fee: 60,
   },
+  // Второй круг. Входы дешёвые и добываются рядом с редким ресурсом, плата в
+  // ASTRA выше — иначе редкий ресурс превращался бы в компонент бесплатно.
+  helium_coolant: {
+    id: 'helium_coolant', name: 'Гелиевый хладагент', tier: 2,
+    inputs: [{ resource: 'helium3', amount: 3 }, { resource: 'ice', amount: 4 }, { resource: 'silicon', amount: 2 }],
+    ms: 40 * 60 * 1000, fee: 90,
+  },
+  titanium_frame: {
+    id: 'titanium_frame', name: 'Титановая рама', tier: 2,
+    inputs: [{ resource: 'titanium', amount: 4 }, { resource: 'iron_ore', amount: 3 }, { resource: 'copper_ore', amount: 2 }],
+    ms: 45 * 60 * 1000, fee: 110,
+  },
+  crystal_lens: {
+    id: 'crystal_lens', name: 'Кристаллическая линза', tier: 2,
+    inputs: [{ resource: 'crystal', amount: 3 }, { resource: 'silicon', amount: 4 }],
+    ms: 50 * 60 * 1000, fee: 130,
+  },
+  astralite_core: {
+    id: 'astralite_core', name: 'Астралитовое ядро', tier: 2,
+    inputs: [{ resource: 'astralite', amount: 3 }, { resource: 'copper_ore', amount: 3 }, { resource: 'silicon', amount: 4 }],
+    ms: 60 * 60 * 1000, fee: 180,
+  },
+  void_weave: {
+    id: 'void_weave', name: 'Пустотное полотно', tier: 2,
+    inputs: [{ resource: 'void_crystal', amount: 2 }, { resource: 'ice', amount: 3 }, { resource: 'silicon', amount: 3 }],
+    ms: 70 * 60 * 1000, fee: 200,
+  },
+  quantum_matrix: {
+    id: 'quantum_matrix', name: 'Квантовая матрица', tier: 2,
+    inputs: [
+      { resource: 'quantum_dust', amount: 2 }, { resource: 'crystal', amount: 1 },
+      { resource: 'copper_ore', amount: 3 }, { resource: 'silicon', amount: 3 },
+    ],
+    ms: 90 * 60 * 1000, fee: 260,
+  },
 };
 
-export const RECIPE_ORDER: RecipeId[] = ['energy_cell', 'circuit', 'alloy_plate'];
+export const RECIPE_ORDER: RecipeId[] = [
+  'energy_cell', 'circuit', 'alloy_plate',
+  'helium_coolant', 'titanium_frame', 'crystal_lens',
+  'astralite_core', 'void_weave', 'quantum_matrix',
+];
+
+/** Рецепты первого круга: их видно новичку, они собираются из первого сектора. */
+export const STARTER_RECIPES: RecipeId[] = RECIPE_ORDER.filter((id) => RECIPES[id].tier === 1);
 
 // ── Боксы (этап 5) ───────────────────────────────────────────────────────────
 // Два бесплатных (дневной и недельный) и два платных. Платные — сток ASTRA:
@@ -287,40 +349,56 @@ export interface ModuleDef {
   basePrice: number;
   /** Компоненты за уровень; на уровень L нужно amount × L. */
   parts: { resource: string; amount: number }[];
+  /**
+   * Дальние компоненты: добавляются к parts с уровня MODULE_LATE_LEVEL и тоже
+   * умножаются на уровень. Здесь редкие ресурсы секторов 2–5, поэтому до 4-го
+   * уровня модуль качается на стартовых компонентах.
+   */
+  lateParts?: { resource: string; amount: number }[];
 }
+
+/** С какого уровня модулю нужны компоненты второго круга. */
+export const MODULE_LATE_LEVEL = 4;
 
 export const MODULES: Record<ModuleId, ModuleDef> = {
   engine: {
     id: 'engine', name: 'Двигатель', effect: 'duration', perLevel: 0.03, basePrice: 1200,
     parts: [{ resource: 'circuit', amount: 1 }],
+    lateParts: [{ resource: 'helium_coolant', amount: 1 }],
   },
   // Топливо целое: −5 % от 1 единицы всё равно даёт 1, поэтому модуль не снижает
   // расход, а расширяет бак — это видно сразу и работает на всех корпусах.
   fuel_system: {
     id: 'fuel_system', name: 'Топливная система', effect: 'tank', perLevel: 1, basePrice: 900,
     parts: [{ resource: 'energy_cell', amount: 1 }, { resource: 'circuit', amount: 1 }],
+    lateParts: [{ resource: 'helium_coolant', amount: 1 }],
   },
   // Кристалл лежит в секторе 2 и выше — сканер собираем из схем и кремния,
   // иначе его нельзя прокачать первые часы игры (тест доступности это ловит).
   scanner: {
     id: 'scanner', name: 'Сканер', effect: 'scanner', perLevel: 0.15, basePrice: 1500,
     parts: [{ resource: 'circuit', amount: 2 }, { resource: 'silicon', amount: 4 }],
+    lateParts: [{ resource: 'crystal_lens', amount: 1 }],
   },
   cargo_bay: {
     id: 'cargo_bay', name: 'Грузовой отсек', effect: 'cargo', perLevel: 0.1, basePrice: 2000,
     parts: [{ resource: 'alloy_plate', amount: 2 }],
+    lateParts: [{ resource: 'titanium_frame', amount: 1 }],
   },
   mining_drill: {
     id: 'mining_drill', name: 'Бур', effect: 'mining', perLevel: 0.06, basePrice: 2500,
     parts: [{ resource: 'alloy_plate', amount: 2 }, { resource: 'circuit', amount: 1 }],
+    lateParts: [{ resource: 'titanium_frame', amount: 1 }, { resource: 'astralite_core', amount: 1 }],
   },
   shield: {
     id: 'shield', name: 'Щит', effect: 'wear', perLevel: 0.08, basePrice: 3000,
     parts: [{ resource: 'alloy_plate', amount: 3 }, { resource: 'energy_cell', amount: 1 }],
+    lateParts: [{ resource: 'void_weave', amount: 1 }, { resource: 'quantum_matrix', amount: 1 }],
   },
   repair_kit: {
     id: 'repair_kit', name: 'Ремкомплект', effect: 'repair', perLevel: 0.1, basePrice: 600,
     parts: [{ resource: 'circuit', amount: 1 }, { resource: 'alloy_plate', amount: 1 }],
+    lateParts: [{ resource: 'crystal_lens', amount: 1 }],
   },
 };
 
@@ -335,9 +413,18 @@ export function modulePrice(id: ModuleId, level: number): number {
   return Math.round(MODULES[id].basePrice * Math.pow(2, level - 1));
 }
 
-/** Компоненты на уровень L: количество растёт линейно. */
+/**
+ * Компоненты на уровень L: количество растёт линейно. С MODULE_LATE_LEVEL
+ * добавляются дальние компоненты — тоже × L, иначе редкий ресурс на 5-м уровне
+ * стоил бы столько же, сколько на 4-м.
+ */
 export function moduleParts(id: ModuleId, level: number): { resource: string; amount: number }[] {
-  return MODULES[id].parts.map((p) => ({ resource: p.resource, amount: p.amount * level }));
+  const def = MODULES[id];
+  const parts = def.parts.map((p) => ({ resource: p.resource, amount: p.amount * level }));
+  if (level >= MODULE_LATE_LEVEL) {
+    for (const p of def.lateParts ?? []) parts.push({ resource: p.resource, amount: p.amount * level });
+  }
+  return parts;
 }
 
 export interface ModuleFx {
@@ -402,6 +489,12 @@ export const RESOURCE_BASE_PRICES: Record<string, number> = {
   energy_cell: 120,
   circuit: 140,
   alloy_plate: 180,
+  helium_coolant: 120,
+  titanium_frame: 150,
+  crystal_lens: 170,
+  astralite_core: 260,
+  void_weave: 230,
+  quantum_matrix: 330,
 };
 
 /** 5 % в базисных пунктах: 500 bp = 5 %. */

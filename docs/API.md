@@ -229,11 +229,18 @@ curl -s -X POST https://<worker>/claim \
 
 ## POST /craft/start
 
-Запуск крафта. Требует `Idempotency-Key`, тело `{ "recipe": "energy_cell" | "circuit" | "alloy_plate" }`.
+Запуск крафта. Требует `Idempotency-Key`, тело
+`{ "recipe": "<id из RECIPE_ORDER>" }` — девять рецептов:
+
+- первый круг: `energy_cell`, `circuit`, `alloy_plate` — только ресурсы первого сектора;
+- второй круг: `helium_coolant`, `titanium_frame`, `crystal_lens`, `astralite_core`,
+  `void_weave`, `quantum_matrix` — в каждом есть редкий ресурс секторов 2–5.
+
 Списывает ресурсы и плату в ASTRA одной транзакцией и ставит задачу `craft_finish`;
 готовый компонент начисляется сам. Очередь — один слот, второй будет за Astra Pass.
 Ошибки: `bad_recipe` (400), `insufficient_resources` и `craft_queue_full` (409).
-Каталог рецептов и запущенные задачи приходят в `/me` в блоке `craft`.
+Каталог рецептов и запущенные задачи приходят в `/me` в блоке `craft`; у каждого
+рецепта есть поле `tier` (1 или 2).
 
 ## POST /modules/install
 
@@ -241,6 +248,10 @@ curl -s -X POST https://<worker>/claim \
 `{ "shipId": "<id>", "module": "engine" | "fuel_system" | "scanner" | "cargo_bay" | "mining_drill" | "shield" | "repair_kit" }`.
 
 - уровень 1..5, цена уровня `L` = `basePrice × 2^(L−1)`, компоненты — `amount × L`;
+- с уровня `MODULE_LATE_LEVEL` (4) добавляются дальние компоненты второго круга,
+  тоже `× L`: двигателю и топливной системе — `helium_coolant`, сканеру и
+  ремкомплекту — `crystal_lens`, грузовому отсеку и буру — `titanium_frame`,
+  буру — ещё `astralite_core`, щиту — `void_weave` и `quantum_matrix`;
 - ASTRA и компоненты списываются одной транзакцией (`module_buy`, `module_parts`);
 - корабль должен быть «на базе»: в полёте установка запрещена (`ship_busy`);
 - модуль занимает слот корпуса; снять его нельзя, только улучшить.

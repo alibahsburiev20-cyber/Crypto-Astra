@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { DAY_MS } from '../../src/shared/constants';
-import { MODULE_ORDER, MODULES, PLANETS, RECIPES, RECIPE_ORDER, SECTORS } from '../../src/shared/gameData';
+import {
+  MODULES, MODULE_LATE_LEVEL, MODULE_ORDER, PLANETS, RECIPES, RECIPE_ORDER, RESOURCE_BASE_PRICES,
+  SECTORS, STARTER_RECIPES, moduleParts,
+} from '../../src/shared/gameData';
 import { applyDelta, getBalance } from '../../src/world/balances';
 import { verifyLedger } from '../../src/world/ledger';
-import { finishCraft, listCraftJobs, startCraft } from '../../src/world/modules/crafting';
+import { craftCatalog, finishCraft, listCraftJobs, startCraft } from '../../src/world/modules/crafting';
 import { addResource, getResource } from '../../src/world/modules/maintenance';
 import { createPlayer } from '../../src/world/modules/players';
 import { applyDurability } from '../../src/world/modules/progress';
@@ -43,6 +46,19 @@ describe('крафт (срез 3 этапа 2)', () => {
 
     const job = sql.exec(`SELECT kind FROM jobs WHERE kind = 'craft_finish'`).toArray();
     expect(job.length).toBe(1);
+  });
+
+  it('второй круг крафтится end-to-end: квантовая матрица из пыли и кристалла', () => {
+    const { sql, tx } = world();
+    const recipe = RECIPES.quantum_matrix;
+    for (const input of recipe.inputs) tx(() => addResource(sql, 'p1', input.resource, input.amount, T0 + 1));
+    const astraBefore = getBalance(sql, 'p1', 'astra');
+    const res = tx(() => startCraft(sql, 'p1', 'q1', 'quantum_matrix', T0 + 1000));
+    expect(getResource(sql, 'p1', 'quantum_dust')).toBe(0);
+    expect(getBalance(sql, 'p1', 'astra')).toBe(astraBefore - recipe.fee);
+    tx(() => finishCraft(sql, res.job.id, T0 + 1000 + recipe.ms));
+    expect(getResource(sql, 'p1', 'quantum_matrix')).toBe(1);
+    expect(verifyLedger(sql).ok).toBe(true);
   });
 
   it('без ресурсов крафт не начинается и ничего не списывает', () => {
@@ -131,9 +147,9 @@ describe('доступность рецептов и модулей (срез 3,
     if (sector && sector.level <= 1) for (const r of planet.resources) firstSector.add(r);
   }
 
-  it('все рецепты собираются из ресурсов первого сектора', () => {
+  it('рецепты первого круга собираются из ресурсов первого сектора', () => {
     const problems: string[] = [];
-    for (const id of RECIPE_ORDER) {
+    for (const id of STARTER_RECIPES) {
       for (const input of RECIPES[id].inputs) {
         if (!firstSector.has(input.resource)) problems.push(`${id}: ${input.resource}`);
       }
@@ -141,17 +157,112 @@ describe('доступность рецептов и модулей (срез 3,
     expect(problems).toEqual([]);
   });
 
+  it('рецепты первого круга — это ровно то, что нужно новичку на ремонт и модули', () => {
+    expect(STARTER_RECIPES).toEqual(['energy_cell', 'circuit', 'alloy_plate']);
+    // До 4-го уровня модули не требуют ничего из второго круга.
+    for (const id of MODULE_ORDER) {
+      for (let level = 1; level < MODULE_LATE_LEVEL; level++) {
+        for (const part of moduleParts(id, level)) {
+          // Либо сырьё первого сектора, либо компонент первого круга.
+          const ok = firstSector.has(part.resource) || (STARTER_RECIPES as string[]).includes(part.resource);
+          expect(ok, `${id} L${level}: ${part.resource}`).toBe(true);
+        }
+      }
+    }
+  });
+
   it('компоненты модулей либо добываются в первом секторе, либо крафтятся', () => {
     const craftable = new Set<string>(RECIPE_ORDER);
     const problems: string[] = [];
     for (const id of MODULE_ORDER) {
-      for (const part of MODULES[id].parts) {
+      const parts = [...MODULES[id].parts, ...(MODULES[id].lateParts ?? [])];
+      for (const part of parts) {
         if (!firstSector.has(part.resource) && !craftable.has(part.resource)) {
           problems.push(`${id}: ${part.resource}`);
         }
       }
     }
     expect(problems).toEqual([]);
+  });
+
+  it('у каждого рецепта вход — существующий ресурс, а не опечатка', () => {
+    const problems: string[] = [];
+    for (const id of RECIPE_ORDER) {
+      for (const input of RECIPES[id].inputs) {
+        if (!(input.resource in RESOURCE_BASE_PRICES)) problems.push(`${id}: ${input.resource}`);
+        if (input.amount <= 0) problems.push(`${id}: ${input.resource} × ${input.amount}`);
+      }
+      expect(RECIPES[id].fee, id).toBeGreaterThan(0);
+      expect(RECIPES[id].ms, id).toBeGreaterThan(0);
+    }
+    expect(problems).toEqual([]);
+  });
+
+  it('ни один ресурс не мёртвый: он либо нужен рецепту или модулю, либо сам крафтится', () => {
+    const consumed = new Set<string>();
+    for (const id of RECIPE_ORDER) for (const input of RECIPES[id].inputs) consumed.add(input.resource);
+    for (const id of MODULE_ORDER) {
+      // Проверяем на максимальном уровне: там действуют и обычные, и дальние части.
+      for (const part of moduleParts(id, 5)) consumed.add(part.resource);
+    }
+    const problems = Object.keys(RESOURCE_BASE_PRICES).filter(
+      (resource) => !consumed.has(resource) && !(resource in RECIPES),
+    );
+    expect(problems).toEqual([]);
+  });
+
+  it('каждый скрафченный компонент где-то расходуется', () => {
+    const consumed = new Set<string>();
+    for (const id of RECIPE_ORDER) for (const input of RECIPES[id].inputs) consumed.add(input.resource);
+    for (const id of MODULE_ORDER) for (const part of moduleParts(id, 5)) consumed.add(part.resource);
+    const orphans = RECIPE_ORDER.filter((id) => !consumed.has(id));
+    expect(orphans).toEqual([]);
+  });
+
+  it('каталог отдаёт клиенту все девять рецептов с кругом', () => {
+    const catalog = craftCatalog();
+    expect(catalog.map((r) => r.id)).toEqual(RECIPE_ORDER);
+    expect(catalog.filter((r) => r.tier === 1).map((r) => r.id)).toEqual(STARTER_RECIPES);
+    expect(catalog.filter((r) => r.tier === 2)).toHaveLength(6);
+    for (const r of catalog) {
+      expect(r.name).toBeTruthy();
+      expect(r.inputs.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('дальние компоненты появляются только с 4-го уровня', () => {
+    for (const id of MODULE_ORDER) {
+      const early = moduleParts(id, MODULE_LATE_LEVEL - 1).map((p) => p.resource);
+      const late = moduleParts(id, MODULE_LATE_LEVEL).map((p) => p.resource);
+      for (const part of MODULES[id].lateParts ?? []) {
+        expect(early, `${id} L${MODULE_LATE_LEVEL - 1}`).not.toContain(part.resource);
+        expect(late, `${id} L${MODULE_LATE_LEVEL}`).toContain(part.resource);
+      }
+    }
+  });
+
+  it('второй круг собирается из ресурсов, которые реально добываются', () => {
+    const mineable = new Set<string>();
+    for (const planet of PLANETS) for (const r of planet.resources) mineable.add(r);
+    const problems: string[] = [];
+    for (const id of RECIPE_ORDER) {
+      if (RECIPES[id].tier !== 2) continue;
+      for (const input of RECIPES[id].inputs) {
+        if (!mineable.has(input.resource) && !(input.resource in RECIPES)) problems.push(`${id}: ${input.resource}`);
+      }
+    }
+    expect(problems).toEqual([]);
+  });
+
+  it('второй круг окупается только по цене компонента, а плата в ASTRA — поглотитель', () => {
+    for (const id of STARTER_RECIPES) expect(RECIPES[id].tier).toBe(1);
+    for (const id of RECIPE_ORDER) {
+      if (RECIPES[id].tier !== 2) continue;
+      const inputs = RECIPES[id].inputs.reduce((sum, i) => sum + RESOURCE_BASE_PRICES[i.resource] * i.amount, 0);
+      // Компонент дороже сырья, но не в разы: рынок не должен стать станком.
+      expect(RESOURCE_BASE_PRICES[id], id).toBeGreaterThan(inputs);
+      expect(RESOURCE_BASE_PRICES[id], id).toBeLessThan(inputs * 2.5 + RECIPES[id].fee);
+    }
   });
 
   it('пластина для крупного ремонта крафтится из того, что можно добыть сразу', () => {
