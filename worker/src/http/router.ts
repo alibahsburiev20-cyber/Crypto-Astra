@@ -18,12 +18,26 @@ import { adminFreeze, adminGrant, adminWorld } from '../routes/admin';
 import { accountDelete, accountExport } from '../routes/account';
 import { enforceUserLimit } from './userLimit';
 import { errorResponse, json } from './response';
+import { dailyBudget, peekBudget, secondsUntilReset } from '../ops/budget';
 
 export async function route(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   const p = url.pathname;
   const m = request.method;
   try {
+    // Режим бережливости: публичный и без секретов. Смотреть можно всегда —
+    // даже когда всё остальное уже в `sleep`.
+    if (p === '/ops/status' && m === 'GET') {
+      const now = Date.now();
+      const state = await peekBudget(env.DB, now, dailyBudget(env.REQUEST_BUDGET));
+      return json({
+        ok: true,
+        ...state,
+        retryAfter: state.mode === 'sleep' ? secondsUntilReset(now) : 0,
+        blocked: state.mode === 'lite' ? ['heavy'] : state.mode === 'sleep' ? ['heavy', 'normal'] : [],
+        now,
+      }, 200, { 'Cache-Control': 'no-store' });
+    }
     if (p === '/health') {
       // build — метка из [vars]: по ней видно, какая сборка отвечает.
       return json({ ok: true, service: 'crypto-astra-api', build: String(env.APP_BUILD ?? 'dev'), now: Date.now() });

@@ -19,6 +19,8 @@ const ERRORS = {
   world_full: 'Нет свободных мест, попробуйте позже',
   internal: 'Ошибка сервера, попробуйте позже',
   server_misconfigured: 'Сервер не настроен',
+  server_sleep: 'Сервер бережёт себя до полуночи UTC: прогресс сохранён, зайдите позже',
+  server_lite: 'Сейчас высокая нагрузка: этот раздел временно недоступен, попробуйте позже',
   bad_run: 'Забег не найден, начните новый',
   run_not_found: 'Забег не найден, начните новый',
   run_expired: 'Забег просрочен: попытка сгорела',
@@ -225,12 +227,16 @@ function el(tag, attrs = {}, ...kids) {
   return n;
 }
 
+/** Режим бережливости сервера: приходит заголовком, отдельный запрос не нужен. */
+let serverMode = 'full';
+
 async function request(path, { method = 'GET', body, headers = {} } = {}) {
   const h = { ...headers };
   if (token) h.Authorization = `Bearer ${token}`;
   if (body) h['Content-Type'] = 'application/json';
   try {
     const r = await fetch(path, { method, headers: h, body: body ? JSON.stringify(body) : undefined, credentials: 'same-origin' });
+    serverMode = r.headers.get('X-Astra-Mode') || serverMode;
     const data = await r.json().catch(() => ({}));
     return { status: r.status, data };
   } catch {
@@ -2174,6 +2180,13 @@ async function loadGame() {
   state = data;
   syncServerTime(data.server_time);
   const welcome = welcomeNote(data);
+  // Сервер сам сказал, что экономит (заголовок X-Astra-Mode): предупреждаем
+  // игрока заранее, а не молчим до первого 503.
+  if (!note && (serverMode === 'lite' || serverMode === 'sleep')) {
+    note = serverMode === 'sleep'
+      ? 'Сервер до полуночи UTC в режиме экономии: часть разделов недоступна, прогресс сохранён.'
+      : 'Высокая нагрузка: часть разделов может быть недоступна до конца дня.';
+  }
   if (welcome && !note) note = welcome;
   if (view === 'ledger') {
     const led = await authed('/ledger');

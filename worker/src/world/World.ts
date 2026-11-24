@@ -29,7 +29,7 @@ import {
 } from './modules/minigame';
 import { verifyLedger, type LedgerReport } from './ledger';
 import { backfillProgressLedger, backfillResourceLedger, migrateLegacyExpeditions, migratePassClaimsSeason } from './migrate';
-import { nextAlarmAt } from './scheduler';
+import { decideWakeAt, nextCriticalAt, nextMaintenanceAt } from './scheduler';
 import { WORLD_SCHEMA } from './schema';
 
 // Один мир = один объект. Запросы обрабатываются по одному, а каждое действие
@@ -37,6 +37,14 @@ import { WORLD_SCHEMA } from './schema';
 // Внешних вызовов (fetch, await) внутри транзакции быть не должно.
 export class World extends DurableObject<Env> {
   private sql: SqlStorage;
+  /**
+   * Когда сюда последний раз приходил игрок (в памяти объекта).
+   *
+   * Хранить это в D1 или в meta нельзя: лишняя запись на каждый запрос съест
+   * суточный лимит записей. После вытеснения объекта значение обнуляется — и это
+   * правильно: если объекта не было в памяти, будить его лишний раз незачем.
+   */
+  private lastSeen = 0;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -65,6 +73,7 @@ export class World extends DurableObject<Env> {
 
   async getState(playerId: string, premium = false) {
     const now = Date.now();
+    this.lastSeen = now;
     const state = this.ctx.storage.transactionSync(() => {
       // Premium забирает готовый бонус сам: игрок не должен помнить про кнопку.
       const claimed = premium ? autoClaim(this.sql, playerId, now) : null;
@@ -368,7 +377,8 @@ export class World extends DurableObject<Env> {
 
   async poke(): Promise<{ ran: number }> {
     const ran = runDueJobs(this.sql, Date.now(), (fn) => this.ctx.storage.transactionSync(fn));
-    await this.arm();
+    // Это cron, а не игрок: активность не отмечаем, иначе мир никогда не уснёт.
+    await this.arm(false);
     return { ran };
   }
 
@@ -376,8 +386,11 @@ export class World extends DurableObject<Env> {
     await this.poke();
   }
 
-  private async arm(): Promise<void> {
-    const target = nextAlarmAt(this.sql);
+  private async arm(touched = true): Promise<void> {
+    const now = Date.now();
+    if (touched) this.lastSeen = now;
+    // В тишине служебные задачи не будят мир: их догонит часовой cron.
+    const target = decideWakeAt(now, this.lastSeen, nextCriticalAt(this.sql), nextMaintenanceAt(this.sql));
     if (target === null) {
       try { await this.ctx.storage.deleteAlarm(); } catch { /* будильника не было */ }
       return;
