@@ -172,7 +172,7 @@ starfield() {
 
 starfield "$BG/space.png" 1920 1200 260
 starfield "$BG/arena.png" 1000 620 150
-cp "$BG/space.png" "$BG/hero.png"
+# hero.png из репозитория удалён: `.hero-art` ссылается на space.png напрямую.
 
 echo "спрайты собраны:"
 find client/icons/ui client/icons/nav client/sprites/arena client/sprites/bg -name '*.png' -newer package.json | head -40
@@ -266,4 +266,193 @@ convert -size ${S}x${S} xc:none \
   -draw "roundrectangle 44,36 148,64 8,8" \
   -resize 48x48 -depth 8 "$UI/garage.png"
 
+# ── Аркада: десять мини-игр (этап 18) ───────────────────────────────────────
+#
+# Два набора: плитки каталога (по одной на игру) и детали поля. Всё рисуется
+# здесь же, без внешних картинок: правило проекта — весь арт из примитивов,
+# чтобы его можно было пересобрать и объяснить.
+
+ARC=client/sprites/arcade
+mkdir -p "$ARC"
+
+# Плитка каталога: скруглённая плашка, полоса сверху и эмблема из примитивов.
+# Эмблему передаём отдельными аргументами, поэтому десять плиток — это десять
+# вызовов, а не десять нарисованных файлов.
+tile() {
+  local out=$1 accent=$2
+  shift 2
+  convert -size 192x192 xc:none \
+    -fill 'rgba(20,32,64,0.92)' -stroke "$accent" -strokewidth 7 \
+    -draw "roundrectangle 12,12 180,180 26,26" \
+    -stroke none -fill 'rgba(140,180,255,0.10)' \
+    -draw "roundrectangle 22,22 170,86 18,18" \
+    -stroke "$accent" -strokewidth 7 -fill none \
+    "$@" \
+    -resize 128x128 -depth 8 "$out"
+}
+
+tile "$ARC/maze.png" '#8fd3ff' \
+  -draw "path 'M 44,44 L 148,44 L 148,148 L 76,148 L 76,88 L 116,88 L 116,116'" \
+  -fill '#8fd3ff' -stroke none -draw "circle 140,140 140,128"
+
+tile "$ARC/sudoku.png" '#aef4ff' \
+  -draw "roundrectangle 48,48 144,144 8,8" \
+  -draw "line 80,48 80,144" -draw "line 112,48 112,144" \
+  -draw "line 48,80 144,80" -draw "line 48,112 144,112"
+
+tile "$ARC/memory.png" '#ffd479' \
+  -draw "roundrectangle 42,56 116,148 10,10" \
+  -draw "roundrectangle 78,44 152,136 10,10" \
+  -fill '#ffd479' -stroke none -draw "circle 115,90 115,74"
+
+tile "$ARC/sequence.png" '#7de2b0' \
+  -draw "roundrectangle 42,42 92,92 10,10" -draw "roundrectangle 100,42 150,92 10,10" \
+  -draw "roundrectangle 42,100 92,150 10,10" \
+  -fill '#7de2b0' -stroke none -draw "roundrectangle 100,100 150,150 10,10"
+
+tile "$ARC/reaction.png" '#ffcf6b' \
+  -fill '#ffcf6b' -stroke none -draw "polygon 108,40 62,104 96,104 84,152 130,88 96,88" \
+  -stroke '#ffcf6b' -fill none -draw "circle 96,96 96,28"
+
+tile "$ARC/runner.png" '#9fb6e6' \
+  -draw "line 40,142 152,142" \
+  -fill '#9fb6e6' -stroke none -draw "circle 96,36 96,24" \
+  -draw "polygon 96,52 124,92 108,92 108,124 84,124 84,92 68,92"
+
+tile "$ARC/breakout.png" '#ff9ac4' \
+  -draw "roundrectangle 40,52 152,68 6,6" -draw "roundrectangle 40,76 96,92 6,6" \
+  -draw "roundrectangle 104,76 152,92 6,6" -draw "roundrectangle 54,148 138,158 5,5" \
+  -fill '#ff9ac4' -stroke none -draw "circle 76,124 76,114"
+
+tile "$ARC/snake.png" '#7de2b0' \
+  -fill '#7de2b0' -stroke none \
+  -draw "roundrectangle 40,88 74,122 8,8" -draw "roundrectangle 74,88 108,122 8,8" \
+  -draw "roundrectangle 108,88 142,122 8,8" -draw "roundrectangle 108,54 142,88 8,8" \
+  -stroke '#7de2b0' -fill none -draw "circle 132,44 132,36"
+
+tile "$ARC/aim.png" '#ff7b7b' \
+  -draw "circle 96,96 96,48" -draw "circle 96,96 96,76" \
+  -draw "line 96,26 96,52" -draw "line 96,140 96,166" \
+  -draw "line 26,96 52,96" -draw "line 140,96 166,96" \
+  -fill '#ff7b7b' -stroke none -draw "circle 96,96 96,90"
+
+tile "$ARC/catch.png" '#8fd3ff' \
+  -draw "path 'M 74,50 A 24,24 0 1 0 118,50'" -draw "line 96,74 96,112" \
+  -draw "roundrectangle 62,112 130,156 8,8" -draw "line 62,134 130,134"
+
+# Детали поля. Размеры — игровые, поэтому уменьшаем вниз (as for the rest of the art).
+
+# Кирпич щита, платформа и заряд для «Разбора щита».
+convert -size 96x36 xc:none -fill '#ff9ac4' -stroke '#ffd6e8' -strokewidth 3 \
+  -draw "roundrectangle 1,1 94,34 7,7" -fill 'rgba(255,255,255,0.25)' -stroke none \
+  -draw "roundrectangle 8,6 86,16 5,5" -depth 8 "$ARC/brick.png"
+convert -size 132x22 xc:none -fill '#9fc7ff' -stroke '#dcecff' -strokewidth 2 \
+  -draw "roundrectangle 1,1 130,20 9,9" -fill 'rgba(20,32,64,0.6)' -stroke none \
+  -draw "roundrectangle 12,7 120,15 5,5" -depth 8 "$ARC/paddle.png"
+convert -size 24x24 radial-gradient:'#ffffff'-'#5f8fd8' \
+  \( -size 24x24 xc:black -fill white -draw "circle 12,12 12,2" \) \
+  -alpha off -compose CopyOpacity -composite -depth 8 "$ARC/ball.png"
+
+# Змейка: голова, тело, корм.
+convert -size 44x44 xc:none -fill '#7de2b0' -stroke '#d7ffe9' -strokewidth 3 \
+  -draw "roundrectangle 2,2 41,41 12,12" -fill '#0b1a12' -stroke none \
+  -draw "circle 15,18 15,14" -draw "circle 29,18 29,14" -depth 8 "$ARC/snake_head.png"
+convert -size 44x44 xc:none -fill '#57b98c' -stroke '#8fe6bd' -strokewidth 3 \
+  -draw "roundrectangle 3,3 40,40 11,11" -depth 8 "$ARC/snake_body.png"
+convert -size 40x40 xc:none -fill '#ffcf6b' -stroke '#fff0c4' -strokewidth 3 \
+  -draw "circle 20,22 20,8" -stroke '#7de2b0' -fill none -draw "line 20,10 26,2" -depth 8 "$ARC/food.png"
+
+# Бегун: валун, дрон, груз и сам герой.
+asteroid "$ARC/rock.png" 5
+convert -size 64x48 xc:none -fill '#8fa4cf' -stroke '#cfe1ff' -strokewidth 3 \
+  -draw "polygon 32,6 58,24 32,42 6,24" -fill '#ff7b7b' -stroke none \
+  -draw "circle 32,24 32,18" -draw "line 10,10 22,18" -draw "line 54,10 42,18" -depth 8 "$ARC/drone.png"
+convert -size 48x48 xc:none -fill '#66e6ff' -stroke '#d8fbff' -strokewidth 3 \
+  -draw "polygon 24,4 42,24 24,44 6,24" -fill '#aef4ff' -stroke none \
+  -draw "polygon 24,10 34,24 24,22" -blur 0x1 -depth 8 "$ARC/gem.png"
+convert -size 56x76 xc:none -fill '#cfe1ff' -stroke '#8fb6ff' -strokewidth 3 \
+  -draw "circle 28,18 28,6" -draw "roundrectangle 12,30 44,62 8,8" \
+  -fill '#66e6ff' -stroke none -draw "roundrectangle 18,36 38,48 5,5" -depth 8 "$ARC/runner_hero.png"
+
+# Ловушка: крюк, груз и обломок.
+convert -size 72x72 xc:none -stroke '#8fd3ff' -strokewidth 6 -fill none \
+  -draw "line 36,6 36,34" -draw "path 'M 16,34 A 20,20 0 0 0 56,34'" \
+  -draw "line 16,34 16,24" -draw "line 56,34 56,24" -depth 8 "$ARC/hook.png"
+convert -size 64x64 xc:none -fill '#a8845c' -stroke '#e4c79b' -strokewidth 4 \
+  -draw "roundrectangle 6,6 58,58 6,6" -stroke '#6f5637' -strokewidth 3 \
+  -draw "line 6,32 58,32" -draw "line 32,6 32,58" -depth 8 "$ARC/crate.png"
+asteroid "$ARC/debris.png" 2
+
+# Мишени: реактивный маяк и снайперская цель.
+convert -size 128x128 xc:none -stroke '#ffcf6b' -strokewidth 8 -fill none \
+  -draw "circle 64,64 64,20" -stroke '#fff0c4' -strokewidth 4 \
+  -draw "circle 64,64 64,40" -fill '#ffcf6b' -stroke none \
+  -draw "circle 64,64 64,52" -blur 0x1 -depth 8 "$ARC/beacon.png"
+convert -size 128x128 xc:none -stroke '#ff7b7b' -strokewidth 7 -fill none \
+  -draw "circle 64,64 64,14" -draw "circle 64,64 64,38" \
+  -fill '#ff7b7b' -stroke none -draw "circle 64,64 64,58" \
+  -stroke '#ffd0d0' -strokewidth 3 -fill none \
+  -draw "line 64,4 64,26" -draw "line 64,102 64,124" -draw "line 4,64 26,64" -draw "line 102,64 124,64" \
+  -depth 8 "$ARC/target.png"
+
+# Карты «Нейро-пар»: рубашка и рубашка с кристаллом.
+convert -size 104x140 xc:none -fill 'rgba(30,46,86,0.95)' -stroke '#8fb6ff' -strokewidth 5 \
+  -draw "roundrectangle 3,3 100,136 12,12" -stroke '#5f8fd8' -strokewidth 3 \
+  -draw "path 'M 52,42 L 76,70 L 52,98 L 28,70 Z'" -depth 8 "$ARC/card_back.png"
+convert -size 104x140 xc:none -fill 'rgba(16,26,50,0.95)' -stroke '#aef4ff' -strokewidth 5 \
+  -draw "roundrectangle 3,3 100,136 12,12" -fill '#66e6ff' -stroke none \
+  -draw "polygon 52,34 80,70 52,106 24,70" -fill '#aef4ff' \
+  -draw "polygon 52,46 68,70 52,64" -depth 8 "$ARC/card_open.png"
+
+# «Сигнальная цепь»: четыре узла своих цветов.
+node() {
+  local out=$1 color=$2
+  convert -size 128x128 xc:none -fill "$color" -stroke 'rgba(255,255,255,0.65)' -strokewidth 5 \
+    -draw "roundrectangle 10,10 118,118 22,22" \
+    -fill 'rgba(255,255,255,0.22)' -stroke none -draw "roundrectangle 26,26 102,58 16,16" \
+    -depth 8 "$out"
+}
+node "$ARC/node_1.png" '#66e6ff'
+node "$ARC/node_2.png" '#7de2b0'
+node "$ARC/node_3.png" '#ffcf6b'
+node "$ARC/node_4.png" '#ff8fb0'
+
+# Лабиринт: клетка-стена и выход.
+convert -size 40x40 xc:none -fill 'rgba(140,180,255,0.30)' -stroke '#8fd3ff' -strokewidth 2 \
+  -draw "rectangle 1,1 38,38" -depth 8 "$ARC/wall.png"
+convert -size 64x64 xc:none -fill '#0b1430' -stroke '#7de2b0' -strokewidth 5 \
+  -draw "circle 32,32 32,10" -fill '#7de2b0' -stroke none -draw "circle 32,32 32,22" \
+  -depth 8 "$ARC/exit.png"
+convert -size 40x40 xc:none -fill 'rgba(20,34,66,0.85)' -stroke 'rgba(140,180,255,0.35)' -strokewidth 2 \
+  -draw "roundrectangle 1,1 38,38 4,4" -depth 8 "$ARC/cell.png"
+
+# Иконки раздела: та же обводка, что у остальных кнопок.
+convert -size ${S}x${S} xc:none \
+  -stroke "$STROKE" -strokewidth 12 -fill none \
+  -draw "roundrectangle 26,52 166,158 16,16" \
+  -draw "line 26,96 166,96" -draw "line 96,52 96,158" \
+  -fill '#7de2b0' -stroke none -draw "circle 60,128 60,118" -draw "circle 132,128 132,118" \
+  -stroke '#7de2b0' -strokewidth 10 -fill none -draw "line 52,74 76,74" -draw "line 116,74 148,74" \
+  -resize 48x48 -depth 8 "$UI/arcade.png"
+convert -size ${S}x${S} xc:none \
+  -stroke '#a9c4ff' -strokewidth 12 -fill none \
+  -draw "roundrectangle 30,60 162,150 18,18" \
+  -draw "line 30,102 162,102" -fill '#66e6ff' -stroke none \
+  -draw "circle 66,128 66,116" -draw "circle 126,128 126,116" \
+  -stroke '#66e6ff' -strokewidth 9 -fill none \
+  -draw "line 58,80 80,80" -draw "line 112,80 134,80" \
+  -resize 40x40 -depth 8 "$NAV/arcade.png"
+
+# Медали аркады: ступени побед, неделя и «все десять игр».
+medal "$ARC/medal_arcade_bronze.png" '#8fd3ff' '10'
+medal "$ARC/medal_arcade_silver.png" '#ffd479' '30'
+medal "$ARC/medal_arcade_gold.png" '#c9a6ff' '75'
+medal "$ARC/medal_arcade_week.png" '#7de2b0' 'W'
+medal "$ARC/medal_arcade_all.png" '#aef4ff' 'X'
+
+# Поле аркады: та же тема, что у арены, но светлее — игры читаются лучше.
+convert client/sprites/bg/arena.png -modulate 108,92 -depth 8 client/sprites/bg/arcade.png
+
+
+echo "арт аркады: плитки каталога, детали поля, медали"
 echo "дополнительные спрайты: гараж, скины, медали, админка"

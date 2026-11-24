@@ -200,6 +200,31 @@ export const WORLD_SCHEMA: string[] = [
      status TEXT NOT NULL DEFAULT 'flying' CHECK (status IN ('flying', 'done')),
      found TEXT, claimed_at INTEGER)`,
   `CREATE INDEX IF NOT EXISTS idx_plane_patrols_player ON plane_patrols (player_id, status)`,
+  // Аркада (этап 18): десять мини-игр. Зерно забега хранится — счёт считается
+  // сервером из зерна и трассы, поэтому строку можно пересчитать и наказать
+  // подлог. ASTRA аркада не выдаёт никогда: награда — опыт и медали-факты.
+  `CREATE TABLE IF NOT EXISTS arcade_runs (
+     id TEXT PRIMARY KEY, player_id TEXT NOT NULL REFERENCES players (id),
+     game TEXT NOT NULL CHECK (game IN ('maze', 'sudoku', 'memory', 'sequence', 'reaction',
+       'runner', 'breakout', 'snake', 'aim', 'catch')),
+     seed INTEGER NOT NULL, started_at INTEGER NOT NULL, ends_at INTEGER NOT NULL,
+     status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'finished', 'expired')),
+     score INTEGER NOT NULL DEFAULT 0 CHECK (score >= 0 AND score <= 600),
+     win INTEGER NOT NULL DEFAULT 0 CHECK (win IN (0, 1)),
+     detail TEXT NOT NULL DEFAULT '{}', xp INTEGER NOT NULL DEFAULT 0 CHECK (xp >= 0))`,
+  `CREATE INDEX IF NOT EXISTS idx_arcade_runs_player ON arcade_runs (player_id, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_arcade_runs_score ON arcade_runs (status, win, score)`,
+  // Суточный счётчик: попытки, победы и выданный опыт. Отказ «попыток нет» при
+  // этом не запоминается, поэтому через сутки запрос пройдёт с тем же ключом.
+  `CREATE TABLE IF NOT EXISTS arcade_daily (
+     player_id TEXT NOT NULL REFERENCES players (id), day INTEGER NOT NULL,
+     runs INTEGER NOT NULL DEFAULT 0 CHECK (runs >= 0),
+     wins INTEGER NOT NULL DEFAULT 0 CHECK (wins >= 0),
+     xp INTEGER NOT NULL DEFAULT 0 CHECK (xp >= 0),
+     PRIMARY KEY (player_id, day))`,
+  `CREATE TABLE IF NOT EXISTS arcade_awards (
+     player_id TEXT NOT NULL REFERENCES players (id), award TEXT NOT NULL, at INTEGER NOT NULL,
+     PRIMARY KEY (player_id, award))`,
   `CREATE TRIGGER IF NOT EXISTS ledger_no_update BEFORE UPDATE ON ledger
      BEGIN SELECT RAISE(ABORT, 'ledger is append-only'); END`,
   `CREATE TRIGGER IF NOT EXISTS ledger_no_delete BEFORE DELETE ON ledger

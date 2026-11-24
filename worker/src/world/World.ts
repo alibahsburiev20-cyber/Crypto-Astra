@@ -29,6 +29,11 @@ import { buyFuel, repairShip } from './modules/upkeep';
 import {
   finishRun, minigameBrief, minigameView, startRun, type FinishResult, type StartResult,
 } from './modules/minigame';
+import {
+  arcadeBrief, arcadeView, finishArcade, startArcade,
+  type ArcadeFinish, type ArcadeStart,
+} from './modules/arcade';
+import type { ArcadeInput } from '../shared/arcade';
 import { verifyLedger, type LedgerReport } from './ledger';
 import {
   backfillProgressLedger, backfillResourceLedger, catchUpXpFromPoints, migrateLegacyExpeditions, migratePassClaimsSeason,
@@ -226,6 +231,34 @@ export class World extends DurableObject<Env> {
 
   minigameSummary(playerId: string, now: number, premium: boolean) {
     return minigameBrief(this.sql, playerId, now, premium);
+  }
+
+  // ── Аркада (этап 18) ───────────────────────────────────────────────────────
+  // Десять игр, один пул попыток и один набор правил: результат считается
+  // здесь, а не в браузере. ASTRA не начисляется вовсе — только опыт и медали.
+  getArcade(playerId: string, premium: boolean) {
+    const now = Date.now();
+    return this.ctx.storage.transactionSync(() => arcadeView(this.sql, playerId, now, premium));
+  }
+
+  async startArcade(playerId: string, idemKey: string, game: string, premium: boolean): Promise<ArcadeStart> {
+    const now = Date.now();
+    const result = this.ctx.storage.transactionSync(() => startArcade(this.sql, playerId, idemKey, game, now, premium));
+    await this.arm();
+    return result;
+  }
+
+  async finishArcade(
+    playerId: string, idemKey: string, body: { runId: string } & ArcadeInput, premium: boolean,
+  ): Promise<ArcadeFinish> {
+    const now = Date.now();
+    const result = this.ctx.storage.transactionSync(() => finishArcade(this.sql, playerId, idemKey, body, now, premium));
+    await this.arm();
+    return result;
+  }
+
+  arcadeSummary(playerId: string, now: number, premium: boolean) {
+    return arcadeBrief(this.sql, playerId, now, premium);
   }
 
   // ── Социальное (этап 4) ────────────────────────────────────────────────────

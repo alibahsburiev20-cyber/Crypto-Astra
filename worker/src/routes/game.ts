@@ -7,6 +7,7 @@ import { premiumStatus } from '../pay/shop';
 import { ownedCosmetics } from '../pay/cosmetics';
 import type { StyleValue } from '../world/modules/identity';
 import { RUN_MS, expandTrace } from '../shared/minigame';
+import { ARCADE_IDS, INPUT_MAX, type ArcadeInput } from '../shared/arcade';
 import { BOXES, isBoxId } from '../shared/gameData';
 
 function world(env: Env, a: AuthContext) {
@@ -129,6 +130,71 @@ export async function minigameFinish(request: Request, env: Env, a: AuthContext)
   }
   if (!trace.length) throw new ApiError(400, 'bad_run');
   const result = await world(env, a).finishMinigame(a.userId, idemKey(request), { runId, trace }, await isPremium(env, a));
+  if (!result.ok) {
+    const status = result.error === 'run_not_found' ? 404 : 409;
+    return json(result, status);
+  }
+  return json(result);
+}
+
+// ── Аркада: десять мини-игр (этап 18) ────────────────────────────────────────
+//
+// Маршрут тонкий осознанно: он проверяет форму запроса (идентификатор игры,
+// непустой runId, размер списков), а содержимое трасс и ответов судит общий
+// модуль worker/src/shared/arcade.ts — тот же, что играет в браузере. Награда
+// начисляется только за засчитанный сервером результат.
+
+/** Список чисел из JSON: режем по максимуму и приводим к числам; мусор удаляет сам модуль. */
+function numberList(raw: unknown, cap: number): number[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  return raw.slice(0, cap).map((v) => Number(v));
+}
+
+/** Трасса снайпера: {t,x,y}; кривые поля превращаются в NaN и отсекаются на проверке. */
+function shotList(raw: unknown, cap: number): { t: number; x: number; y: number }[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  return raw.slice(0, cap).map((item) => {
+    const o = (item ?? {}) as { t?: unknown; x?: unknown; y?: unknown };
+    return { t: Number(o.t), x: Number(o.x), y: Number(o.y) };
+  });
+}
+
+export async function arcade(env: Env, a: AuthContext): Promise<Response> {
+  return json(await world(env, a).getArcade(a.userId, await isPremium(env, a)));
+}
+
+export async function arcadeStart(request: Request, env: Env, a: AuthContext): Promise<Response> {
+  const body = await readJsonSoft(request);
+  const game = typeof body.game === 'string' ? body.game : '';
+  // Список игр знает общий модуль: без этого сюда можно было бы прислать что
+  // угодно и получить 500 внутри транзакции.
+  if (!ARCADE_IDS.includes(game as (typeof ARCADE_IDS)[number])) throw new ApiError(400, 'bad_game');
+  const r = await world(env, a).startArcade(a.userId, idemKey(request), game, await isPremium(env, a));
+  if (!r.runId) return json({ error: r.error ?? 'daily_limit', attempts: r.attempts }, 429);
+  return json(r);
+}
+
+export async function arcadeFinish(request: Request, env: Env, a: AuthContext): Promise<Response> {
+  const body = await readJson(request);
+  const runId = typeof body.runId === 'string' ? body.runId : '';
+  if (!runId) throw new ApiError(400, 'bad_run');
+  const input: { runId: string } & ArcadeInput = { runId };
+  const moves = numberList(body.moves, INPUT_MAX);
+  if (moves) input.moves = moves;
+  const answers = numberList(body.answers, 81);
+  if (answers) input.answers = answers;
+  const presses = numberList(body.presses, INPUT_MAX);
+  if (presses) input.presses = presses;
+  const taps = numberList(body.taps, INPUT_MAX);
+  if (taps) input.taps = taps;
+  const axis = numberList(body.axis, INPUT_MAX);
+  if (axis) input.axis = axis;
+  const dirs = numberList(body.dirs, INPUT_MAX);
+  if (dirs) input.dirs = dirs;
+  const shots = shotList(body.shots, INPUT_MAX);
+  if (shots) input.shots = shots;
+  if (body.stepMs !== undefined) input.stepMs = Number(body.stepMs);
+  const result = await world(env, a).finishArcade(a.userId, idemKey(request), input, await isPremium(env, a));
   if (!result.ok) {
     const status = result.error === 'run_not_found' ? 404 : 409;
     return json(result, status);

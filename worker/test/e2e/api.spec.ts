@@ -595,4 +595,5 @@ if (!BASE) {
       expect((await api('/me')).data.balances.astra).toBe(astra);
     });
   });
+
 }
