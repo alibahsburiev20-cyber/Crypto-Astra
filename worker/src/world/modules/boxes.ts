@@ -1,4 +1,7 @@
-import { BOXES, BOX_COMPONENTS, BOX_ORDER, RESOURCE_NAMES, isBoxId, type BoxDef, type BoxId } from '../../shared/gameData';
+import {
+  BOXES, BOX_COMPONENTS, BOX_ORDER, PLANES, PLANE_ORDER, PLANE_RARITY_NAMES, RESOURCE_NAMES,
+  isBoxId, planeSprite, type BoxDef, type BoxId, type PlaneId,
+} from '../../shared/gameData';
 import { applyDelta, getBalance } from '../balances';
 import { ApiError } from '../errors';
 import { withIdempotency } from '../idempotency';
@@ -27,6 +30,8 @@ export interface BoxRoll {
   drops: BoxDrop[];
   rare: boolean;
   components: number;
+  /** Машина звена: коллекция, а не ресурс. null — не выпала. */
+  plane: PlaneId | null;
 }
 
 export interface BoxView {
@@ -88,7 +93,57 @@ export function rollBox(def: BoxDef, seed: string): BoxRoll {
     }
   }
 
-  return { units: total, drops, rare, components };
+  // Машина звена. Свои байты (9 и 10), чтобы не сдвигать ресурсы: у уже
+  // выданных боксов по сохранённому seed обязано воспроизводиться то же самое.
+  const plane = def.plane && seedUnit(seed, 9) < def.plane.chance
+    ? def.plane.pool[Math.min(def.plane.pool.length - 1, Math.floor(seedUnit(seed, 10) * def.plane.pool.length))]
+    : null;
+
+  return { units: total, drops, rare, components, plane: plane ?? null };
+}
+
+export interface PlaneView {
+  id: PlaneId;
+  name: string;
+  rarity: string;
+  rarityName: string;
+  hint: string;
+  sprite: string;
+  count: number;
+  firstAt: number;
+}
+
+/** Полка звена: все модели, включая ещё не найденные (count 0). */
+export function planesView(sql: SqlStorage, playerId: string): { found: number; total: number; models: PlaneView[] } {
+  const rows = sql.exec('SELECT plane, count, first_at FROM player_planes WHERE player_id = ?', playerId).toArray();
+  const byId = new Map(rows.map((r) => [String(r.plane), r]));
+  const models = PLANE_ORDER.map((id) => {
+    const def = PLANES[id];
+    const row = byId.get(id);
+    return {
+      id,
+      name: def.name,
+      rarity: def.rarity,
+      rarityName: PLANE_RARITY_NAMES[def.rarity],
+      hint: def.hint,
+      sprite: planeSprite(id),
+      count: row ? Number(row.count) : 0,
+      firstAt: row ? Number(row.first_at) : 0,
+    };
+  });
+  return { found: models.filter((m) => m.count > 0).length, total: PLANE_ORDER.length, models };
+}
+
+/** Начислить машину. Дубликаты копятся счётчиком — коллекция не «сгорает». */
+function grantPlane(sql: SqlStorage, playerId: string, plane: PlaneId, now: number): number {
+  const row = sql.exec('SELECT count FROM player_planes WHERE player_id = ? AND plane = ?', playerId, plane).toArray()[0];
+  const count = row ? Number(row.count) + 1 : 1;
+  sql.exec(
+    `INSERT INTO player_planes (player_id, plane, count, first_at, last_at) VALUES (?, ?, 1, ?, ?)
+     ON CONFLICT (player_id, plane) DO UPDATE SET count = count + 1, last_at = excluded.last_at`,
+    playerId, plane, now, now,
+  );
+  return count;
 }
 
 export function boxesView(sql: SqlStorage, playerId: string, now: number): { boxes: BoxView[] } {
@@ -154,6 +209,10 @@ export function openBox(sql: SqlStorage, playerId: string, idemKey: string, boxI
       }, now);
     }
 
+    // Машина звена: пишется в ту же транзакцию, что и ресурсы, поэтому
+    // «выпало в анимации, но не сохранилось» невозможно.
+    const plane = roll.plane ? grantPlane(sql, playerId, roll.plane, now) : 0;
+
     sql.exec(
       `INSERT INTO box_state (player_id, box, last_open_at, opens) VALUES (?, ?, ?, ?)
        ON CONFLICT (player_id, box) DO UPDATE SET last_open_at = excluded.last_open_at, opens = excluded.opens`,
@@ -175,6 +234,18 @@ export function openBox(sql: SqlStorage, playerId: string, idemKey: string, boxI
         units: roll.units,
         rare: roll.rare,
         components: roll.components,
+        plane: roll.plane
+          ? {
+            id: roll.plane,
+            name: PLANES[roll.plane].name,
+            rarity: PLANES[roll.plane].rarity,
+            rarityName: PLANE_RARITY_NAMES[PLANES[roll.plane].rarity],
+            hint: PLANES[roll.plane].hint,
+            sprite: planeSprite(roll.plane),
+            count: plane,
+            firstTime: plane === 1,
+          }
+          : null,
         astra,
         nextOpenAt: view ? view.nextOpenAt : 0,
         opens: opens + 1,

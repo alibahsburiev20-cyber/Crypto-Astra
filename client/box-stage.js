@@ -16,8 +16,12 @@
 
 const SPARKS = 18;
 
-/** Ресурсы из ответа сервера → чипы. Одинаковые складываются в один. */
-export function stageItems(drops) {
+/**
+ * Ресурсы из ответа сервера → чипы. Одинаковые складываются в один.
+ * Машина звена (`plane`) добавляется последней: это не ресурс, а находка
+ * коллекции, поэтому у неё свой спрайт и своя подпись.
+ */
+export function stageItems(drops, plane = null) {
   const out = [];
   for (const d of drops || []) {
     if (!d || !d.resource) continue;
@@ -27,7 +31,22 @@ export function stageItems(drops) {
     if (found) found.amount += amount;
     else out.push({ resource: String(d.resource), name: String(d.name || d.resource), amount });
   }
+  if (plane && plane.id) {
+    out.push({
+      resource: `plane:${String(plane.id)}`,
+      kind: 'plane',
+      name: String(plane.name || plane.id),
+      amount: Math.max(1, Number(plane.count) || 1),
+      sprite: plane.sprite || `/sprites/planes/${plane.id}.png`,
+      firstTime: plane.firstTime !== false,
+    });
+  }
   return out;
+}
+
+/** Путь к картинке чипа: у ресурсов — иконка, у машины — спрайт звена. */
+function iconOf(item) {
+  return item.kind === 'plane' ? (item.sprite || '/sprites/planes/strizh.png') : `/icons/resources/${item.resource}.png`;
 }
 
 /**
@@ -101,7 +120,7 @@ export function createBoxStage({ doc = globalThis.document, win = globalThis } =
 
     const img = doc.createElement('img');
     img.className = 'box-chip-art';
-    img.src = `/icons/resources/${item.resource}.png`;
+    img.src = iconOf(item);
     img.alt = '';
     img.width = 38;
     img.height = 38;
@@ -109,7 +128,8 @@ export function createBoxStage({ doc = globalThis.document, win = globalThis } =
 
     const count = doc.createElement('b');
     count.className = 'box-chip-count';
-    count.textContent = `×${item.amount}`;
+    // У машины «×1» ничего не говорит: показываем новинку или номер в звене.
+    count.textContent = item.kind === 'plane' ? (item.firstTime ? 'новинка' : `×${item.amount}`) : `×${item.amount}`;
 
     const caption = doc.createElement('span');
     caption.className = 'box-chip-name';
@@ -120,7 +140,7 @@ export function createBoxStage({ doc = globalThis.document, win = globalThis } =
   }
 
   function build(payload) {
-    const items = stageItems(payload.drops);
+    const items = stageItems(payload.drops, payload.plane);
     const layout = stageLayout(items.length, Math.min(
       Number(win.innerWidth) || 360,
       Number(win.innerHeight) || 640,
@@ -153,7 +173,11 @@ export function createBoxStage({ doc = globalThis.document, win = globalThis } =
     chips.className = 'box-stage-items';
     items.forEach((item, i) => {
       chips.append(chip(
-        { ...item, rare: item.resource === 'astralite' || item.resource === 'void_crystal' || item.resource === 'quantum_dust', part: parts.has(item.resource) },
+        {
+          ...item,
+          rare: item.kind === 'plane' || item.resource === 'astralite' || item.resource === 'void_crystal' || item.resource === 'quantum_dust',
+          part: parts.has(item.resource),
+        },
         layout[i],
         i,
       ));
@@ -169,7 +193,7 @@ export function createBoxStage({ doc = globalThis.document, win = globalThis } =
       const li = doc.createElement('li');
       li.dataset.resource = item.resource;
       const icon = doc.createElement('img');
-      icon.src = `/icons/resources/${item.resource}.png`;
+      icon.src = iconOf(item);
       icon.alt = '';
       icon.width = 20;
       icon.height = 20;
@@ -177,7 +201,7 @@ export function createBoxStage({ doc = globalThis.document, win = globalThis } =
       const name = doc.createElement('span');
       name.textContent = item.name;
       const amount = doc.createElement('b');
-      amount.textContent = `×${item.amount}`;
+      amount.textContent = item.kind === 'plane' ? (item.firstTime ? 'новинка' : `×${item.amount}`) : `×${item.amount}`;
       li.append(icon, name, amount);
       list.append(li);
     }
@@ -186,6 +210,7 @@ export function createBoxStage({ doc = globalThis.document, win = globalThis } =
     const rare = kinds.has('astralite') || kinds.has('void_crystal') || kinds.has('quantum_dust');
     const componentCount = (payload.drops || []).filter((d) => parts.has(d.resource)).length;
     hint.textContent = [
+      payload.plane ? (payload.plane.firstTime ? 'Новая машина в звене!' : 'Машина звена — дубликат.') : '',
       rare ? 'Редкая находка!' : '',
       componentCount ? `Компонентов: ${componentCount}` : '',
       'Всё уже на складе.',
