@@ -23,6 +23,15 @@ export interface AdminSummary {
     ships: number; created_at: number;
   }[];
 }
+/** Таблицы, которые админский отчёт умеет считать. */
+export type AdminTable = 'players' | 'ships' | 'expeditions';
+
+const ADMIN_TABLES: readonly AdminTable[] = ['players', 'ships', 'expeditions'];
+
+export function isCountableTable(name: string): name is AdminTable {
+  return (ADMIN_TABLES as readonly string[]).includes(name);
+}
+
 
 export function adminSummary(sql: SqlStorage, limit = 50, now = Date.now()): AdminSummary {
   const players = sql.exec(
@@ -47,7 +56,14 @@ export function adminSummary(sql: SqlStorage, limit = 50, now = Date.now()): Adm
     const row = sql.exec('SELECT COALESCE(SUM(amount), 0) AS s FROM balances WHERE asset = ?', asset).toArray()[0];
     return row ? Number(row.s) : 0;
   };
-  const count = (table: string): number => {
+  // Только перечислимые таблицы и только по имени из белого списка. Строка
+  // запроса собирается подстановкой, поэтому любое имя «извне» здесь запрещено:
+  // иначе админский отчёт стал бы точкой SQL-инъекции.
+  const count = (table: AdminTable): number => {
+    // До input здесь дойти не может, но проверка оставлена намеренно: функция
+    // собирает SQL подстановкой, и следующая правка обязана споткнуться об
+    // исключение, а не об молчаливую инъекцию.
+    if (!isCountableTable(table)) throw new Error(`admin: table not countable: ${table}`);
     const row = sql.exec(`SELECT COUNT(*) AS n FROM ${table}`).toArray()[0];
     return row ? Number(row.n) : 0;
   };

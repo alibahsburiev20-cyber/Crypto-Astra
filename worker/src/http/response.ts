@@ -1,4 +1,5 @@
 import { ApiError } from '../world/errors';
+import { securityHeaders } from './security';
 
 // Коды ошибок Durable Object (доходят как message) → HTTP-статус.
 export const STATUS_BY_CODE: Record<string, number> = {
@@ -108,13 +109,15 @@ export const STATUS_BY_CODE: Record<string, number> = {
 };
 
 export function json(data: unknown, status = 200, headers: Record<string, string> = {}): Response {
+  // Заголовки безопасности идут и на JSON: ответ могут открыть как документ,
+  // а `nosniff` плюс CSP это исключают. `Cache-Control: no-store` — приватные
+  // данные не должны осесть в браузере или в кэше прокси.
   return new Response(JSON.stringify(data), {
     status,
     headers: {
       'Content-Type': 'application/json; charset=utf-8',
       'Cache-Control': 'no-store',
-      'X-Content-Type-Options': 'nosniff',
-      'Referrer-Policy': 'same-origin',
+      ...securityHeaders(),
       ...headers,
     },
   });
@@ -131,13 +134,71 @@ export function errorResponse(e: unknown): Response {
   return json({ error: 'internal' }, 500);
 }
 
-const MAX_JSON_BYTES = 16 * 1024;
+/** Потолок тела запроса. Игровому действию 16 КиБ хватает с запасом. */
+export const MAX_JSON_BYTES = 16 * 1024;
 
-export async function readJson(request: Request): Promise<Record<string, unknown>> {
-  // Тело больше 16 КиБ на этих маршрутах не нужно: это защита от раздутых запросов.
-  const length = Number(request.headers.get('Content-Length') ?? '0');
-  if (Number.isFinite(length) && length > MAX_JSON_BYTES) throw new ApiError(413, 'payload_too_large');
-  const body = await request.json().catch(() => null);
+/**
+ * Тело запроса, но с реальным лимитом.
+ *
+ * Проверять только `Content-Length` нельзя: его нет у chunked-передачи, и тогда
+ * «потолок» превращается в рекомендацию — а `request.json()` сначала съест весь
+ * мегабайтный буфер. Поэтому читаем поток и обрываем его на лимите. Ответ
+ * читается один раз: `Request.body` не перематывается, значит дальше работает
+ * только разобранный нами объект (так и надо — вторичное чтение тела было бы
+ * дырой в виде «проверили одно, парсим другое»).
+ */
+async function readCappedText(request: Request, maxBytes = MAX_JSON_BYTES): Promise<string> {
+  const declared = Number(request.headers.get('Content-Length') ?? Number.NaN);
+  if (Number.isFinite(declared) && declared > maxBytes) throw new ApiError(413, 'payload_too_large');
+  const stream = request.body;
+  if (!stream) return '';
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => undefined);
+      throw new ApiError(413, 'payload_too_large');
+    }
+    chunks.push(value as Uint8Array);
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+  return new TextDecoder().decode(bytes);
+}
+
+export async function readJson(request: Request, maxBytes = MAX_JSON_BYTES): Promise<Record<string, unknown>> {
+  const body = safeParse(await readCappedText(request, maxBytes));
   if (!body || typeof body !== 'object' || Array.isArray(body)) throw new ApiError(400, 'bad_request');
   return body as Record<string, unknown>;
+}
+
+/**
+ * Мягкое чтение: пустое или битое тело — это `{}`, а не 400.
+ *
+ * Нужно маршрутам, где тело факультативно (Claim: старые клиенты умели слать
+ * пустой POST, и отсутствие токена они должны увидеть как `turnstile_required`,
+ * а не как ошибку парсинга). Раздутые тело и JSON-мусор при этом всё равно
+ * отсекаются: «мягко» относится к форме, а не к размеру.
+ *
+ * `maxBytes` — потолок под маршрут: у `/batch` он свой, см. `http/batch.ts`.
+ */
+export async function readJsonSoft(request: Request, maxBytes = MAX_JSON_BYTES): Promise<Record<string, unknown>> {
+  const body = safeParse(await readCappedText(request, maxBytes));
+  return body && typeof body === 'object' && !Array.isArray(body) ? body as Record<string, unknown> : {};
+}
+
+/** `''` (тела нет) и битый JSON дают null — вызывающий решает, ругаться или нет. */
+function safeParse(text: string): unknown {
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
 }

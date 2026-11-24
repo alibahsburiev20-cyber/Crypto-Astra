@@ -52,6 +52,14 @@
 повторах, таймаутах и параллельных запросах (мир сериализует запросы, а
 транзакция откатывается целиком).
 
+Формат ключа — 8…64 символа `[A-Za-z0-9._:-]`, одно правило для одиночных
+маршрутов (`routes/game.ts`), для пачки (`http/batch.ts`) и для денег
+(`pay/shop.ts`, `pay/payouts.ts`). Клиент берёт его из `crypto.randomUUID()` и
+держит в `sessionStorage` до ответа; если защищённого контекста нет и `randomUUID`
+недоступен, у клиента есть запасной генератор того же формата. Проверка нужна не
+«для красоты»: без неё сюда можно было положить до 8 КиБ произвольного текста,
+и он оседал бы в `idempotency_keys` как есть.
+
 ## Ledger
 
 - Триггеры запрещают `UPDATE`/`DELETE`.
@@ -62,22 +70,99 @@
 
 ## Заголовки и CSP
 
-HTML отдаётся с:
+Единый источник — `worker/src/http/security.ts`: `CSP` + `SECURITY_HEADERS`. Их
+несёт **каждый** ответ Worker (и JSON, и статика), а `client/_headers` — зеркало
+для Pages. Раньше набор жил в трёх местах и однажды разъехался (HSTS был только
+в `_headers`), поэтому разъезд теперь ловит тест в
+`worker/test/unit/attackSurface.test.ts`.
 
 ```
 default-src 'self'; script-src 'self' https://challenges.cloudflare.com;
 style-src 'self'; img-src 'self' data:;
 connect-src 'self' https://challenges.cloudflare.com;
 frame-src https://challenges.cloudflare.com; frame-ancestors 'none';
-base-uri 'none'; form-action 'self'
+base-uri 'none'; form-action 'self'; object-src 'none';
+upgrade-insecure-requests
 ```
 
-`X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`,
-`Referrer-Policy: same-origin`, HSTS в `_headers`. Внешних источников, кроме
-Turnstile, нет: рекламный провайдер подключается отдельным изменением CSP.
+Плюс `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`,
+`Referrer-Policy: same-origin`, `Strict-Transport-Security: max-age=31536000`,
+`Permissions-Policy` (закрыты камера, микрофон, геолокация, payment, usb, serial,
+hid, bluetooth, датчики движения, fullscreen — игре они не нужны, а атакующему
+через XSS — да), `Cross-Origin-Resource-Policy: same-origin`,
+`Cross-Origin-Opener-Policy: same-origin`,
+`X-Permitted-Cross-Domain-Policies: none`.
 
-Клиент строит DOM текстовыми узлами, без `innerHTML`, поэтому имена планет и
-ресурсов не могут стать XSS.
+Внешних источников, кроме Turnstile, нет: рекламный провайдер подключается
+отдельным изменением CSP — адрес паблишера надо добавить в `script-src` и
+`connect-src`, иначе скрипт молча заблокируется.
+
+Клиент строит DOM текстовыми узлами (`el()` / `textContent`), без `innerHTML` с
+данными, поэтому имена планет, позывные и названия ресурсов не могут стать XSS.
+Ни `eval`, ни `new Function`, ни `document.write` в клиенте нет — это тоже
+проверяется тестом.
+
+## Тело запроса
+
+16 КиБ (`MAX_JSON_BYTES`) — и это не рекомендация: тело читается потоком
+(`readCappedText`), чтение обрывается на лимите. Проверять только
+`Content-Length` нельзя — у chunked-передачи его нет, а `request.json()` сначала
+съедает весь буфер. Деньги (`/pay/*`) и Claim читаются тем же путём, так что
+«мягкость» (пустое тело = `{}`) относится к форме, а не к размеру.
+
+## Матрица атак
+
+Список сверен с OWASP Top 10 (2025), OWASP API Security Top 10 (2023) и перечнем
+векторов L7, которые закрывает Cloudflare. «Закрыто» означает код + тест в этом
+репозитории; «на edge» — что делает профиль аккаунта, а не наш код.
+
+| Атака | Статус | Где закрыто |
+|---|---|---|
+| SQL-инъекция через форму (email, позывной, id лота) | закрыто | только `?`-параметры; `attackSurface.test.ts › инъекции` |
+| SQL-инъекция через имя таблицы в админ-отчёте | закрыто | белый список `isCountableTable`, вне списка — `Error` |
+| Command / NoSQL / LDAP / XPath-инъекция | не применимо | нет shell, нет хранилищ таких типов, XML не разбираем |
+| XSS через пользовательские данные (позывной, имя гильдии, чат) | закрыто | клиент пишет через `textContent`; тест-сторож на `innerHTML` |
+| XSS через URL/`href` | закрыто | `href` в клиенте — только литерал `/pay.html`; `javascript:` в данных некуда подставить |
+| Прототип-грязь в JSON (`__proto__`, `constructor`) | закрыто | `safeParse` + поля читаются по именам; тест на `__proto__` в теле |
+| ReDoS через длинные строки | закрыто | линейные регулярки + лимит тела; тест на 8 КиБ в поле |
+| Подпись JWT `alg:none`, чужим/пустым секретом, подмена `payload` | закрыто | `verifyJwt` требует HS256 иTimingSafe-сравнение; тесты на каждый вариант |
+| Подделка claims (не-строковые `sub`/`w`) | закрыто | типы проверяются до выдачи прав |
+| Угон сессии через refresh-куку | закрыто | `HttpOnly; Secure; SameSite=Lax; Path=/auth`, ротация + отзыв всех при reuse |
+| Перебор паролей (brute force) | закрыто | `auth_limits`: 3 неудачи → Turnstile, 10 → блок IP на 15 мин |
+| Перебор админского токена | закрыто | `admin_ip:*` в тех же счётчиках; сравнение `sameToken` |
+| User enumeration (есть ли такой email) | закрыто | одинаковый ответ и одинаковое время (DUMMY_HASH) |
+| Mass assignment (`role`, `is_admin`, `astra` в теле) | закрыто | поля выбираются по белому списку, в схеме таких колонок нет |
+| BOLA — чужой лот/корабль/гильдия по id | закрыто | каждый запрос с `sub` из токена; `not_your_lot`, `verifyLedger` в тесте |
+| BFLA — игровой маршрут «напрямую» без админ-прав | закрыто | `/admin/*` и `/pay/*` — только со своим токеном, все методы, тест |
+| SSRF | нет поверхности | один исходящий `fetch` — фиксированный `siteverify`, адрес не из запроса |
+| CSRF | закрыто | access в заголовке (не в куке), `SameSite=Lax`, CORS не открыт |
+| Открытый CORS | закрыто | ни одного `Access-Control-Allow-*`; тест по 8 маршрутам × 3 метода |
+| Clickjacking | закрыто | `frame-ancestors 'none'` + `X-Frame-Options: DENY` |
+| Mixin / MITM | закрыто | HSTS + `upgrade-insecure-requests`, прод только на https |
+| Раздувание тела (DoS памятью) | закрыто | потоковый лимит 16 КиБ, chunked тоже, 413 |
+| Deep JSON / мусор в JSON | закрыто | `safeParse`, отказ без 500 |
+| Flood на API (HTTP flood, cache busting, HULK, LOIC) | на edge | `http_ratelimit` + WAF до Worker; в коде — `REQUEST_BUDGET` и режимы `thrifty/lite/sleep` |
+| Slowloris, slow read, HTTP/2 Rapid Reset | на edge | терминирует Cloudflare; в воркере нет долгих циклов и нет `await` без лимита |
+| TLS exhaustion / negotiation attacks | на edge | настройка профиля, не код |
+| Амплификация / L3-L4 (SYN, UDP, memcached, DNS) | вне приложения | сеть Cloudflare |
+| Накрутка наград через клиента | закрыто | сервер считает трассу мини-игры сам, суммы от клиента не принимаются; `sanitizeTrace` зажимает скорость |
+| Подмена истории Ledger | закрыто | триггеры + хеш-цепочка + заморозка при расхождении (423) |
+| Обход статических путей (`/../`, `%2e%2e`, NUL) | закрыто | `SITE_FILES` — точные ключи, с диска ничего не читается |
+| Утечка стека/SQL в отказе | закрыто | `errorResponse` отдаёт только код; 500 = `{"error":"internal"}` |
+| Цепочка поставок (A03) | частично | в рантайме зависимостей нет, лок-файл только на `registry.npmjs.org`; тест-проверка есть |
+
+### Что сознательно оставлено как есть
+
+- Turnstile «падает открыто», если `TURNSTILE_SECRET` не задан: так работают
+  локальная разработка, тесты и превью. Для прод-контура это обязательный
+  секрет, и проверка — в чек-листе `LAUNCH-READINESS.md`.
+- Счётчики лимита в D1 при отказе D1 не останавливают вход (иначе отказ БД
+  отрезал бы игру всем). Fail-open задокументирован и закреплён тестом
+  `userLimit.test.ts`; грубый flood до этого режется на edge.
+- `/pay/*`, `/auth/*`, `/admin/*` не проходят через `enforceUserLimit`: у входа и
+  админки свои IP-политики, у денег — `no-store` плюс Turnstile/токен. Общий
+  пользовательский лимит на них заводить не стали, чтобы не сломать платёжные
+  повторы; при этом тело и идемпотентность у них на тех же restrict-ах.
 
 ## Секреты
 
@@ -92,7 +177,7 @@ Turnstile, нет: рекламный провайдер подключаетс�
 30 днями/часом; удаление аккаунта должно удалять и запись в D1, и игрока в мире
 (этап 5).
 
-## Известные пробелы этапа 1
+## Известные пробелы
 
 - Нет админки за Cloudflare Access и ролей.
 - Нет сброса пароля и Telegram-входа.
