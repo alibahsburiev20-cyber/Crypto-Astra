@@ -456,3 +456,31 @@ convert client/sprites/bg/arena.png -modulate 108,92 -depth 8 client/sprites/bg/
 
 echo "арт аркады: плитки каталога, детали поля, медали"
 echo "дополнительные спрайты: гараж, скины, медали, админка"
+
+# ── Иконка чертежа флагмана ──────────────────────────────────────────────────
+# Чертеж — единственный источник последнего корабля, поэтому иконка рисуется
+# здесь же, а не берётся извне: миллиметровка, силуэт корпуса, размерная выноска
+# и оранжевая печать. 128×128 — тот же формат, что у остальных рецептов.
+RES=client/icons/resources
+convert -size 512x512 xc:none \
+  -fill '#0b1230' -draw "roundrectangle 24,24 488,488 64,64" \
+  -stroke '#a9c4ff' -strokewidth 14 -fill none -draw "roundrectangle 24,24 488,488 64,64" \
+  -stroke 'rgba(90,120,200,0.35)' -strokewidth 6 \
+  -draw "line 82,40 82,472" -draw "line 40,82 472,82" \
+  -draw "line 140,40 140,472" -draw "line 40,140 472,140" \
+  -draw "line 198,40 198,472" -draw "line 40,198 472,198" \
+  -draw "line 256,40 256,472" -draw "line 40,256 472,256" \
+  -draw "line 314,40 314,472" -draw "line 40,314 472,314" \
+  -draw "line 372,40 372,472" -draw "line 40,372 472,372" \
+  -draw "line 430,40 430,472" -draw "line 40,430 472,430" \
+  -stroke '#66e6ff' -strokewidth 16 -fill none \
+  -draw "polygon 96,300 416,300 356,376 156,376" \
+  -draw "line 176,300 176,220" -draw "line 176,220 336,220" -draw "line 336,220 336,300" \
+  -draw "line 236,220 236,150" -draw "line 236,150 300,150" \
+  -stroke '#8f7bff' -strokewidth 10 -draw "line 96,424 416,424" \
+  -draw "line 96,404 96,444" -draw "line 416,404 416,444" \
+  -stroke none -fill '#ff9f45' -draw "roundrectangle 356,96 456,196 24,24" \
+  -fill '#0b1230' -draw "line 380,146 432,146" \
+  -depth 8 -resize 128x128 "$RES/flagship_plans.png"
+
+echo "чертёж флагмана: $RES/flagship_plans.png"

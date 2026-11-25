@@ -152,11 +152,29 @@ describe('клиент бонусной проверки', () => {
     expect(app).toContain('blockedByGate');
   });
 
-  it('виджет ставится после перерисовки бонусных экранов', () => {
-    expect(app).toContain("if (view === 'bridge' || view === 'boxes' || view === 'bonus') mountBonusGate();");
+  it('виджет ставится после перерисовки любого экрана со слотом', () => {
+    // Условие смотрит на DOM, а не на список разделов: если слот проверки
+    // оказался в новом экране, виджет обязан встать и там — иначе игрок видит
+    // подпись «подтвердите, что вы человек» без самой проверки.
+    expect(app).toContain("if (bonusGateOn() && document.getElementById('turnstile-claim')) mountBonusGate();");
+    expect(app).not.toContain("if (view === 'bridge' || view === 'boxes' || view === 'bonus') mountBonusGate();");
     expect(app).toContain('function bonusGateBlock()');
     // Подпись для игрока: проверка именно что про бонус.
     expect(app).toContain('Подтвердите, что вы человек');
+  });
+
+  it('загрузка скрипта имеет потолок: зависшая проверка становится ошибкой', () => {
+    // Без onload и без onerror (блокировщик, прокси, preview-домен) промис не
+    // settles никогда — Claim оставался бы серым навсегда.
+    expect(app).toContain('const TURNSTILE_LOAD_MS = 12000;');
+    const fn = app.slice(app.indexOf('function ensureTurnstileScript'), app.indexOf('/** Включён ли шлюз'));
+    expect(fn).toContain('turnstile_load_timeout');
+    expect(fn).toContain('clearTimeout(timer)');
+  });
+
+  it('если перерисовка вынесла iframe, виджет пересоздаётся', () => {
+    const fn = app.slice(app.indexOf('/** Навешиваем виджет'), app.indexOf('function renderBonusWidget'));
+    expect(fn).toContain('if (bonusWidget !== null && window.turnstile && !box.firstChild) {');
   });
 
   it('без site key шлюз не появляется вообще', () => {
@@ -220,7 +238,10 @@ describe('шлюз «я человек» — только там, где бон�
     // А как только таймер истёк, блок обязан появиться сам, без перезагрузки.
     expect(app).toContain("!document.querySelector('.bonus-check')");
     expect(app.slice(app.indexOf('function updateTimers()')).includes('mountBonusGate();')).toBe(true);
-    // А в боксах — только если в каталоге есть бесплатный бокс.
-    expect(app).toContain('data.boxes.some((b) => b.price === 0)');
+    // А в боксах — только если в каталоге есть бесплатный бокс. Список при этом
+    // проверяется на массив: ответ 200 без `boxes` ронял весь раздел в пустоту.
+    expect(app).toContain('const boxes = Array.isArray(data.boxes) ? data.boxes : [];');
+    expect(app).toContain('boxes.some((b) => b.price === 0)');
+    expect(app).toContain('if (status === 200 && Array.isArray(data?.boxes)) boxData = data;');
   });
 });

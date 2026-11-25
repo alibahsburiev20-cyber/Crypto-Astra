@@ -484,7 +484,10 @@ button.ghost:hover:not(:disabled) { background: rgba(255, 255, 255, .08); }
 .res-name { display: inline-flex; align-items: center; gap: 6px; }
 .card .label { display: inline-flex; align-items: center; }
 button .icon-sm { margin-right: 8px; }
-.sprite-thumb { height: auto; image-rendering: pixelated; }
+/* Размер резервируется до загрузки PNG: без aspect-ratio карточка в «Флоте»
+   подпрыгивала на ~48 px, как только подтягивался спрайт, — оттого раздел и
+   «прыгал вверх-вниз» на каждом плановом обновлении. */
+.sprite-thumb { width: 96px; aspect-ratio: 2 / 1; height: auto; image-rendering: pixelated; object-fit: contain; }
 
 /* ── Сетка планет ────────────────────────────── */
 .planet-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
@@ -1054,6 +1057,32 @@ body {
 }
 
 .arcade-board { padding: 16px; background: rgba(8, 14, 32, 0.75); }
+
+/* Тип управления аркадой: строка переключателя + экранная крестовина для тача.
+   Подсветка опирается на border, а не на box-shadow: у кнопок и так свой слой
+   тени, и без рамки активная кнопка неотличима от соседней. */
+.arcade-controls {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+  margin: 12px 0 4px; padding: 8px 10px;
+  background: rgba(4, 9, 20, .55); border: 1px solid var(--line); border-radius: 14px;
+}
+.arcade-controls-label { color: var(--muted); font-size: .78rem; letter-spacing: .04em; text-transform: uppercase; }
+.arcade-control-btn { padding: 7px 14px; font-size: .86rem; }
+.arcade-control-btn.is-on {
+  background: linear-gradient(135deg, rgba(53, 214, 232, .22), rgba(124, 140, 255, .22));
+  color: var(--text); box-shadow: none; border-color: rgba(53, 214, 232, .45);
+}
+.arcade-pad { display: flex; align-items: center; gap: 14px; margin-left: auto; }
+.arcade-pad-dpad { display: grid; grid-template-columns: repeat(3, 44px); grid-template-rows: repeat(3, 44px); gap: 4px; }
+.arcade-pad-btn {
+  min-height: 44px; padding: 0; font-size: .95rem; touch-action: none; user-select: none;
+  -webkit-user-select: none;
+}
+.arcade-pad-mid { display: grid; place-items: center; color: var(--line); }
+.arcade-pad-btn.is-action { padding: 0 18px; font-size: .82rem; letter-spacing: .06em; }
+@media (max-width: 640px) {
+  .arcade-pad { width: 100%; justify-content: space-between; margin-left: 0; }
+}
 
 .arcade-grid9 {
   display: grid;

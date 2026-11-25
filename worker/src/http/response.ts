@@ -43,6 +43,8 @@ export const STATUS_BY_CODE: Record<string, number> = {
   ship_not_for_sale: 400,
   ship_locked: 403,
   ship_owned: 409,
+  // Флагман собирается из чертежа: 409 — «ещё не готово», а не «запрошено неверно».
+  blueprint_required: 409,
   admin_email_forbidden: 403,
   callsign_taken: 409,
   callsign_cooldown: 409,

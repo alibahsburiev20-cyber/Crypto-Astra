@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { DAY_MS } from '../../src/shared/constants';
 import {
   MODULES, MODULE_LATE_LEVEL, MODULE_ORDER, PLANETS, RECIPES, RECIPE_ORDER, RESOURCE_BASE_PRICES,
-  SECTORS, STARTER_RECIPES, XP, moduleParts,
+  RESOURCE_NAMES, SECTORS, SHIPS, SHIP_ORDER, STARTER_RECIPES, XP, moduleParts,
 } from '../../src/shared/gameData';
 import { applyDelta, getBalance } from '../../src/world/balances';
 import { verifyLedger } from '../../src/world/ledger';
@@ -220,15 +220,47 @@ describe('доступность рецептов и модулей (срез 3,
     const consumed = new Set<string>();
     for (const id of RECIPE_ORDER) for (const input of RECIPES[id].inputs) consumed.add(input.resource);
     for (const id of MODULE_ORDER) for (const part of moduleParts(id, 5)) consumed.add(part.resource);
+    // Чертежи расходует верфь, а не рецепт: без этой строки «Чертёж Flagship»
+    // выглядел бы сиротой, хотя именно он открывает последний корабль.
+    for (const type of SHIP_ORDER) {
+      const plan = SHIPS[type].blueprint;
+      if (plan) consumed.add(plan);
+    }
     const orphans = RECIPE_ORDER.filter((id) => !consumed.has(id));
     expect(orphans).toEqual([]);
   });
 
-  it('каталог отдаёт клиенту все девять рецептов с кругом', () => {
+  /**
+   * Чертёж обязан быть у того, что его требует: у Flagship нет цены, и если
+   * `blueprint` исчезнет из таблицы, верфь снова закроется без объяснений.
+   */
+  it('у корабля без цены есть чертёж, и он крафтится', () => {
+    for (const type of SHIP_ORDER) {
+      const def = SHIPS[type];
+      if (def.price != null) continue;
+      if (type === 'scout') {
+        // Стартовый борт никто не покупает — у него ни цены, ни чертежа.
+        expect(def.blueprint).toBeNull();
+        continue;
+      }
+      expect(def.blueprint, type).toBeTruthy();
+      expect(RECIPES[def.blueprint as keyof typeof RECIPES], type).toBeTruthy();
+      expect(RESOURCE_NAMES[def.blueprint as string], type).toBeTruthy();
+    }
+  });
+
+  it('чертёж не торгуется на рынке: его цена — корабль, а не ASTRA', () => {
+    for (const type of SHIP_ORDER) {
+      const plan = SHIPS[type].blueprint;
+      if (plan) expect(RESOURCE_BASE_PRICES[plan], plan).toBeUndefined();
+    }
+  });
+
+  it('каталог отдаёт клиенту все десять рецептов с кругом', () => {
     const catalog = craftCatalog();
     expect(catalog.map((r) => r.id)).toEqual(RECIPE_ORDER);
     expect(catalog.filter((r) => r.tier === 1).map((r) => r.id)).toEqual(STARTER_RECIPES);
-    expect(catalog.filter((r) => r.tier === 2)).toHaveLength(6);
+    expect(catalog.filter((r) => r.tier === 2)).toHaveLength(7);
     for (const r of catalog) {
       expect(r.name).toBeTruthy();
       expect(r.inputs.length).toBeGreaterThan(0);
@@ -263,6 +295,9 @@ describe('доступность рецептов и модулей (срез 3,
     for (const id of STARTER_RECIPES) expect(RECIPES[id].tier).toBe(1);
     for (const id of RECIPE_ORDER) {
       if (RECIPES[id].tier !== 2) continue;
+      // Чертежи вне этого правила: у них нет рыночной цены, и оценивать их
+      // «окупаемостью» нельзя — платой служит сам корабль.
+      if (RESOURCE_BASE_PRICES[id] == null) continue;
       const inputs = RECIPES[id].inputs.reduce((sum, i) => sum + RESOURCE_BASE_PRICES[i.resource] * i.amount, 0);
       // Компонент дороже сырья, но не в разы: рынок не должен стать станком.
       expect(RESOURCE_BASE_PRICES[id], id).toBeGreaterThan(inputs);

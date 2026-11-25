@@ -19,17 +19,26 @@ export interface ShipDef {
   slots: number;
   /** null — не продаётся (старт или чертёж). */
   price: number | null;
+  /**
+   * Ресурс-чертёж, из которого корабль собирается в ангаре. Нужен там, где
+   * `price === null`: иначе у игрока нет ни цены, ни пути — только замок.
+   */
+  blueprint: RecipeId | null;
   unlockLevel: number;
   repairCoef: number;
 }
 
 export const SHIPS: Record<ShipType, ShipDef> = {
-  scout: { type: 'scout', name: 'Scout', rarity: 'Common', cargo: 10, maxSector: 2, tank: 5, consumption: 1, speed: 1, mining: 1, slots: 2, price: null, unlockLevel: 1, repairCoef: 1 },
-  hauler: { type: 'hauler', name: 'Hauler', rarity: 'Uncommon', cargo: 40, maxSector: 2, tank: 8, consumption: 1.2, speed: 0.9, mining: 1, slots: 3, price: 1500, unlockLevel: 5, repairCoef: 1.5 },
-  miner: { type: 'miner', name: 'Miner', rarity: 'Uncommon', cargo: 25, maxSector: 2, tank: 7, consumption: 1.1, speed: 1, mining: 1.5, slots: 3, price: 2000, unlockLevel: 5, repairCoef: 1.5 },
-  explorer: { type: 'explorer', name: 'Explorer', rarity: 'Rare', cargo: 20, maxSector: 4, tank: 12, consumption: 1, speed: 1.3, mining: 1.1, slots: 5, price: 6000, unlockLevel: 12, repairCoef: 2 },
-  cruiser: { type: 'cruiser', name: 'Cruiser', rarity: 'Epic', cargo: 60, maxSector: 4, tank: 15, consumption: 1.5, speed: 1.2, mining: 1.3, slots: 6, price: 20000, unlockLevel: 20, repairCoef: 2 },
-  flagship: { type: 'flagship', name: 'Flagship', rarity: 'Legendary', cargo: 120, maxSector: 5, tank: 25, consumption: 2, speed: 1.5, mining: 1.6, slots: 8, price: null, unlockLevel: 30, repairCoef: 3 },
+  scout: { type: 'scout', name: 'Scout', rarity: 'Common', cargo: 10, maxSector: 2, tank: 5, consumption: 1, speed: 1, mining: 1, slots: 2, price: null, blueprint: null, unlockLevel: 1, repairCoef: 1 },
+  hauler: { type: 'hauler', name: 'Hauler', rarity: 'Uncommon', cargo: 40, maxSector: 2, tank: 8, consumption: 1.2, speed: 0.9, mining: 1, slots: 3, price: 1500, blueprint: null, unlockLevel: 5, repairCoef: 1.5 },
+  miner: { type: 'miner', name: 'Miner', rarity: 'Uncommon', cargo: 25, maxSector: 2, tank: 7, consumption: 1.1, speed: 1, mining: 1.5, slots: 3, price: 2000, blueprint: null, unlockLevel: 5, repairCoef: 1.5 },
+  explorer: { type: 'explorer', name: 'Explorer', rarity: 'Rare', cargo: 20, maxSector: 4, tank: 12, consumption: 1, speed: 1.3, mining: 1.1, slots: 5, price: 6000, blueprint: null, unlockLevel: 12, repairCoef: 2 },
+  cruiser: { type: 'cruiser', name: 'Cruiser', rarity: 'Epic', cargo: 60, maxSector: 4, tank: 15, consumption: 1.5, speed: 1.2, mining: 1.3, slots: 6, price: 20000, blueprint: null, unlockLevel: 20, repairCoef: 2 },
+  // Флагман — единственный борт, который дотягивает до 5-го сектора. Продавать
+  // его за ASTRA нельзя (иначе дальность становится товаром), поэтому он
+  // собирается из чертежа: `flagship_plans` крафтится из редких ресурсов 4-го
+  // сектора, то есть путь к «Omega Edge» есть у того, кто долетел до «Nyx».
+  flagship: { type: 'flagship', name: 'Flagship', rarity: 'Legendary', cargo: 120, maxSector: 5, tank: 25, consumption: 2, speed: 1.5, mining: 1.6, slots: 8, price: null, blueprint: 'flagship_plans', unlockLevel: 30, repairCoef: 3 },
 };
 
 export const SHIP_ORDER: ShipType[] = ['scout', 'hauler', 'miner', 'explorer', 'cruiser', 'flagship'];
@@ -162,6 +171,7 @@ export const RESOURCE_NAMES: Record<string, string> = {
   astralite_core: 'Астралитовое ядро',
   void_weave: 'Пустотное полотно',
   quantum_matrix: 'Квантовая матрица',
+  flagship_plans: 'Чертёж Flagship',
 };
 
 // Крафт (этап 2, срез 3). Компоненты — такие же ресурсы: лежат в resources и
@@ -169,7 +179,7 @@ export const RESOURCE_NAMES: Record<string, string> = {
 export type RecipeId =
   | 'energy_cell' | 'circuit' | 'alloy_plate'
   | 'helium_coolant' | 'titanium_frame' | 'crystal_lens'
-  | 'astralite_core' | 'void_weave' | 'quantum_matrix';
+  | 'astralite_core' | 'void_weave' | 'quantum_matrix' | 'flagship_plans';
 
 export interface Recipe {
   id: RecipeId;
@@ -247,12 +257,25 @@ export const RECIPES: Record<RecipeId, Recipe> = {
     ],
     ms: 90 * 60 * 1000, fee: 260,
   },
+  // Чертёж флагмана. Единственный рецепт, на выходе у которого не компонент, а
+  // документ: он не продаётся на рынке и не нужен модулям — он открывает верфь.
+  // Входы собраны так, чтобы чертёж был виден игроку, который долетел до 4-го
+  // сектора, но ещё не имеет права летать в 5-й: иначе получился бы замок,
+  // который вскрывается только тем, кому он и так не нужен.
+  flagship_plans: {
+    id: 'flagship_plans', name: 'Чертёж Flagship', tier: 2,
+    inputs: [
+      { resource: 'quantum_dust', amount: 6 }, { resource: 'void_crystal', amount: 4 },
+      { resource: 'titanium_frame', amount: 3 }, { resource: 'astralite_core', amount: 2 },
+    ],
+    ms: 6 * 60 * 60 * 1000, fee: 900,
+  },
 };
 
 export const RECIPE_ORDER: RecipeId[] = [
   'energy_cell', 'circuit', 'alloy_plate',
   'helium_coolant', 'titanium_frame', 'crystal_lens',
-  'astralite_core', 'void_weave', 'quantum_matrix',
+  'astralite_core', 'void_weave', 'quantum_matrix', 'flagship_plans',
 ];
 
 /** Рецепты первого круга: их видно новичку, они собираются из первого сектора. */

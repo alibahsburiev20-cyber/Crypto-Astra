@@ -83,6 +83,7 @@ const ERRORS = {
   module_max_level: 'У модуля уже максимальный уровень',
   bad_ship_type: 'Такого корабля нет',
   ship_not_for_sale: 'Этот корабль не продаётся за ASTRA',
+  blueprint_required: 'Нужен чертёж: соберите «Чертёж Flagship» в разделе «Крафт» — он из квантовой пыли и пустотного кристалла 4-го сектора',
   ship_locked: 'Уровень ещё мал для этого корабля',
   ship_owned: 'Такой корабль уже в ангаре',
   garage_full: 'Гараж полон: купите ещё одну ячейку',
@@ -138,6 +139,7 @@ const REASONS = {
   resource_gain: 'Ресурсы из рейса',
   expedition_wear: 'Износ корабля',
   ship_delivery: 'Выдача корабля',
+  ship_blueprint: 'Чертёж в сборку',
   craft_fee: 'Плата за крафт',
   craft_input: 'Ресурсы в крафт',
   craft_output: 'Крафт готов',
@@ -164,6 +166,9 @@ const RESOURCES = {
   helium_coolant: 'Гелиевый хладагент', titanium_frame: 'Титановая рама',
   crystal_lens: 'Кристаллическая линза', astralite_core: 'Астралитовое ядро',
   void_weave: 'Пустотное полотно', quantum_matrix: 'Квантовая матрица',
+  // Чертёж флагмана — ресурс такой же, как компонент: лежит в трюме и сгорает в
+  // сборке. Без имени в этой карте карточка крафта показывала бы `flagship_plans`.
+  flagship_plans: 'Чертёж Flagship',
 };
 
 // Запись журнала по ресурсу приходит как res:<имя>, а не как базовый актив.
@@ -185,6 +190,38 @@ let token = null;
 let account = null;
 let mode = 'register';
 let view = 'bridge';
+// Какой раздел отрисован в #panel сейчас: нужно, чтобы отличать плановое
+// обновление того же экрана от перехода — у него свои правила прокрутки.
+let renderedView = null;
+
+// Раздел, на котором игрока застала перезагрузка страницы. Без этого F5 в
+// «Флоте» возвращал в «Обзор»: список кораблей и верфь приходилось искать
+// заново, а на телефоне ещё и прокрутку. Значение берётся из хэша URL (можно
+// поделиться ссылкой «.../#fleet»), а хэш — из localStorage.
+function knownViews() {
+  return new Set(Array.from(document.querySelectorAll('[data-view]')).map((b) => b.dataset.view));
+}
+
+function savedView() {
+  const known = knownViews();
+  const fromHash = (location.hash || '').replace(/^#/, '').trim();
+  if (known.has(fromHash)) return fromHash;
+  try {
+    const v = localStorage.getItem('astra:view');
+    return known.has(v) ? v : 'bridge';
+  } catch {
+    return 'bridge';
+  }
+}
+
+function rememberView(v) {
+  try { localStorage.setItem('astra:view', v); } catch { /* приватный режим */ }
+  // replaceState, а не location.hash: история не наполняется кликами по меню,
+  // а ссылка на раздел всё равно остаётся в адресной строке.
+  if ((location.hash || '').replace(/^#/, '') !== v) {
+    try { history.replaceState(null, '', `#${v}`); } catch { /* file:// и старые браузеры */ }
+  }
+}
 let state = null;
 let ledger = [];
 // Полный отчёт по сезону приходит из /season: в /me лежит только компактный блок.
@@ -454,7 +491,17 @@ async function loadConfig() {
   refreshBonusGateView();
 }
 
-/** Скрипт Turnstile грузится один раз на страницу и переиспользуется формами. */
+/**
+ * Скрипт Turnstile грузится один раз на страницу и переиспользуется формами.
+ *
+ * Таймаут обязателен: запрос к challenges.cloudflare.com может ни выполниться,
+ * ни отвалиться — блокировщик скриптов, корпоративный прокси, preview-домен без
+ * сети. Без `onload` и без `onerror` промис не завершается никогда: шлюз
+ * остаётся в «Загружаем проверку…», а кнопка Claim — мёртвой. Именно так игрок
+ * и видит проверку: «она есть, но ничего не происходит».
+ */
+const TURNSTILE_LOAD_MS = 12000;
+
 function ensureTurnstileScript() {
   if (!turnstileScript) {
     turnstileScript = new Promise((resolve, reject) => {
@@ -462,8 +509,14 @@ function ensureTurnstileScript() {
       s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
       s.async = true;
       s.defer = true;
-      s.onload = resolve;
-      s.onerror = reject;
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        reject(new Error('turnstile_load_timeout'));
+      }, TURNSTILE_LOAD_MS);
+      s.onload = () => { if (settled) return; settled = true; clearTimeout(timer); resolve(); };
+      s.onerror = () => { if (settled) return; settled = true; clearTimeout(timer); reject(new Error('turnstile_load_error')); };
       document.head.append(s);
     });
   }
@@ -511,6 +564,12 @@ function mountBonusGate() {
   // целиком) — значит ничего пересаживать нельзя: каждый повторный render()
   // обрывал бы challenge на середине и приводил бы к «сбою».
   if (bonusWidget !== null && window.turnstile && box.firstChild) return;
+  // ...но если перерисовка всё-таки вынесла iframe из контейнера, виджет мёртв:
+  // без пересоздания игрок остался бы с пустым слотом и вечной «загрузкой».
+  if (bonusWidget !== null && window.turnstile && !box.firstChild) {
+    try { window.turnstile.remove(bonusWidget); } catch { /* уже снят */ }
+    bonusWidget = null;
+  }
   if (window.turnstile) { renderBonusWidget(box); return; }
   setBonusGate('loading');
   ensureTurnstileScript().then(() => {
@@ -525,7 +584,7 @@ function mountBonusGate() {
   }).catch(() => {
     // Сбросить промис, чтобы следующая попытка снова попробовала загрузить скрипт.
     turnstileScript = null;
-    setBonusGate('error', 'Не удалось загрузить проверку Cloudflare: нет связи или её блокирует расширение. Бонусы никуда не денутся — повторите, когда связь вернётся.');
+    setBonusGate('error', 'Проверка Cloudflare не открылась: нет связи, или её блокирует расширение, или этот адрес не пропускает чужие скрипты. Бонусы никуда не денутся — повторите, когда связь вернётся.');
     refreshBonusGateView();
   });
 }
@@ -1164,6 +1223,12 @@ function renderFlight() {
   if (!selected || selected.locked) selected = open[0];
   const kind = window.__kind || 'short';
   const opt = selected?.options.find((o) => o.kind === kind);
+  // Выбранный борт не дотягивает до планеты — флот при этом долетает. Подбираем
+  // того, кто может: кнопка смены корабля дешевле, чем догадка игрока.
+  const tooFar = !!selected?.shipTooFar;
+  const betterShip = tooFar
+    ? idle.find((sh) => (sh.maxSector ?? 0) >= (selected?.sector ?? 0)) || null
+    : null;
 
   const planetArt = (p, big) => el('span', { class: `planet-art p-${p.id}${big ? ' big' : ''}` },
     el('img', {
@@ -1185,7 +1250,9 @@ function renderFlight() {
     },
       planetArt(p, false),
       el('span', { class: 'planet-name' }, p.name),
-      el('span', { class: 'planet-meta' }, p.locked
+      // Замок и «этот борт не дотягивает» — разные вещи: первое лечится уровнем
+      // или новым кораблём, второе — одним кликом по чипу рядом.
+      el('span', { class: 'planet-meta' }, p.locked || p.shipTooFar
         ? el('span', { class: 'lock-meta' },
             el('img', { src: '/icons/ui/lock.png', alt: '', width: '12', height: '12', class: 'icon-xs', loading: 'lazy' }),
             p.lock)
@@ -1210,7 +1277,9 @@ function renderFlight() {
         },
           el('img', { src: shipArtSrc(sh.type), alt: '', width: '40', height: '20', class: 'chip-art', loading: 'lazy' }),
           el('span', {}, sh.name),
-          el('em', {}, `${sh.durability}%`))))
+          // Радиус борта прямо на чипе: «не долетает» и «выбери другой» — это один
+          // взгляд сюда, а не пять кликов по планетам.
+          el('em', {}, `до ${sh.maxSector ?? '?'} сект. · ${sh.durability}%`))))
     : null;
 
   const detail = selected ? el('div', { class: 'planet-detail' },
@@ -1238,6 +1307,11 @@ function renderFlight() {
         el('img', { src: `/icons/ui/route_${k}.png`, alt: '', width: '20', height: '20', class: 'icon-sm', loading: 'lazy' }),
         o ? o.label : k);
     })),
+    tooFar ? el('p', { class: 'error' },
+      selected.lock || 'Выбранный корабль сюда не долетит') : null,
+    tooFar && betterShip ? el('button', {
+      type: 'button', class: 'ghost', onClick: () => pickShip(betterShip.id),
+    }, `Взять ${betterShip.name} — он долетает`) : null,
     opt ? el('div', { class: 'block' },
       el('p', { class: 'muted' },
         `Топливо ${opt.fuel} · ${fmtDur(opt.durationMs)} · опыт ${opt.xp}`),
@@ -1249,7 +1323,7 @@ function renderFlight() {
       class: 'cta',
       disabled: !opt || !ship || state.frozen || state.balances.fuel < (opt?.fuel ?? 99) || ship.durability <= 0 ? '' : null,
       onClick: () => doStart(ship?.id, selected?.id, kind),
-    }, idle.length > 1 ? `Старт · ${ship?.name || ''}` : 'Старт'),
+    }, tooFar ? 'Не долетит' : idle.length > 1 ? `Старт · ${ship?.name || ''}` : 'Старт'),
     ship && ship.durability > 0 && ship.durability <= 70 ? el('p', { class: 'error' }, 'Прочность низкая. Ниже 50% ремонт закрыт: нет alloy_plate.') : null,
     !idle.length ? el('p', { class: 'muted' }, 'Свободных кораблей нет: все борта в рейсе или требуют ремонта. Дождитесь возвращения — и можно лететь дальше.') : null,
     idle.length > 1 ? el('p', { class: 'muted' }, `Свободных бортов: ${idle.length}. Каждый может лететь своей планетой одновременно с остальными.`) : null,
@@ -1475,7 +1549,9 @@ function renderFleet() {
     })()),
     moduleRig(shipMods(s.id), 22),
     el('h3', {}, `${s.name} · ${s.durability}%`),
-    el('p', { class: 'muted' }, s.status === 'flying' ? 'В рейсе' : 'На базе'),
+    // Дальность прямо в карточке: без неё «странная дальность» лечится только
+    // тыканьем в планеты, а игрок должен видеть радиус борта до вылета.
+    el('p', { class: 'muted' }, `${s.status === 'flying' ? 'В рейсе' : 'На базе'} · до ${s.maxSector ?? '?'} сект.`),
     s.repair.blocked === 'ok' ? el('button', { type: 'button', disabled: state.frozen ? '' : null, onClick: () => doRepair(s.id) },
       el('img', { src: '/icons/ui/repair.png', alt: '', width: '20', height: '20', class: 'icon-sm', loading: 'lazy' }),
       `Ремонт за ${s.repair.cost} ASTRA${s.repair.plate ? ' + пластина' : ''}`) : null,
@@ -1490,25 +1566,44 @@ function renderFleet() {
   const shop = state.catalog.filter((c) => !c.owned).map((c) => {
     const tooLow = state.level < c.unlockLevel;
     const noMoney = c.price != null && state.balances.astra < c.price;
-    const label = c.price == null ? 'Чертёж: крафт позже'
+    // Корабль без цены собирается из чертежа: у него своя готовность — не
+    // «много ASTRA», а «чертёж в трюме». Числом показываем, сколько уже есть.
+    const plans = c.blueprint ? (c.blueprintCount ?? 0) : 0;
+    const needsPlans = c.blueprint != null && c.price == null;
+    const shortPlans = needsPlans && plans < 1;
+    const label = needsPlans
+      ? shortPlans
+        ? `Нужен чертёж: «Чертёж Flagship» в «Крафте» (есть ${plans} из 1)`
+        : `Собрать из чертежа (${plans} из 1)`
       : tooLow ? `Нужен уровень ${c.unlockLevel}`
         : noMoney ? `Не хватает ${astraNum(c.price - state.balances.astra)} ASTRA`
           : garageFull ? 'Гараж полон: купите ячейку'
             : `Купить за ${astraNum(c.price)} ASTRA`;
-    return el('div', { class: `block${tooLow || c.price == null ? ' locked' : ''}` },
-      el('img', { src: `/sprites/ships/${c.type}.png`, alt: '', width: '96', class: 'sprite-thumb' }),
+    const blocked = state.frozen || tooLow || garageFull || (needsPlans ? shortPlans : noMoney);
+    return el('div', { class: `block${blocked && !shortPlans ? ' locked' : ''}` },
+      el('img', {
+        src: `/sprites/ships/${c.type}.png`, alt: '', width: '96', height: '48', class: 'sprite-thumb', loading: 'lazy',
+      }),
       el('h3', {},
         tooLow ? el('img', { src: '/icons/ui/lock.png', alt: '', width: '14', height: '14', class: 'icon-xs', loading: 'lazy' }) : null,
         ` ${c.name}`),
       el('p', { class: 'muted' },
-        `Груз ${c.cargo} · бак ${c.tank} · добыча ×${c.mining} · уровень ${c.unlockLevel}`),
+        // Дальность — то, ради чего вообще смотрят в конец списка верфи: без неё
+        // выбор корабля превращается в угадывание.
+        `Груз ${c.cargo} · бак ${c.tank} · добыча ×${c.mining} · до ${c.maxSector ?? '?'} сект. · уровень ${c.unlockLevel}`),
       el('button', {
         type: 'button',
-        disabled: state.frozen || tooLow || c.price == null || noMoney || garageFull ? '' : null,
+        disabled: blocked ? '' : null,
         onClick: () => doBuyShip(c.type),
       },
-      c.price != null && !tooLow ? el('img', { src: '/icons/ui/buy.png', alt: '', width: '18', height: '18', class: 'btn-ico', loading: 'lazy' }) : null,
+      !needsPlans && c.price != null && !tooLow
+        ? el('img', { src: '/icons/ui/buy.png', alt: '', width: '18', height: '18', class: 'btn-ico', loading: 'lazy' }) : null,
       label),
+      // Кнопка прямо в верфи: чертёж — тот же крафт, и ходить за ним в другой
+      // раздел, где его ещё надо найти в списке, лишняя работа.
+      needsPlans && shortPlans
+        ? el('button', { type: 'button', class: 'ghost', onClick: () => setView('craft') }, 'К чертежу в «Крафт»')
+        : null,
     );
   });
   return el('div', { class: 'screen' },
@@ -1556,7 +1651,7 @@ function renderCraftScreen() {
     },
     {
       tier: 2, title: 'Дальний круг',
-      hint: 'Редкие ресурсы секторов 2–5: гелий-3, титан, кристалл, астралит, пустотный кристалл, квантовая пыль. Идут в модули с 4-го уровня.',
+      hint: 'Редкие ресурсы секторов 2–5: гелий-3, титан, кристалл, астралит, пустотный кристалл, квантовая пыль. Идут в модули с 4-го уровня — и в чертежи кораблей верфи.',
     },
   ].map((g) => {
     const list = c.recipes.filter((r) => (r.tier || 1) === g.tier);
@@ -1865,7 +1960,10 @@ function renderSeason() {
 // только рисует то, что пришло: никаких счётчиков на стороне браузера.
 async function loadBoxes() {
   const { status, data } = await authed('/boxes');
-  if (status === 200) boxData = data;
+  // Список обязано быть массивом: ответ 200 без `boxes` ронял весь экран на
+  // `data.boxes.some`, и раздел оставался пустым до перезагрузки страницы.
+  if (status === 200 && Array.isArray(data?.boxes)) boxData = data;
+  else if (status === 200) note = 'Ошибка: сервер вернул боксы без списка — попробуйте обновить раздел';
   else if (status !== 0) note = `Ошибка: ${errText(data.error)}`;
   if (view === 'boxes') render();
 }
@@ -3401,7 +3499,8 @@ function arcadeStage(game) {
       : el('div', { class: 'arena-overlay' },
         el('h3', {}, game.title),
         el('p', { class: 'muted' }, game.rules),
-        el('p', { class: 'muted' }, `Управление: ${game.controls}. Счёт и победа — на совести сервера: он пересчитывает твой ввод по зерну забега.`),
+        el('p', { class: 'muted' },
+          `Управление: ${game.controls}. Режим выше (Авто / Мышь / Тач / Кнопки) решает, что вообще считать вводом. Счёт и победа — на совести сервера: он пересчитывает твой ввод по зерну забега.`),
         el('button', {
           type: 'button', class: 'cta', 'data-arcade-start': '',
           disabled: arcadeData.attempts.left <= 0 ? '' : null,
@@ -3444,6 +3543,9 @@ function renderArcade() {
         el('span', {}, 'опыт за день: ', el('b', {}, `${a.today.xp}/${a.caps.xp} XP`))),
       el('div', { class: 'level-bar' }, xpFill)),
 
+    // Режим управления доступен и в каталоге: выбирать его надо до забега, а не
+    // на ходу, когда поле перерисовывается каждую секунду.
+    game ? null : arcadeControlRow(null),
     game ? null : el('div', { class: 'arcade-catalog' }, ...a.games.map(arcadeTile)),
     game ? el('div', { class: 'arcade-open' },
       el('div', { class: 'arcade-open-head' },
@@ -3453,6 +3555,9 @@ function renderArcade() {
           type: 'button', class: 'ghost',
           onClick: () => { arcadeStopLoop(); arcadeRun = null; arcadeOpen(null); },
         }, 'К каталогу')),
+      // Выбор типа управления — до старта забега и во время него: игрок
+      // меняется на ходу («играл мышью, потом взял телефон»).
+      arcadeControlRow(game),
       arcadeResult ? arcadeResultCard(arcadeResult) : null,
       arcadeStage(game)) : null,
 
@@ -3504,6 +3609,109 @@ function renderArcade() {
 // ── Ввод: клавиши, мышь, палец ───────────────────────────────────────────────
 // Слушатели вешаются один раз: после каждой перерисовки их число не растёт.
 
+// Тип управления аркадой. Поле следует за мышью — на телефоне это «палец уехал
+// на пиксель, щит уехал», а с клавиатуры играть было нельзя вовсе. Режим
+// выбирается один раз и живёт в localStorage: игрок не перетыкает его каждый
+// забег, а экранная крестовина появляется только там, где она нужна.
+const ARCADE_CONTROL_MODES = ['auto', 'mouse', 'touch', 'keys'];
+const ARCADE_CONTROL_HINTS = {
+  auto: 'мышь, палец и клавиши — что удобнее',
+  mouse: 'поле идёт за мышью; палец не управляется',
+  touch: 'палец по полю плюс экранные кнопки',
+  keys: 'только клавиши (стрелки, W/A/S/D)',
+};
+const ARCADE_CONTROL_NAMES = { auto: 'Авто', mouse: 'Мышь', touch: 'Тач', keys: 'Кнопки' };
+/** Шаг экранной крестовины и клавиш; край поля — чтобы щит не уходил за борт. */
+const ARCADE_PAD_STEP = 46;
+const ARCADE_PAD_EDGE = 40;
+
+let arcadeControl = (() => {
+  try {
+    const v = localStorage.getItem('astra:arcade-control');
+    return ARCADE_CONTROL_MODES.includes(v) ? v : 'auto';
+  } catch {
+    return 'auto';
+  }
+})();
+
+/** Принимает ли этот режим данный указатель. */
+function arcadePointerAllowed(e) {
+  if (arcadeControl === 'keys') return false;
+  const type = e && e.pointerType;
+  if (arcadeControl === 'touch') return type === 'touch' || type === 'pen';
+  if (arcadeControl === 'mouse') return type === 'mouse';
+  return true;
+}
+
+function arcadeControlRow(game) {
+  const padGames = ['maze', 'snake', 'breakout', 'catch', 'runner', 'reaction'];
+  return el('div', { class: 'arcade-controls' },
+    el('span', { class: 'arcade-controls-label' }, 'Управление'),
+    ...ARCADE_CONTROL_MODES.map((mode) => el('button', {
+      type: 'button',
+      class: `arcade-control-btn${arcadeControl === mode ? ' is-on' : ''}`,
+      'aria-pressed': arcadeControl === mode ? 'true' : 'false',
+      title: ARCADE_CONTROL_HINTS[mode],
+      onClick: () => {
+        arcadeControl = mode;
+        try { localStorage.setItem('astra:arcade-control', mode); } catch { /* приватный режим */ }
+        render();
+      },
+    }, ARCADE_CONTROL_NAMES[mode])),
+    el('span', { class: 'muted' }, ARCADE_CONTROL_HINTS[arcadeControl]),
+    // Экранные кнопки — только там, где они на что-то влияют, и только в тач-режиме:
+    // полупрозрачный крест поверх поля в другой игре только мешает.
+    arcadeControl === 'touch' && game && padGames.includes(game.id) && arcadeRun ? arcadePad(game) : null);
+}
+
+/**
+ * Экранные кнопки. Держать дольше — шаг повторяется, как с зажатыми стрелками.
+ *
+ * Повтор обязан остановиться, если кнопку вынесли из DOM: экран перерисовывается
+ * вместе с `/me` (а на «Флоте» — ещё и по завершении рейса), и интервал,
+ * повешенный только на `pointerup`, остался бы жить на мёртвом узле. Итог для
+ * игрока выглядел бы поломкой: платформа уезжает в одну сторону сама, а «отпустил
+ * — не реагирует».
+ */
+function arcadePadBtn(label, onStep, extraClass) {
+  const btn = el('button', {
+    type: 'button',
+    class: `arcade-pad-btn${extraClass ? ` ${extraClass}` : ''}`,
+    'aria-label': label,
+  }, label);
+  let timer = null;
+  const stop = () => { if (timer !== null) { clearInterval(timer); timer = null; } };
+  btn.addEventListener('contextmenu', (e) => e.preventDefault());
+  btn.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    onStep();
+    stop();
+    timer = setInterval(() => {
+      if (!btn.isConnected) { stop(); return; }
+      onStep();
+    }, 120);
+  });
+  for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) btn.addEventListener(ev, stop);
+  return btn;
+}
+
+function arcadePad(game) {
+  const dirBtn = (label, dir) => arcadePadBtn(label, () => arcadeNudge(dir));
+  // Дирекции нужны лабиринту и змейке, щит — разбивателю и ловцу, действие —
+  // бегунку и реакции. Для остальных игр крест на поле лишний.
+  const dirs = ['maze', 'snake', 'breakout', 'catch'].includes(game.id);
+  const action = game.id === 'runner' ? 'ПРЫЖОК' : game.id === 'reaction' ? 'ТАП' : null;
+  const row = [];
+  if (dirs) {
+    row.push(el('div', { class: 'arcade-pad-dpad' },
+      el('span'), dirBtn('▲', 0), el('span'),
+      dirBtn('◀', 3), el('span', { class: 'arcade-pad-mid' }, '·'), dirBtn('▶', 1),
+      el('span'), dirBtn('▼', 2), el('span')));
+  }
+  if (action) row.push(arcadePadBtn(action, () => arcadeTapAction(), 'is-action'));
+  return el('div', { class: 'arcade-pad' }, ...row);
+}
+
 const ARCADE_DIR_CODES = {
   ArrowUp: 0, w: 0, 'ц': 0,
   ArrowRight: 1, d: 1, 'в': 1,
@@ -3520,49 +3728,78 @@ function arcadePointer(event, canvas) {
   return { x: Math.round(x), y: Math.round(y) };
 }
 
-window.addEventListener('keydown', (e) => {
-  if (view !== 'arcade' || !arcadeRun || arcadeRun.finished) return;
+/**
+ * Один ход в направлении. `dir`: 0 вверх, 1 вправо, 2 вниз, 3 влево.
+ * Общий для клавиатуры и экранного креста: два ввода обязаны вести себя
+ * одинаково, иначе «играл кнопками, а на телефоне сломалось».
+ */
+function arcadeNudge(dir) {
   const run = arcadeRun;
-  const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  if (!run || run.finished) return;
   if (run.game === 'maze') {
-    const d = ARCADE_DIR_CODES[key];
-    if (d == null) return;
-    e.preventDefault();
-    run.moves.push(d);
+    run.moves.push(dir);
     const g = run.st.grid;
     const x = run.st.cursor % g.cols;
     const y = Math.floor(run.st.cursor / g.cols);
-    const wall = [1, 2, 4, 8][d];
+    const wall = [1, 2, 4, 8][dir];
     if (g.mask[run.st.cursor] & wall) {
       // Сквозь стену не пройти: попытка обрывается, как и на сервере.
       sfx('hit');
       arcadeSubmit({});
       return;
     }
-    const nx = x + [0, 1, 0, -1][d];
-    const ny = y + [-1, 0, 1, 0][d];
+    const nx = x + [0, 1, 0, -1][dir];
+    const ny = y + [-1, 0, 1, 0][dir];
     run.st.cursor = ny * g.cols + nx;
     sfx('pick');
     if (run.st.cursor === g.cols * g.rows - 1) arcadeSubmit({});
     return;
   }
   if (run.game === 'snake') {
-    const d = ARCADE_DIR_CODES[key];
-    if (d == null) return;
-    e.preventDefault();
-    run.st.dir = d;
+    run.st.dir = dir;
     return;
   }
-  if (run.game === 'runner' && (key === ' ' || key === 'ArrowUp' || key === 'w')) {
-    e.preventDefault();
+  if (run.game === 'breakout' || run.game === 'catch') {
+    // Шаги, а не «прицел»: с клавиатуры и пальцом плавно ведут себя одинаково.
+    const delta = dir === 3 ? -ARCADE_PAD_STEP : dir === 1 ? ARCADE_PAD_STEP : dir === 0 ? -ARCADE_PAD_STEP : ARCADE_PAD_STEP;
+    const base = run.st.targetX ?? run.st.x ?? ARCADE_W / 2;
+    run.st.targetX = Math.max(ARCADE_PAD_EDGE, Math.min(ARCADE_W - ARCADE_PAD_EDGE, base + delta));
+  }
+}
+
+/** Главное действие: прыжок в бегунке и тап в реакции. */
+function arcadeTapAction() {
+  const run = arcadeRun;
+  if (!run || run.finished) return;
+  if (run.game === 'runner') {
     if (run.st.jumpAt == null) {
       run.st.jumpAt = Math.min(run.runMs, Date.now() + serverOffset - run.t0);
       sfx('pick');
     }
+    return;
+  }
+  if (run.game === 'reaction') arcadeReactTap(run);
+}
+
+window.addEventListener('keydown', (e) => {
+  if (view !== 'arcade' || !arcadeRun || arcadeRun.finished) return;
+  if (arcadeControl === 'mouse' || arcadeControl === 'touch') return;
+  const run = arcadeRun;
+  const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  const dir = ARCADE_DIR_CODES[key];
+  if (dir != null && (run.game === 'maze' || run.game === 'snake'
+    || run.game === 'breakout' || run.game === 'catch')) {
+    e.preventDefault();
+    arcadeNudge(dir);
+    return;
+  }
+  if (run.game === 'runner' && (key === ' ' || key === 'ArrowUp' || key === 'w')) {
+    e.preventDefault();
+    arcadeTapAction();
   }
   if (run.game === 'reaction' && key === ' ') {
     e.preventDefault();
-    arcadeReactTap(run);
+    arcadeTapAction();
   }
 });
 
@@ -3578,6 +3815,9 @@ document.addEventListener('pointermove', (e) => {
   const run = arcadeRun;
   if (!run || run.finished) return;
   if (run.game !== 'breakout' && run.game !== 'catch') return;
+  // Режим управления решает, чьё движение поля вообще считать вводом. В «Авто»
+  // работает и мышь, и палец — как было до выбора режима.
+  if (!arcadePointerAllowed(e)) return;
   const canvas = document.getElementById('arcade-canvas');
   if (!canvas) return;
   const p = arcadePointer(e, canvas);
@@ -3615,6 +3855,7 @@ document.addEventListener('pointerdown', (e) => {
     return;
   }
   if (run.game === 'catch' || run.game === 'breakout') {
+    if (!arcadePointerAllowed(e)) return;
     run.st.targetX = p.x;
     run.st.x = p.x;
   }
@@ -3906,7 +4147,8 @@ function renderBoxes() {
       el('button', { type: 'button', class: 'ghost', onClick: () => loadBoxes() }, 'Обновить'));
   }
 
-  const gate = bonusGateOn() && data.boxes.some((b) => b.price === 0)
+  const boxes = Array.isArray(data.boxes) ? data.boxes : [];
+  const gate = bonusGateOn() && boxes.some((b) => b.price === 0)
     ? el('div', { class: 'block bonus-check-block' }, bonusGateBlock())
     : null;
 
@@ -3919,7 +4161,7 @@ function renderBoxes() {
     : null;
 
   const history = (data.history || []).map((h) => el('li', {},
-    el('span', { class: 'muted' }, `${fmtDay(h.at)} · ${data.boxes.find((b) => b.id === h.box)?.name || h.box}`),
+    el('span', { class: 'muted' }, `${fmtDay(h.at)} · ${boxes.find((b) => b.id === h.box)?.name || h.box}`),
     el('span', {}, dropsLine(h.drops))));
 
   return el('div', { class: 'screen' },
@@ -3927,7 +4169,7 @@ function renderBoxes() {
     el('p', { class: 'muted' }, 'Боксы — это ресурсы, а не валюта: ASTRA из них не выпадает. Дневной и недельный бесплатны по таймеру — и только после подтверждения, что ты человек; платные — сток ASTRA. Доходность ниже, чем у рейсов.'),
     gate,
     result,
-    el('div', { class: 'box-grid' }, ...data.boxes.map(boxCard)),
+    el('div', { class: 'box-grid' }, ...boxes.map(boxCard)),
     history.length ? el('div', { class: 'block' },
       el('h3', {}, 'Последние открытия'),
       el('ul', { class: 'plain box-history' }, ...history)) : null,
@@ -3982,7 +4224,19 @@ function render() {
   setText('#top-level', state.level);
   renderFrozen();
   const panel = $('#panel');
-  panel.replaceChildren();
+  // Экран меняется ОДНОЙ операцией и с сохранением прокрутки. Раньше сначала
+  // шёл `replaceChildren()` без аргументов: на этот миг высота страницы
+  // обнулялась, браузер обрезал scrollY, и игрока, дочитывающего длинный
+  // список в «Флоте», выбрасывало наверх. Плановое обновление тикера и любой
+  // клик по кнопке выглядели как «вкладки скачут сами по себе».
+  //
+  // Возвращаем позицию только там, где игрок никуда не уходил (обновление,
+  // ремонт, покупка). Переход в другой раздел — наверх, к его заголовку:
+  // оставлять игрока на 800 px внутри нового экрана — значит «скачут».   
+  const sameView = renderedView === null || renderedView === view;
+  const scrollKeep = sameView
+    ? Math.round(window.scrollY || document.documentElement.scrollTop || 0)
+    : 0;
   const body = view === 'flight' ? renderFlight()
     : view === 'fleet' ? renderFleet()
       : view === 'craft' ? renderCraftScreen()
@@ -3997,13 +4251,21 @@ function render() {
                         : view === 'arcade' ? renderArcade()
             : view === 'wallet' ? renderWallet()
             : view === 'ledger' ? renderLedger() : renderBridge();
-  panel.append(body);
+  panel.replaceChildren(body);
+  renderedView = view;
+  if (Math.abs(Math.round(window.scrollY || 0) - scrollKeep) > 1) {
+    window.scrollTo(0, scrollKeep);
+  }
   // Арена живёт на canvas: цикл перевешиваем на свежий элемент после перерисовки.
   if (view === 'arena') arenaMount();
   // Аркада — тот же приём: у каждого своей игры свой цикл и свой canvas.
   if (view === 'arcade') arcadeMount();
   // Виджет «я человек» живёт в разметке экрана — ставим его после каждой перерисовки.
-  if (view === 'bridge' || view === 'boxes' || view === 'bonus') mountBonusGate();
+  // Раньше список был жёсткий (мости́к, бонусы, боксы): как только слот проверки
+  // оказывался в другом разделе, контейнер пустовал — подпись «подтвердите, что вы
+  // человек» есть, а самой проверки нет, и кнопка не разблокируется никогда.
+  // Теперь условие смотрит на DOM: есть контейнер — ставим виджет.
+  if (bonusGateOn() && document.getElementById('turnstile-claim')) mountBonusGate();
   for (const btn of document.querySelectorAll('[data-view]')) btn.classList.toggle('active', btn.dataset.view === view);
 }
 
@@ -4237,6 +4499,7 @@ function doApplyReferral(code) { return act(`ref:${code}`, '/referrals/apply', {
 
 function setView(v) {
   view = v;
+  rememberView(v);
   note = '';
   if (v === 'bonus') loadPayAccount();
   if (v === 'boxes') loadBoxes();
@@ -4317,8 +4580,13 @@ setInterval(() => {
     const health = await request('/health');
     if (health.status === 200) syncServerTime(health.data.now);
     await loadConfig();
-    if (await refresh()) await loadGame();
-    else show('landing');
+    if (await refresh()) {
+      view = savedView();
+      // Раздел восстановлен — значит и хэш обязан встать: адресная строка
+      // описывает экран, на котором игрок реально сидит.
+      rememberView(view);
+      await loadGame();
+    } else show('landing');
   } catch (e) {
     console.error('boot failed', e);
     openAuth('login');
