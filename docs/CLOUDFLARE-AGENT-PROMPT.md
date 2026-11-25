@@ -14,7 +14,8 @@ node 20+ и терминал. Задача: довести оплачиваем�
 РЕПОЗИТОРИЙ: github.com/alibahsburiev20-cyber/Crypto-Astra, ветка main.
 ПРОД: https://crypto-astra.cryptoastra.workers.dev
 D1: astra-global (прод), astra-preview (превью). Сеть: mainnet, USDT TRC-20
-(контракт TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t).
+(контракт TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t). BSC-рельс в коде есть, но в
+продовую конфигурацию не включён: смену цепи решаю я, сам PAY_CHAIN не меняй.
 Документ с деталями и проверками: docs/CLOUDFLARE-AGENT-TASK.md — открой и
 следуй ему, этот текст задаёт порядок и границы.
 
@@ -117,9 +118,12 @@ d1_migrations, _cf_KV, sqlite_sequence; сверяй с числом «до», �
   # получить JWT игрока: POST /auth/register или /auth/login, взять access_token
   curl -s -H "Authorization: Bearer $TOKEN" $BASE/pay/address.json
   curl -s -H "Authorization: Bearer $TOKEN" $BASE/pay/address.json   # тот же адрес!
+  curl -s -H "Authorization: Bearer $TOKEN" $BASE/pay/qr -o /tmp/qr.png && file /tmp/qr.png
 Ожидаемо: адрес T…, network mainnet, asset USDT, contract
-TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t; повторный вызов — тот же адрес и index;
-без токена 401; https://astra-pay-signer.<sub>.workers.dev не открывается.
+TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t, explorer.name = Tronscan; повторный вызов —
+тот же адрес и index; без токена 401 и на /pay/address.json, и на /pay/qr;
+/pay/qr — PNG-картинка (сканер читает адрес с неё — открой телефоном или сверь
+с адресом руками); https://astra-pay-signer.<sub>.workers.dev не открывается.
 Плюс админка: без токена 401, с неверным 403, с верным 200.
 Если wallets всё ещё "signer_required" — binding не подхватился, разбирайся, не
 объявляй успех.
@@ -130,7 +134,7 @@ TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t; повторный вызов — тот ж�
   5.1 Подготовь: возьми мой адрес из /pay/address.json, сумму 1 USDT.
   5.2 Спроси меня и дождись «да» (это мои реальные деньги).
   5.3 После моего перевода проверь: GET /admin/pay (депозит виден, статус
-      credited, ровно одна строка на txid), баланс в /pay/balance.json вырос на
+      credited, ровно одна строка на txid), баланс в /pay/account.json вырос на
       1000000 микро-USDT, reconcile.issues пуст, покупка проходит один раз и
       повторная попытка не списывает второй раз.
   5.4 Если депозит не появился — не «зачисляй вручную»: смотри explorer,
@@ -191,7 +195,7 @@ TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t; повторный вызов — тот ж�
 
 ОТЧЁТ (ровно это, без секретов):
 1. Адрес: $BASE, HTTPS ok, /health build <...>
-2. D1: миграции <...>, schema ready, tables 14
+2. D1: миграции <...>, schema ready, число таблиц как «до» (шаг 1)
 3. Signer: задеплоен, wallets ready, адрес игрока выдан и повторяется
 4. PAY_HOT_ADDRESS совпадает с ключом (pay:hot-address --check): да/нет
 5. Админка: 401 без токена, 403 с неверным, 429 после 10 ошибок, 200 с верным
