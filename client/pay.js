@@ -226,6 +226,9 @@ const DEPOSIT_ERRORS = {
   bsc_contract_missing: 'Для этой сети не задан контракт USDT — приём выключен намеренно.',
   usdt_contract_missing: 'Сервер не знает, какой контракт считать USDT — приём выключен.',
   pay_chain_unknown: 'В настройках указана неизвестная сеть, поэтому деньги не принимаются.',
+  // Смена сети на сервере: у игрока в базе адрес прошлой цепи. Показать его —
+  // значит «деньги ушли в сеть, которую мы не смотрим», поэтому здесь отказ.
+  address_chain_mismatch: 'Ваш адрес выдан в другой сети. Напишите в поддержку: адрес нужно перевыпустить.',
   signer_unavailable: 'Сервис подписи недоступен. Попробуйте позже.',
   deposits_disabled: 'Приём USDT выключен в этой сборке.',
   pay_unavailable: 'Платёжная база недоступна. Попробуйте позже.',
@@ -302,12 +305,15 @@ function networkNote(data, lang) {
   const label = data.networkLabel || data.network || '—';
   const contract = data.contract ? `, контракт ${data.contract}` : '';
   // На 18-значной сети хвост отбрасывается: «1.0000000000005» зачислится как «1».
+  const conf = Number(data.confirmations) > 0 ? ` · зачисление после ${data.confirmations} подтверждений` : '';
   const rounding = Number(data.decimals) > 6
     ? (lang === 'en' ? ' Send a whole number: the fraction is not credited.' : ' Отправляйте целое число USDT: дробная часть не зачислится.')
     : '';
-  return lang === 'en'
-    ? `Network: ${label}. Token: USDT${contract}.${rounding}`
-    : `Сеть: ${label}. Токен: USDT${contract}.${rounding}`;
+  if (lang === 'en') {
+    const confEn = Number(data.confirmations) > 0 ? ` · credited after ${data.confirmations} confirmations` : '';
+    return `Network: ${label}. Token: USDT${contract}.${confEn}${rounding}`;
+  }
+  return `Сеть: ${label}. Токен: USDT${contract}.${conf}${rounding}`;
 }
 
 async function boot() {

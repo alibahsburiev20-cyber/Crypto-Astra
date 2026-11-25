@@ -257,6 +257,18 @@ export const PAY_PARTIAL_INDEXES: string[] = [
      ON pay_pool_cycles (status) WHERE status = 'open'`,
 ];
 
+/**
+ * Индекс против ветвления журнала. Вынесен отдельно и создаётся с try/catch
+ * специально: если в уже существующей базе форк случился до появления индекса,
+ * правильная реакция — «деньги работают, а повреждённый хвост видно в сверке», а
+ * не 503 на весь платёжный контур из-за DDL.
+ */
+export const PAY_CHAIN_INDEXES: string[] = [
+  // За данным хешем может следовать ровно одна запись: гонка двух начислений
+  // ловится базой, а не «увидеть потом в сверке».
+  `CREATE UNIQUE INDEX IF NOT EXISTS ux_pay_ledger_prev ON pay_ledger (prev_hash)`,
+];
+
 let payReady: Promise<boolean> | null = null;
 
 /** true — таблицы `pay_*` на месте. После ошибки следующий вызов пробует снова. */
@@ -265,6 +277,13 @@ export function ensurePaySchema(db: D1Database): Promise<boolean> {
     payReady = (async () => {
       for (const statement of PAY_STATEMENTS) await db.prepare(statement).run();
       for (const index of PAY_PARTIAL_INDEXES) await db.prepare(index).run();
+      for (const index of PAY_CHAIN_INDEXES) {
+        try {
+          await db.prepare(index).run();
+        } catch (e) {
+          console.error('pay ledger chain index failed', e);
+        }
+      }
       for (const trigger of PAY_TRIGGERS) {
         try {
           await db.prepare(trigger).run();

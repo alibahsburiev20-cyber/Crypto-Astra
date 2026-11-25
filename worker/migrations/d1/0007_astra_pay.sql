@@ -118,6 +118,9 @@ CREATE TABLE IF NOT EXISTS pay_ledger (
 
 CREATE INDEX IF NOT EXISTS idx_pay_ledger_user ON pay_ledger (user_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_pay_ledger_reason ON pay_ledger (reason, created_at);
+-- Цепочка журнала: за данным хешем может следовать ровно одна запись, поэтому
+-- ветвление из-за гонки двух начислений ловится базой, а не сверкой постфактум.
+CREATE UNIQUE INDEX IF NOT EXISTS ux_pay_ledger_prev ON pay_ledger (prev_hash);
 
 CREATE TRIGGER IF NOT EXISTS pay_ledger_no_update BEFORE UPDATE ON pay_ledger
   BEGIN SELECT RAISE(ABORT, 'pay ledger is append-only'); END;

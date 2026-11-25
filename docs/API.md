@@ -100,11 +100,12 @@ purchasesEnabled, history[], entitlements[] }`. История — только 
 | POST | `/admin/pay/withdrawal` | админ | `{ id, action }`: `approve`, `reserve`, `broadcast`, `sent`, `confirm`, `fail` |
 | POST | `/admin/pay/stop` | админ | `{ stop: true/false, reason }` — стоп-флаг выплат |
 | POST | `/admin/pay/send` | админ | `{ id }` — собрать, подписать в Signer и отправить заявку в состоянии `reserved` |
-| GET | `/admin/pay/sweep/plan` | админ | план сбора: по каждому адресу USDT, TRX, хватает ли на комиссию; ничего не двигает |
+| GET | `/admin/pay/sweep/plan` | админ | план сбора: по каждому адресу USDT и нативная монета на комиссию (TRX в TRON, BNB в BSC), хватает ли на газ, и сколько газа занести, чтобы собрать остальное; ничего не двигает |
 | GET | `/admin/pay/prize` | админ | сколько в призовом фонде, сколько выдано, баланс кошелька (USDT/TRX) и последние призы |
 | POST | `/admin/pay/prize/award` | админ | начислить приз из фонда на баланс игрока; `dryRun` по умолчанию, сумма не больше остатка фонда |
-| POST | `/admin/pay/send` | админ | подпись и отправка зарезервированной выплаты; `409 hot_wallet_insufficient_usdt` / `409 hot_wallet_no_trx` — платить нечем, заявка остаётся `reserved` |
-| GET | `/admin/pay/solvency` | админ | обязательства (балансы игроков + призовой фонд) против активов в блокчейне: покрытие, дефицит |
+| POST | `/admin/pay/send` | админ | подпись и отправка зарезервированной выплаты; `409 hot_wallet_insufficient_usdt` / `hot_wallet_no_trx` (TRON) / `hot_wallet_no_bnb` (BSC) — платить нечем, заявка остаётся `reserved`; `502 chain_id_mismatch`, `gas_price_too_high`, `nonce_busy`, `hot_address_mismatch`, `signer_contract_mismatch` — конфигурация, деньги не двинулись |
+| (cron) | — | — | в BSC подтверждение выплаты по квитанции сети (`pay/evm/payouts.ts`) делает cron: `sent → confirmed`, реверт → `failed` с возвратом. Вручную подтверждения не требуются |
+| GET | `/admin/pay/solvency` | админ | обязательства (балансы игроков + призовой фонд) против активов в блокчейне: покрытие, дефицит. `plan.truncated: true` означает «адресов больше, чем мы прочитали» — в этом случае активы считаются неполными и «покрыто» не утверждается |
 
 Админка пока закрыта заголовком `X-Admin-Token` (срез 5.3 заменит его на
 Cloudflare Access, токен останется вторым замком).

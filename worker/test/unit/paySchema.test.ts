@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import {
-  PAY_PARTIAL_INDEXES, PAY_SCHEMA_VERSION, PAY_STATEMENTS, PAY_TABLES, PAY_TRIGGERS,
+  PAY_CHAIN_INDEXES, PAY_PARTIAL_INDEXES, PAY_SCHEMA_VERSION, PAY_STATEMENTS, PAY_TABLES, PAY_TRIGGERS,
   ensurePaySchema, resetPaySchemaForTests,
 } from '../../src/pay/schema';
 
@@ -173,9 +173,13 @@ describe('ensurePaySchema', () => {
     resetPaySchemaForTests();
     const { db, seen } = countingDb();
     expect(await ensurePaySchema(db)).toBe(true);
-    const total = PAY_STATEMENTS.length + PAY_PARTIAL_INDEXES.length + PAY_TRIGGERS.length;
+    const total = PAY_STATEMENTS.length + PAY_PARTIAL_INDEXES.length
+      + PAY_CHAIN_INDEXES.length + PAY_TRIGGERS.length;
     expect(seen).toHaveLength(total);
     expect(seen.some((s) => s.includes('pay_ledger_no_update'))).toBe(true);
+    // Индекс против ветвления журнала — отдельной группой: он создаётся с
+    // try/catch, чтобы уже существующий форк в проде не обрубил весь контур.
+    expect(seen.some((s) => s.includes('ux_pay_ledger_prev'))).toBe(true);
 
     expect(await ensurePaySchema(db)).toBe(true);
     expect(seen).toHaveLength(total); // промис запомнен на изолят

@@ -281,6 +281,14 @@ export function createEvmRpc(opts: EvmRpcOptions) {
       return time < 1e12 ? time * 1000 : time;
     },
 
+    /**
+     * Какую сеть обслуживает нода. Дешевле проверить один вызов, чем подписать
+     * перевод и отправить его в чужую цепь с тем же адресом получателя.
+     */
+    async chainId(): Promise<number> {
+      return hexToNumber(await request<string>('eth_chainId'));
+    },
+
     async gasPrice(): Promise<bigint> {
       return hexToBigInt(await request<string>('eth_gasPrice'));
     },

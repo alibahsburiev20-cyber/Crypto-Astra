@@ -129,17 +129,21 @@ function bscSpec(env: Env, network: PayNetworkLike): ChainSpec {
  */
 function bscReadiness(contractConfigured: boolean): RailReadiness {
   const wired = {
-    // Шаг 6: выдача адресов `0x…` из семени Signer (путь `m/44'/60'/0'/0/i`).
-    addresses: false,
-    // Шаг 5: `eth_getLogs` по `Transfer` + подтверждения (`pay/evm/deposits.ts`).
-    deposits: false,
-    // Шаг 7: EIP-1559-транзакция, подпись в Signer, `eth_sendRawTransaction`.
-    payouts: false,
+    // Выдача адресов `0x…` из семени Signer (`pay/evm/derivation.ts`, `/address`
+    // с `chain: "bsc"`), индекс — тот же, что у TRON-адреса игрока.
+    addresses: true,
+    // `eth_getLogs` по `Transfer` + подтверждения + курсор (`pay/evm/deposits.ts`).
+    deposits: true,
+    // EIP-1559-транзакция, подпись в Signer, `eth_sendRawTransaction`, сверка
+    // квитанции в cron (`pay/evm/broadcast.ts`, `pay/evm/payouts.ts`).
+    payouts: true,
   };
+  // Сеть выбрана, а USDT не указан — принимать и платить нечем: контракт в EVM
+  // это часть адреса денег, угадать его нельзя.
   if (!contractConfigured) {
-    return { ...wired, reason: 'bsc_contract_missing' };
+    return { addresses: true, deposits: false, payouts: false, reason: 'bsc_contract_missing' };
   }
-  return { ...wired, reason: 'bsc_rail_not_wired' };
+  return { ...wired, reason: '' };
 }
 
 /** Конфигурация активной цепи. Всё остальное обязано брать её отсюда. */

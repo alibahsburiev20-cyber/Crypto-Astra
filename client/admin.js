@@ -161,6 +161,10 @@ async function loadPay() {
       + ` · курсор блока ${chain.cursor ?? 0}`
       + (chain.contract ? ` · контракт ${chain.contract}` : ' · контракт не задан')
       + (chain.ready && chain.ready.reason ? ` · ${chain.ready.reason}` : '')
+      // Что из рельса включено и сколько адресов относится к активной цепи:
+      // «игрокам надо перевыпустить адреса» видно именно по этому числу.
+      + (chain.ready ? ` · рельс: адреса ${chain.ready.addresses ? 'вкл' : 'выкл'}, приём ${chain.ready.deposits ? 'вкл' : 'выкл'}, выплаты ${chain.ready.payouts ? 'вкл' : 'выкл'}` : '')
+      + (chain.addresses ? ` · адресов ${chain.addresses.active}${chain.addresses.otherChain ? ` · другой цепи ${chain.addresses.otherChain}` : ''}` : '')
     : 'Сеть: сервер не ответил.');
 
   const head = document.createElement('thead');

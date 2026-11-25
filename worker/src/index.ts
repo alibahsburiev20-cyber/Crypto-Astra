@@ -5,6 +5,7 @@ import { payFlags } from './pay/flags';
 import { chainSpec } from './pay/chain';
 import { applyEvmDeposits, bscActiveAddresses, scanEvmBlocks } from './pay/evm/deposits';
 import { createEvmRpc } from './pay/evm/rpc';
+import { applyEvmPayoutConfirmations } from './pay/evm/payouts';
 import { applyDeposits, scanAll, trongridFetcher } from './pay/monitor';
 import { tronApiBase } from './pay/tron/contracts';
 import { ensurePaySchema } from './pay/schema';
@@ -148,6 +149,22 @@ export default {
         }
       } catch (e) {
         console.error('pay stranded check failed', e);
+      }
+    }
+
+    // Подтверждение выплат по квитанции сети. Без этого шага заявка висела бы в
+    // `sent` до ручного нажатия «подтвердить»: деньги ушли, а баланс игрока
+    // «в обработке» неделями. Работает только там, где рельс дописан.
+    if (pay.payouts) {
+      const spec = chainSpec(env, pay);
+      if (spec.chain === 'bsc' && spec.ready.payouts && spec.contract) {
+        try {
+          const rpc = createEvmRpc({ url: spec.apiBase, fetchImpl: fetch });
+          const res = await applyEvmPayoutConfirmations(env.DB, rpc, spec.confirmations, Date.now());
+          if (res.checked) console.log('pay payouts confirm', { chain: 'bsc', ...res });
+        } catch (e) {
+          console.error('pay payouts confirm failed', e);
+        }
       }
     }
 

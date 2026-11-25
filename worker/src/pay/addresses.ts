@@ -10,10 +10,19 @@
 
 import type { Env } from '../env';
 import { addressToHex } from './tron/address';
+import { isEvmAddress, toChecksumAddress } from './evm/address';
+import { isValidAddress as isTronAddress } from './tron/address';
+import type { PayChain } from './units';
 
 export interface DerivedAddress {
   index: number;
   address: string;
+  /**
+   * Значение для `pay_addresses.hex`. Формат адреса зависит от сети (TRON —
+   * base58 → `41…`, EVM — те же 20 байт без `0x`), поэтому «hex» считает тот,
+   * кто знает сеть, а не общий код.
+   */
+  hex?: string;
 }
 
 export interface AddressDeriver {
@@ -57,19 +66,20 @@ export async function ensureAddress(
     const index = Number(row ?? -1) + 1;
 
     const derived = await deriver.derive(index);
+    const hex = derived.hex ?? addressToHex(derived.address);
 
     const res = await db.prepare(
       `INSERT INTO pay_addresses (id, user_id, address, hex, derivation_index, created_at)
        VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT DO NOTHING`,
-    ).bind(`ad_${index}_${userId}`.slice(0, 64), userId, derived.address, addressToHex(derived.address), index, now).run();
+    ).bind(`ad_${index}_${userId}`.slice(0, 64), userId, derived.address, hex, index, now).run();
 
     const changes = Number((res as { meta?: { changes?: number } }).meta?.changes ?? 0);
     if (changes) {
       return {
         address: derived.address,
         index,
-        hex: addressToHex(derived.address),
+        hex,
         createdAt: now,
         created: true,
       };
@@ -87,7 +97,11 @@ export async function ensureAddress(
  * если биндинг не настроен, адреса не выдаются — и это правильно, лучше
  * ошибка, чем адрес от неизвестного источника.
  */
-export function signerDeriver(env: Env): AddressDeriver {
+/**
+ * @param chain сеть, адрес которой просим. Одна строка `pay_addresses` относится
+ *   ровно к одной цепи — формат адреса это и различает.
+ */
+export function signerDeriver(env: Env, chain: PayChain = 'tron'): AddressDeriver {
   return {
     async derive(index: number): Promise<DerivedAddress> {
       const signer = env.SIGNER;
@@ -96,12 +110,53 @@ export function signerDeriver(env: Env): AddressDeriver {
       const res = await signer.fetch('https://signer/address', {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-        body: JSON.stringify({ index }),
+        body: JSON.stringify({ index, chain }),
       });
       if (!res.ok) throw new Error(`signer_${res.status}`);
       const data = await res.json() as { index?: number; address?: string };
       if (typeof data.address !== 'string' || data.index !== index) throw new Error('signer_bad_response');
-      return { index, address: data.address };
+      if (chain === 'bsc') {
+        // В базе — нижний регистр: событие из ноды приходит в нижнем регистре, и
+        // сверка депозитов идёт сравнением строк. Красоту (EIP-55) включаем при
+        // показе игроку, а не при хранении.
+        if (!isEvmAddress(data.address)) throw new Error('signer_bad_address');
+        const canonical = toChecksumAddress(data.address).toLowerCase();
+        return { index, address: canonical, hex: canonical.slice(2) };
+      }
+      return { index, address: data.address, hex: addressToHex(data.address) };
     },
   };
+}
+
+/**
+ * Формат адреса и есть цепь: `T…` существует только в TRON, `0x…` — только в EVM.
+ * `unknown` — мусор в базе (ручная правка), и он не должен пройти как «наш».
+ */
+export function addressChain(address: string): PayChain | 'unknown' {
+  const raw = String(address ?? '').trim();
+  if (isEvmAddress(raw)) return 'bsc';
+  if (isTronAddress(raw)) return 'tron';
+  return 'unknown';
+}
+
+/**
+ * Принадлежит ли адрес активной цепи.
+ *
+ * Это не косметика: при смене `PAY_CHAIN` у игрока в базе остаётся адрес старой
+ * сети, а `user_id` уникален — второго адреса не будет. Показать такой адрес
+ * значит отправить деньги в цепь, которую мы не сканируем: игрок заплатит, а
+ * зачисления не будет. Поэтому «не совпало» — отказ, а не «покажем как есть».
+ */
+export function addressMatchesChain(address: string, chain: PayChain): boolean {
+  return addressChain(address) === chain;
+}
+
+/** Как адрес показывает игроку: в EVM — с контрольной суммой, иначе опечатку не отличить. */
+export function displayAddress(chain: PayChain, address: string): string {
+  if (chain !== 'bsc') return address;
+  try {
+    return toChecksumAddress(address);
+  } catch {
+    return address;
+  }
 }

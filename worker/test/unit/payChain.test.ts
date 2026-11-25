@@ -97,16 +97,24 @@ describe('BSC-контур', () => {
     expect(testnet.ready.reason).toBe('bsc_contract_missing');
   });
 
-  it('пока рельс не дописан, сеть не обещает ни адресов, ни депозитов, ни выплат', () => {
-    expect(spec.ready).toMatchObject({ addresses: false, deposits: false, payouts: false });
-    expect(spec.ready.reason).toBe('bsc_rail_not_wired');
+  it('рельс дописан: адреса, приём и выплаты включены вместе', () => {
+    // Смысл этого флага в том, что `true` появляется только вместе с кодом. Если
+    // кто-то отключит модуль — тест должен упасть, а не «тихо выключить деньги».
+    expect(spec.ready).toMatchObject({ addresses: true, deposits: true, payouts: true });
+    expect(spec.ready.reason).toBe('');
   });
 
-  it('и адрес игроку не выдаёт: 503 вместо «0x… посмотрите позже»', async () => {
-    const env = { PAYMENTS_ENABLED: 'on', DEPOSITS_ENABLED: 'on', PAY_CHAIN: 'bsc', PAY_NETWORK: 'mainnet' } as never;
+  it('без контракта приём и выплаты стоят, даже если адреса выдавать можно', () => {
+    const testnet = chainSpec({ PAY_CHAIN: 'bsc' } as never, flagsFor({ PAY_CHAIN: 'bsc' }));
+    expect(testnet.ready).toMatchObject({ addresses: true, deposits: false, payouts: false });
+    expect(testnet.ready.reason).toBe('bsc_contract_missing');
+  });
+
+  it('адрес игроку не выдаётся, если контракт не задан: 503 вместо «0x… посмотрите позже»', async () => {
+    const env = { PAYMENTS_ENABLED: 'on', DEPOSITS_ENABLED: 'on', PAY_CHAIN: 'bsc', PAY_NETWORK: 'testnet' } as never;
     // База тут не нужна: маршрут обязан отказать до первого запроса к D1.
     await expect(payAddress(env, { userId: 'u1' } as never)).rejects.toMatchObject({
-      status: 503, code: 'bsc_rail_not_wired',
+      status: 503, code: 'usdt_contract_missing',
     });
   });
 
@@ -114,7 +122,7 @@ describe('BSC-контур', () => {
     const res = await payStatus({ PAY_CHAIN: 'bsc', PAY_NETWORK: 'mainnet' } as never);
     const body = await res.json() as Record<string, unknown>;
     expect(body).toMatchObject({ chain: 'bsc', decimals: 18, networkLabel: 'BNB Smart Chain (BEP-20)' });
-    expect(body.rail).toMatchObject({ addresses: false, deposits: false, payouts: false });
+    expect(body.rail).toMatchObject({ addresses: true, deposits: true, payouts: true });
     expect(body.contract).toBe(BSC_MAINNET.usdt.toLowerCase());
   });
 

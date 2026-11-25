@@ -14,10 +14,28 @@
 // Первая версия — только ручное подтверждение: `approve` вызывает админ.
 
 import { TronAddressError, normalizeAddress } from './tron/address';
+import { isEvmAddress, toChecksumAddress } from './evm/address';
+import type { PayChain } from './units';
 import { formatMicroUsdt } from './tron/amount';
 import { payBalanceMicro, appendPayLedger } from './ledger';
 
 export const MIN_WITHDRAW_MICRO = 5_000_000; // 5 USDT: ниже комиссия съедает смысл
+
+/**
+ * Минимальная заявка по сетям разная, и это не щедрость, а цена перевода:
+ * TRON жрёт ~15 TRX (~4 $) за `transfer`, если энергия не арендована, и планка
+ * 5 USDT стоит ровно затем, чтобы вывод не оказался дороже самого вывода.
+ * BEP-20 стоит доли цента, и держать там ту же планку — значит «запретить
+ * мелкие выводы» без всякой причины.
+ */
+export const MIN_WITHDRAW_MICRO_BY_CHAIN: Record<PayChain, number> = {
+  tron: 5_000_000,
+  bsc: 1_000_000,
+};
+
+export function minWithdrawMicro(chain: PayChain = 'tron'): number {
+  return MIN_WITHDRAW_MICRO_BY_CHAIN[chain] ?? MIN_WITHDRAW_MICRO;
+}
 export const MAX_WITHDRAW_MICRO = 5_000_000_000; // 5 000 USDT за одну заявку
 export const DAILY_LIMIT_MICRO = 20_000_000_000; // 20 000 USDT в сутки на игрока
 const DAY = 86_400_000;
@@ -60,8 +78,31 @@ export interface WithdrawalRow {
   txid: string | null;
 }
 
+/**
+ * Адрес получателя проверяется по активной цепи, а не «по любому формату».
+ *
+ * Иначе получается самый плохой из вариантов: заявка принята, деньги зарезервированы,
+ * а в сети такой адрес не существует. Нижнее регистрование для EVM — не косметика:
+ * `pay_addresses` хранит ту же форму, и сверка идёт сравнением строк.
+ */
+export function normalizeWithdrawAddress(chain: PayChain, raw: string): string {
+  const text = String(raw ?? '').trim();
+  if (chain === 'bsc') {
+    if (!isEvmAddress(text)) throw new PayoutError('bad_address');
+    return toChecksumAddress(text).toLowerCase();
+  }
+  try {
+    return normalizeAddress(text);
+  } catch (e) {
+    if (e instanceof TronAddressError) throw new PayoutError('bad_address');
+    throw e;
+  }
+}
+
 export interface RequestInput {
   userId: string;
+  /** Активная цепь: от неё зависит формат адреса. По умолчанию — TRON. */
+  chain?: PayChain;
   address: string;
   amountMicro: number;
   /** Ключ от клиента: повтор заявки не создаёт вторую. */
@@ -73,17 +114,11 @@ export async function requestWithdrawal(
   input: RequestInput,
   now: number,
 ): Promise<{ withdrawal: WithdrawalRow; duplicated: boolean }> {
-  let address: string;
-  try {
-    address = normalizeAddress(String(input.address ?? ''));
-  } catch (e) {
-    if (e instanceof TronAddressError) throw new PayoutError('bad_address');
-    throw e;
-  }
+  const address = normalizeWithdrawAddress(input.chain ?? 'tron', String(input.address ?? ''));
 
   const amount = Number(input.amountMicro);
   if (!Number.isSafeInteger(amount) || amount <= 0) throw new PayoutError('bad_amount');
-  if (amount < MIN_WITHDRAW_MICRO) throw new PayoutError('below_minimum');
+  if (amount < minWithdrawMicro(input.chain ?? 'tron')) throw new PayoutError('below_minimum');
   if (amount > MAX_WITHDRAW_MICRO) throw new PayoutError('above_maximum');
 
   const rawKey = String(input.idemKey ?? '').trim();
