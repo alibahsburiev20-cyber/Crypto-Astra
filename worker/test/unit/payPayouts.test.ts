@@ -4,7 +4,8 @@ import { ensurePaySchema, resetPaySchemaForTests } from '../../src/pay/schema';
 import { appendPayLedger, creditDeposit, payBalanceMicro } from '../../src/pay/ledger';
 import {
   DAILY_LIMIT_MICRO, MIN_WITHDRAW_MICRO, PayoutError, approveWithdrawal, confirmWithdrawal,
-  failWithdrawal, requestWithdrawal, reserveWithdrawal, markBroadcast, markSent, withdrawalQueue,
+  failWithdrawal, legacyWithdrawalIdemKey, requestWithdrawal, reserveWithdrawal, markBroadcast, markSent,
+  withdrawalIdemKey, withdrawalQueue,
 } from '../../src/pay/payouts';
 import { isPayoutsStopped, reconcile, reconcileAndFlag, setPayoutsStop } from '../../src/pay/reconcile';
 import { hexToBase58 } from '../../src/pay/tron/address';
@@ -195,5 +196,105 @@ describe('сверка (этап 11)', () => {
     const report = await reconcile(db, T0 + 1);
     expect(report.ledger.ok).toBe(false);
     expect(report.issues.map((i) => i.code)).toContain('ledger_broken');
+  });
+});
+
+describe('ключ идемпотентности заявки принадлежит игроку', () => {
+  // pay_withdrawals.idem_key — UNIQUE на всю таблицу, а ключ придумывает клиент.
+  // Без метки владельца второй игрок, назвавший тот же ключ, получил бы чужую
+  // заявку как «свой повтор»: адрес вывода, сумму и user_id владельца.
+  it('чужой ключ не находится и не мешает своей заявке', async () => {
+    const db = await freshDb();
+    await creditDeposit(db, { txid: TX('a'), eventIndex: 0, userId: 'u1', address: ALICE, amountMicro: 20_000_000 }, T0);
+    await creditDeposit(db, { txid: TX('b'), eventIndex: 0, userId: 'u2', address: ALICE, amountMicro: 20_000_000 }, T0);
+
+    const first = await requestWithdrawal(db, { userId: 'u1', address: ALICE, amountMicro: 6_000_000, idemKey: 'shared-1000' }, T0);
+    const second = await requestWithdrawal(db, { userId: 'u2', address: BOB_ADDR, amountMicro: 7_000_000, idemKey: 'shared-1000' }, T0 + 1);
+
+    expect(second.duplicated).toBe(false);
+    expect(second.withdrawal.user_id).toBe('u2');
+    expect(second.withdrawal.address).toBe(BOB_ADDR);
+    expect(second.withdrawal.id).not.toBe(first.withdrawal.id);
+    const rows = await db.prepare('SELECT user_id, amount_micro FROM pay_withdrawals ORDER BY created_at').all<{ user_id: string; amount_micro: number }>();
+    expect(rows.results).toEqual([
+      { user_id: 'u1', amount_micro: 6_000_000 },
+      { user_id: 'u2', amount_micro: 7_000_000 },
+    ]);
+  });
+
+  it('повтор своим же ключом — та же заявка, чужая — нет', async () => {
+    const db = await funded(20_000_000);
+    const first = await requestWithdrawal(db, { userId: 'u1', address: ALICE, amountMicro: 6_000_000, idemKey: 'mine-10000' }, T0);
+    const again = await requestWithdrawal(db, { userId: 'u1', address: BOB_ADDR, amountMicro: 9_000_000, idemKey: 'mine-10000' }, T0 + 1);
+    // Другой адрес и сумма в повторе игнорируются: возвращается ровно то, что уже стоит в очереди.
+    expect(again.duplicated).toBe(true);
+    expect(again.withdrawal.id).toBe(first.withdrawal.id);
+    expect(again.withdrawal.address).toBe(ALICE);
+  });
+
+  it('старая заявка без метки владельца находится только у своего игрока', async () => {
+    const db = await freshDb();
+    await creditDeposit(db, { txid: TX('a'), eventIndex: 0, userId: 'u1', address: ALICE, amountMicro: 20_000_000 }, T0);
+    await creditDeposit(db, { txid: TX('b'), eventIndex: 0, userId: 'u2', address: ALICE, amountMicro: 20_000_000 }, T0);
+    // Строка в старом формате ключа: `wd:<ключ>`, без метки.
+    await db.prepare(
+      `INSERT INTO pay_withdrawals (id, user_id, address, amount_micro, fee_micro, status, idem_key, created_at)
+       VALUES ('wd_old_key_000001', 'u1', ?, 6000000, 0, 'requested', 'wd:old-key-000001', ?)`,
+    ).bind(ALICE, T0).run();
+
+    const owner = await requestWithdrawal(db, { userId: 'u1', address: ALICE, amountMicro: 6_000_000, idemKey: 'old-key-000001' }, T0 + 1);
+    expect(owner.duplicated).toBe(true);
+    expect(owner.withdrawal.user_id).toBe('u1');
+
+    // Второй игрок с тем же ключом обязан получить свою заявку, а не чужую.
+    const other = await requestWithdrawal(db, { userId: 'u2', address: BOB_ADDR, amountMicro: 6_000_000, idemKey: 'old-key-000001' }, T0 + 2);
+    expect(other.duplicated).toBe(false);
+    expect(other.withdrawal.user_id).toBe('u2');
+    const count = await db.prepare('SELECT COUNT(*) AS c FROM pay_withdrawals').first<number>('c');
+    expect(Number(count)).toBe(2);
+  });
+
+  // Меж двумя одновременными заявками баланс не двигается (списывает его резерв),
+  // а вот суточный потолок считается по уже вставленным строкам. Поэтому проверка
+  // «проверил — вставил» обязана продублироваться условием внутри самой вставки:
+  // иначе N параллельных заявок по 5 000 USDT каждая увидят пустой день и все N
+  // встанут в очередь.
+  it('шесть одновременных заявок не пробивают суточный потолок', async () => {
+    const db = await funded(30_000_000_000);
+    const one = 5_000_000_000; // MAX_WITHDRAW_MICRO: потолок одной заявки
+    const settled = await Promise.allSettled(
+      [1, 2, 3, 4, 5, 6].map((n) => requestWithdrawal(db, {
+        userId: 'u1', address: BOB_ADDR, amountMicro: one, idemKey: `par-000${n}`,
+      }, T0)),
+    );
+    const ok = settled.filter((r) => r.status === 'fulfilled');
+    const failed = settled.filter((r) => r.status === 'rejected') as PromiseRejectedResult[];
+    // Ровно DAILY_LIMIT_MICRO / one = 4 заявки, не больше.
+    expect(ok.length).toBe(4);
+    expect(failed.length).toBe(2);
+    for (const f of failed) expect(String(f.reason)).toMatch(/daily_limit/);
+    const total = await db.prepare("SELECT COALESCE(SUM(amount_micro), 0) AS s FROM pay_withdrawals WHERE status NOT IN ('failed')")
+      .first<number>('s');
+    expect(Number(total)).toBe(DAILY_LIMIT_MICRO);
+  });
+
+  it('суммы заявок за день считаются с учётом уже принятых', async () => {
+    const db = await funded(DAILY_LIMIT_MICRO);
+    // Заявка на весь суточный потолок: её вставили не мы, но учёт обязан считать
+    // её как свою — и следующая не должна вставиться ни под каким предлогом.
+    await db.prepare(
+      `INSERT INTO pay_withdrawals (id, user_id, address, amount_micro, fee_micro, status, idem_key, created_at)
+       VALUES ('wd_today_0000000', 'u1', ?, ?, 0, 'requested', 'wd:today:0000000', ?)`,
+    ).bind(ALICE, DAILY_LIMIT_MICRO, T0).run();
+    await expect(requestWithdrawal(db, { userId: 'u1', address: BOB_ADDR, amountMicro: 6_000_000, idemKey: 'day-200000' }, T0 + 1))
+      .rejects.toThrow(/daily_limit/);
+    const count = await db.prepare('SELECT COUNT(*) AS c FROM pay_withdrawals').first<number>('c');
+    expect(Number(count)).toBe(1);
+  });
+
+  it('ключ строится с меткой игрока', () => {
+    expect(withdrawalIdemKey('u1', 'abc-123456')).toMatch(/^wd:[0-9a-f]{16}:abc-123456$/);
+    expect(withdrawalIdemKey('u1', 'abc-123456')).not.toBe(withdrawalIdemKey('u2', 'abc-123456'));
+    expect(legacyWithdrawalIdemKey('abc-123456')).toBe('wd:abc-123456');
   });
 });

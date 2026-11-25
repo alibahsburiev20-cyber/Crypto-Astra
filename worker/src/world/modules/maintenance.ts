@@ -4,7 +4,7 @@ import { applyDelta, getBalance } from '../balances';
 import { ApiError } from '../errors';
 import { cleanupIdempotency } from '../idempotency';
 import { appendLedger } from '../ledger';
-import { verifyLedger } from '../ledger';
+import { LEDGER_TAIL_KEY, VERIFY_HASH_KEY, VERIFY_SEQ_KEY, verifyLedger, verifyNow, verifyWatermark } from '../ledger';
 import { enqueue, playerPayload } from '../scheduler';
 import { ensureSeasonJobs } from './season';
 
@@ -198,27 +198,86 @@ export function runFuelRegen(sql: SqlStorage, playerId: string, scheduledAt: num
   enqueue(sql, 'fuel_regen', plan.nextAt, { playerId });
 }
 
-export function runLedgerVerify(sql: SqlStorage, now: number): void {
-  const report = verifyLedger(sql);
-  const set = (key: string, value: string) => sql.exec(
+
+/**
+ * Как часто делать полную перепроверку от генезиса.
+ *
+ * Часовой прогон — быстрый: суммы целиком и хеш-цепочка только нового. Раз в
+ * неделю мир всё-таки перечитывает журнал от первой строки, чтобы «тихая»
+ * подмена старой записи не осталась живой навсегда. Между этими прогонами
+ * подделку выдают расхождение сумм и счётчики строк.
+ */
+export const FULL_VERIFY_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
+
+function metaGet(sql: SqlStorage, key: string): string | null {
+  const row = sql.exec('SELECT value FROM meta WHERE key = ?', key).toArray()[0];
+  return row === undefined ? null : String(row.value);
+}
+
+export function setMeta(sql: SqlStorage, key: string, value: string): void {
+  sql.exec(
     `INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
     key, value,
   );
-  set('last_verify_at', String(now));
-  set('last_verify_ok', report.ok ? '1' : '0');
+}
+
+export function runLedgerVerify(sql: SqlStorage, now: number): void {
+  const lastFull = Number(metaGet(sql, 'ledger_verify_full_at') ?? 0);
+  // Первая сверка (или мир без отметки) — всегда полная: нечего ещё и ускорять.
+  const full = !verifyWatermark(sql) || now - lastFull >= FULL_VERIFY_INTERVAL_MS;
+  const report = full ? verifyLedger(sql) : verifyNow(sql);
+
+  setMeta(sql, 'last_verify_at', String(now));
+  setMeta(sql, 'last_verify_ok', report.ok ? '1' : '0');
+  if (full) setMeta(sql, 'ledger_verify_full_at', String(now));
   sql.exec(
     `INSERT INTO ledger_checks (day, at, ok) VALUES (?, ?, ?)
      ON CONFLICT (day) DO UPDATE SET at = excluded.at, ok = excluded.ok`,
     utcDay(now), now, report.ok ? 1 : 0,
   );
-  set('frozen', report.ok ? '0' : '1');
-  if (!report.ok) set('frozen_seq', String(report.brokenAtSeq ?? ''));
+  if (report.ok) {
+    // Отметку двигаем только при успехе: следующий прогон начнёт отсюда.
+    if (report.head) {
+      setMeta(sql, VERIFY_SEQ_KEY, String(report.head.seq));
+      setMeta(sql, VERIFY_HASH_KEY, report.head.hash);
+    }
+    setMeta(sql, LEDGER_TAIL_KEY, `${report.rows}:${report.head?.seq ?? 0}`);
+    // Голова закреплена: `verifyLedgerFast` сверит с ней следующий прогон.
+    setMeta(sql, 'frozen', '0');
+  } else {
+    setMeta(sql, 'frozen', '1');
+    setMeta(sql, 'frozen_seq', String(report.brokenAtSeq ?? ''));
+  }
   enqueue(sql, 'ledger_verify', now + VERIFY_INTERVAL_MS, {});
+}
+
+/** Флаги рынка протухают: разбор сделки старше трёх месяцев уже не нужен. */
+export const MARKET_FLAG_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+/** И жёсткий потолок строк: флаг пишется на каждую «крупную» сделку. */
+export const MARKET_FLAG_MAX = 5_000;
+
+/**
+ * Сколько строк `market_flags` осталось после чистки. Наружу — ради теста:
+ * «удалили лишнее» нельзя проверить, не посмотрев в таблицу.
+ */
+export function pruneMarketFlags(sql: SqlStorage, now: number): number {
+  sql.exec('DELETE FROM market_flags WHERE at < ?', now - MARKET_FLAG_TTL_MS);
+  sql.exec(
+    `DELETE FROM market_flags WHERE id NOT IN (
+        SELECT id FROM market_flags ORDER BY at DESC LIMIT ?
+     )`,
+    MARKET_FLAG_MAX,
+  );
+  return Number(sql.exec('SELECT COUNT(*) AS c FROM market_flags').toArray()[0].c);
 }
 
 export function runIdemCleanup(sql: SqlStorage, now: number): void {
   cleanupIdempotency(sql, now);
   sql.exec(`DELETE FROM jobs WHERE status IN ('done', 'failed') AND run_at < ?`, now - 7 * 24 * 60 * 60 * 1000);
+  // Флаги подозрительных сделок пишет каждый крупный или «парный» оборот, и
+  // чистит их больше некому: без этой строки таблица растёт всю жизнь, а
+  // читают её редко и только в админке.
+  pruneMarketFlags(sql, now);
   enqueue(sql, 'idem_cleanup', now + 24 * 60 * 60 * 1000, {});
 }
 

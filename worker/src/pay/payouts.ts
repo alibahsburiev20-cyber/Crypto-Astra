@@ -18,6 +18,7 @@ import { isEvmAddress, toChecksumAddress } from './evm/address';
 import type { PayChain } from './units';
 import { formatMicroUsdt } from './tron/amount';
 import { payBalanceMicro, appendPayLedger } from './ledger';
+import { sha256Hex } from '../shared/sha256';
 
 export const MIN_WITHDRAW_MICRO = 5_000_000; // 5 USDT: ниже комиссия съедает смысл
 
@@ -109,6 +110,45 @@ export interface RequestInput {
   idemKey: string;
 }
 
+/**
+ * Ключ идемпотентности заявки.
+ *
+ * `pay_withdrawals.idem_key` — UNIQUE на всю таблицу, а ключ придумывает игрок.
+ * Значит без метки владельца два человека с одним и тем же ключом столкнулись бы
+ * в одном индексе, и хуже того: второй получил бы **чужую** заявку как «свою
+ * повторную» — то есть увидел бы чужой адрес вывода, сумму и `user_id`. Метка —
+ * усечённый хеш игрока: в базу не утекает ничего нового, а ключи разных людей
+ * больше не пересекаются. Тот же приём уже держит покупки (`buy:<user>:<key>`).
+ */
+export function withdrawalIdemKey(userId: string, rawKey: string): string {
+  return `wd:${sha256Hex(String(userId)).slice(0, 16)}:${rawKey}`;
+}
+
+/** Ключ старых заявок — до того, как в нём появилась метка владельца. */
+export function legacyWithdrawalIdemKey(rawKey: string): string {
+  return `wd:${rawKey}`;
+}
+
+/**
+ * Заявка по ключу, но только своя.
+ *
+ * Чужая строка с тем же ключом находится быть не может в принципе: фильтр по
+ * `user_id` стоит в том же запросе, а не «проверили после». Старые заявки (до
+ * метки владельца) ищутся тем же правилом — иначе «нашёлся чужой ответ» выглядел
+ * бы как повтор.
+ */
+async function findOwnWithdrawal(
+  db: D1Database, userId: string, idemKey: string, legacyKey: string,
+): Promise<WithdrawalRow | null> {
+  const byKey = 'SELECT * FROM pay_withdrawals WHERE idem_key = ? AND user_id = ?';
+  const found = await db.prepare(byKey).bind(idemKey, userId).first<WithdrawalRow>();
+  if (found) return found;
+  return db.prepare(byKey).bind(legacyKey, userId).first<WithdrawalRow>();
+}
+
+const DAY_SPENT_SQL = `SELECT COALESCE(SUM(amount_micro), 0) AS total FROM pay_withdrawals
+  WHERE user_id = ? AND created_at >= ? AND status NOT IN ('failed')`;
+
 export async function requestWithdrawal(
   db: D1Database,
   input: RequestInput,
@@ -123,32 +163,53 @@ export async function requestWithdrawal(
 
   const rawKey = String(input.idemKey ?? '').trim();
   if (!/^[A-Za-z0-9._:-]{8,64}$/.test(rawKey)) throw new PayoutError('bad_idem_key');
-  const idemKey = `wd:${rawKey}`;
+  const idemKey = withdrawalIdemKey(input.userId, rawKey);
+  const legacyKey = legacyWithdrawalIdemKey(rawKey);
 
-  const existing = await db.prepare('SELECT * FROM pay_withdrawals WHERE idem_key = ?')
-    .bind(idemKey).first<WithdrawalRow>();
+  const existing = await findOwnWithdrawal(db, input.userId, idemKey, legacyKey);
   if (existing) return { withdrawal: normalize(existing), duplicated: true };
 
+  const dayStart = Math.floor(now / DAY) * DAY;
+
+  // Эти две проверки — «для человека»: они называют причину отказа до вставки.
+  // Решает, однако, не они, а то же условие внутри `INSERT … SELECT`: между
+  // чтением и записью баланс мог уйти (вторая вкладка, параллельный запрос,
+  // поздно пришедший refund), и «проверил потом вставил» на двух таких запросах
+  // складывается в заявку вдвое больше остатка. Условие в самой вставке обходят
+  // только вместе с базой.
   const balance = await payBalanceMicro(db, input.userId);
   if (balance < amount) throw new PayoutError('insufficient_funds');
-
-  const dayStart = Math.floor(now / DAY) * DAY;
-  const spent = await db.prepare(
-    `SELECT COALESCE(SUM(amount_micro), 0) AS total FROM pay_withdrawals
-      WHERE user_id = ? AND created_at >= ? AND status NOT IN ('failed')`,
-  ).bind(input.userId, dayStart).first<number>('total');
+  const spent = await db.prepare(DAY_SPENT_SQL).bind(input.userId, dayStart).first<number>('total');
   if (Number(spent ?? 0) + amount > DAILY_LIMIT_MICRO) throw new PayoutError('daily_limit');
 
   const id = `wd_${idemKey.slice(3)}`;
-  await db.prepare(
+  const info = await db.prepare(
     `INSERT INTO pay_withdrawals (id, user_id, address, amount_micro, fee_micro, status, idem_key, created_at)
-     VALUES (?, ?, ?, ?, 0, 'requested', ?, ?)
+     SELECT ?, ?, ?, ?, 0, 'requested', ?, ?
+      WHERE (SELECT COALESCE(SUM(delta), 0) FROM pay_ledger WHERE user_id = ?) >= ?
+        AND (SELECT COALESCE(SUM(amount_micro), 0) FROM pay_withdrawals
+              WHERE user_id = ? AND created_at >= ? AND status NOT IN ('failed')) + ? <= ?
      ON CONFLICT (idem_key) DO NOTHING`,
-  ).bind(id, input.userId, address, amount, idemKey, now).run();
+  ).bind(
+    id, input.userId, address, amount, idemKey, now,
+    input.userId, amount,
+    input.userId, dayStart, amount, DAILY_LIMIT_MICRO,
+  ).run();
+  const changes = Number((info as { meta?: { changes?: number } }).meta?.changes ?? 0);
+  if (changes === 1) {
+    const row = await db.prepare('SELECT * FROM pay_withdrawals WHERE id = ?').bind(id).first<WithdrawalRow>();
+    if (!row) throw new PayoutError('request_failed');
+    return { withdrawal: normalize(row), duplicated: false };
+  }
 
-  const row = await db.prepare('SELECT * FROM pay_withdrawals WHERE idem_key = ?').bind(idemKey).first<WithdrawalRow>();
-  if (!row) throw new PayoutError('request_failed');
-  return { withdrawal: normalize(row), duplicated: false };
+  // Вставки нет. Либо это гонка с таким же ключом (тогда строка найдётся — и это
+  // «дубль», а не ошибка), либо деньги/суточный потолок кончились между
+  // проверкой и вставкой: называем настоящую причину, а не «request_failed».
+  const raced = await findOwnWithdrawal(db, input.userId, idemKey, legacyKey);
+  if (raced) return { withdrawal: normalize(raced), duplicated: true };
+  const after = await payBalanceMicro(db, input.userId);
+  if (after < amount) throw new PayoutError('insufficient_funds');
+  throw new PayoutError('daily_limit');
 }
 
 /**
