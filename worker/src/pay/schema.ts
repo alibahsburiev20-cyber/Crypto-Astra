@@ -46,7 +46,9 @@ export const PAY_TABLES = [
   'pay_chain_cursor',
 ] as const;
 
-export const PAY_ADDRESSES_DDL = `CREATE TABLE IF NOT EXISTS pay_addresses (
+/** Форма таблицы; имя параметром, потому что перестройка строит её как `_new`. */
+function payAddressesDdl(table: string): string {
+  return `CREATE TABLE IF NOT EXISTS ${table} (
      id TEXT PRIMARY KEY,
      user_id TEXT NOT NULL,
      chain TEXT NOT NULL DEFAULT 'tron' CHECK (chain IN ('tron', 'bsc')),
@@ -56,16 +58,33 @@ export const PAY_ADDRESSES_DDL = `CREATE TABLE IF NOT EXISTS pay_addresses (
      active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
      last_scanned_ts INTEGER NOT NULL DEFAULT 0,
      created_at INTEGER NOT NULL)`;
+}
+
+export const PAY_ADDRESSES_DDL = payAddressesDdl('pay_addresses');
 
 
 /**
- * Что делает код, если застал пустую `pay_addresses` старой формы. Совпадает с
- * хвостом миграции 0008; отдельно держим, чтобы тест мог сверить форму таблицы,
+ * Что делает код, если застал `pay_addresses` старой формы. Совпадает с
+ * миграцией 0008; отдельно держим, чтобы тест мог сверить форму таблицы,
  * собранной из этих же строк, с таблицей после `d1 migrations apply`.
  */
 export const PAY_ADDRESSES_REBUILD: string[] = [
+  // Мусорное имя `_new` снимаем: перестройка обязана идти против ЧИСТОЙ
+  // заготовки, иначе leftover от чьей-то прерванной миграции стал бы «новой»
+  // таблицей.
+  'DROP TABLE IF EXISTS pay_addresses_new',
+  payAddressesDdl('pay_addresses_new'),
+  // Копия идёт ДО удаления: если что-то пойдёт не так, `batch` откатит всё.
+  // `INSERT` без `OR IGNORE` — при любом конфликте падает вся транзакция, а не
+  // «тихо потеряла строку».
+  `INSERT INTO pay_addresses_new (
+       id, user_id, chain, address, hex, derivation_index, active, last_scanned_ts, created_at)
+     SELECT id, user_id,
+            CASE WHEN address LIKE '0x%' THEN 'bsc' ELSE 'tron' END,
+            address, hex, derivation_index, active, last_scanned_ts, created_at
+       FROM pay_addresses`,
   'DROP TABLE pay_addresses',
-  PAY_ADDRESSES_DDL,
+  'ALTER TABLE pay_addresses_new RENAME TO pay_addresses',
   'CREATE UNIQUE INDEX IF NOT EXISTS ux_pay_addresses_user_chain ON pay_addresses (user_id, chain)',
   'CREATE INDEX IF NOT EXISTS idx_pay_addresses_active ON pay_addresses (active, created_at)',
 ];
@@ -305,14 +324,22 @@ export const PAY_CHAIN_INDEXES: string[] = [
  * Старая таблица имела `user_id UNIQUE` на уровне таблицы — это «один адрес на
  * игрока вообще», и вторую цепь в такой схеме не разместить (миграция 0007).
  * Инлайн-UNIQUE из SQLite не выбрасывается, поэтому только перестройка. Правила:
- *   * колонка `chain` уже есть — ничего не делаем (обычный путь);
- *   * колонки нет, таблица пуста — пересоздаём как надо: терять нечего, а
- *     именно такое состояние было в проде на момент переезда;
- *   * колонки нет, строки есть — НЕ ТРОГАЕМ и поднимаем ошибку: молча
- *     перестраивать непустую денежную таблицу код не имеет права, для этого
- *     есть миграция 0008 и человек, который смотрит в дамп.
- * Отказ здесь означает «схема не готова»: денежные маршруты ответят 503 и
- * приём встанет. Приём на непонятной схеме стоил бы дороже.
+ *   * колонки `chain` уже нет нужды ждать — есть: ничего не делаем (обычный путь);
+ *   * колонки нет, таблица пуста — пересоздаём как надо, терять нечего;
+ *   * колонки нет, строки есть — переносим их, а метку сети берём из формата
+ *     адреса (`0x…` существует только в EVM, `T…` — только в TRON). Строки при
+ *     этом не «угадываются»: `address`, `hex`, `derivation_index`, курсор и
+ *     `active` уходят в новую таблицу как есть, поэтому перенос не может ни
+ *     потерять чужой депозит, ни перенумеровать семя.
+ *   * но если хоть один адрес нельзя отнести ни к одной из известных сетей —
+ *     отказ: это мусор в денежной таблице (ручная правка), и перестраивать базу
+ *     вокруг мусора код не имеет права.
+ *
+ * Почему перестройка вообще разрешена в коде, а не только в миграции: прод
+ * деплоится из браузера и `d1 migrations apply` в тот момент может быть недоступен,
+ * а отказ здесь означал бы «приём стоит, пока кто-то доберётся до терминала».
+ * Пачка идёт через `batch` — в D1 это одна транзакция, так что «таблицу сняли, а
+ * новую не создали» невозможно: либо всё, либо прежнее состояние.
  */
 export async function upgradePayAddressChains(db: D1Database): Promise<void> {
   type D1Like = {
@@ -336,7 +363,15 @@ export async function upgradePayAddressChains(db: D1Database): Promise<void> {
   const count = await d.prepare('SELECT COUNT(*) AS n FROM pay_addresses').first<number>('n').catch(() => null);
   if (count === null || count === undefined) return;
   if (Number(count) > 0) {
-    throw new Error('pay_addresses без колонки chain и с данными: примените миграцию 0008 (npm run db:migrate)');
+    // «Формат неизвестен» — это не «повесим tron»: непонятную строку нельзя
+    // ни перенести, ни удалить без человека.
+    const odd = await d
+      .prepare("SELECT COUNT(*) AS n FROM pay_addresses WHERE address NOT LIKE '0x%' AND address NOT LIKE 'T%'")
+      .first<number>('n')
+      .catch(() => null);
+    if (Number(odd ?? 0) > 0) {
+      throw new Error(`pay_addresses: ${odd} строк(и) с адресом ни в одной известной сети — примените миграцию 0008 вручную`);
+    }
   }
   await d.batch(PAY_ADDRESSES_REBUILD.map((sql) => d.prepare(sql)));
 }
@@ -347,8 +382,14 @@ let payReady: Promise<boolean> | null = null;
 export function ensurePaySchema(db: D1Database): Promise<boolean> {
   if (!payReady) {
     payReady = (async () => {
-      for (const statement of PAY_STATEMENTS) await db.prepare(statement).run();
+      // Порядок — часть гарантии, а не косметика: `pay_addresses` поднимается и
+      // перестраивается ПЕРВОЙ, потому что индексы этой таблицы в общем списке
+      // ссылаются на колонку `chain`. На базе старой формы (прод до миграции 0008)
+      // любой другой порядок означает «DDL упал на no such column: chain, и весь
+      // контур вернулся к 503» — ровно то, что мы чиним этим же прогоном.
+      await db.prepare(PAY_ADDRESSES_DDL).run();
       await upgradePayAddressChains(db);
+      for (const statement of PAY_STATEMENTS) await db.prepare(statement).run();
       for (const index of PAY_PARTIAL_INDEXES) await db.prepare(index).run();
       for (const index of PAY_CHAIN_INDEXES) {
         try {

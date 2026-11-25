@@ -32,9 +32,14 @@ D1: astra-global (прод), astra-preview (превью). Сеть: mainnet, US
   публичные, сверяй с ними). SIGNER_PRIVATE_KEY в main не появляется никогда:
   ключ живёт только в astra-pay-signer. Проверь наличие, не перезаписывай без причины.
 - Схема: у `pay_addresses` появилась колонка `chain` (миграция 0008). После
-  деплоя кода с этой правкой сверь `PRAGMA table_info(pay_addresses)` — колонка
-  обязана быть; если её нет и таблица непустая, `pay_unavailable` лечится только
-  `wrangler d1 migrations apply DB --remote`, руками таблицу не правь.
+  деплоя кода с этой правкой сверь `PRAGMA table_info(pay_addresses)` — колонку
+  поднимает сам код при первом запросе (в том числе на непустой таблице: строки
+  переносятся, сеть берётся из формата адреса), так что отдельная миграция на проде
+  не требуется. Если `schema` в `/pay/status.json` = `error` и после деплоя не
+  стала `ready` — не правь таблицу руками, а пришли вывод
+  `npx wrangler d1 execute DB --remote --command "SELECT COUNT(*) AS n, SUM(address LIKE '0x%') AS evm FROM pay_addresses"`:
+  код отказывается перестраивать базу, только если в `address` лежит то, что
+  нельзя отнести ни к одной известной сети.
 - Секреты Signer: SIGNER_SEED (уже лежит — перегенерировать нельзя никогда) и
   SIGNER_TOKEN. SIGNER_PRIVATE_KEY в Signer нет НАМЕРЕННО: без него нечем
   двигать деньги, а деньги не включены. Он понадобится только для sweep/payouts
