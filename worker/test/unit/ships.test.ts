@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { DAY_MS } from '../../src/shared/constants';
 import { SHIPS } from '../../src/shared/gameData';
 import { applyDelta, getBalance } from '../../src/world/balances';
+import { addResource, getResource } from '../../src/world/modules/maintenance';
 import { verifyLedger } from '../../src/world/ledger';
 import { fuelCap } from '../../src/world/modules/maintenance';
 import { createPlayer } from '../../src/world/modules/players';
@@ -76,8 +77,51 @@ describe('покупка кораблей (срез 5 этапа 2)', () => {
 
   it('Flagship за ASTRA не продаётся, выдуманный тип тоже', () => {
     const { sql, tx } = world(500000, 40);
-    expect(() => tx(() => buyShip(sql, 'p1', 'k1', 'flagship', T0 + 100))).toThrow(/ship_not_for_sale/);
+    // Не «не продаётся и всё»: у флагмана есть путь — чертёж, поэтому отказ
+    // называется по-другому и объясняет, чего не хватает.
+    expect(() => tx(() => buyShip(sql, 'p1', 'k1', 'flagship', T0 + 100))).toThrow(/blueprint_required/);
     expect(() => tx(() => buyShip(sql, 'p1', 'k2', 'dreadnought', T0 + 200))).toThrow(/bad_ship_type/);
+    // Стартовый Scout — не товар: у него ни цены, ни чертежа.
+    expect(() => tx(() => buyShip(sql, 'p1', 'k3', 'scout', T0 + 300))).toThrow(/ship_not_for_sale/);
+    expect(shipCount(sql)).toBe(1);
+  });
+
+  /**
+   * Чертёж — единственный способ собрать флагмана (правка владельца: «последний
+   * корабль без чертежа — нини, и где чертёж взять»). Проверяем обе половины:
+   * ASTRA не тратится, чертёж сгорает ровно один раз, журнал сходится.
+   */
+  it('флагман собирается из чертежа, и чертёж сгорает', () => {
+    const { sql, tx } = world(0, 40);
+    tx(() => addResource(sql, 'p1', 'flagship_plans', 1, T0 + 2));
+    const built = tx(() => buyShip(sql, 'p1', 'k1', 'flagship', T0 + 100));
+    expect(built.ship.type).toBe('flagship');
+    expect(built.price).toBe(0);
+    expect(getResource(sql, 'p1', 'flagship_plans')).toBe(0);
+    expect(shipCount(sql, 'flagship')).toBe(1);
+    // Стартовый бонус на месте: чертёж заменяет цену, а не складывается с ней.
+    expect(getBalance(sql, 'p1', 'astra')).toBe(500);
+    expect(verifyLedger(sql).ok).toBe(true);
+    expect(() => tx(() => buyShip(sql, 'p1', 'k2', 'flagship', T0 + 200))).toThrow(/ship_owned/);
+  });
+
+  it('без свободной ячейки чертёж не сгорает', () => {
+    const { sql, tx } = world(500000, 40);
+    tx(() => addResource(sql, 'p1', 'flagship_plans', 1, T0 + 2));
+    // Базовый гараж — 3 борта: скаут уже стоит, значит влезут ещё два.
+    for (const type of ['hauler', 'miner']) {
+      tx(() => buyShip(sql, 'p1', `k-${type}`, type, T0 + 100));
+    }
+    expect(() => tx(() => buyShip(sql, 'p1', 'k1', 'flagship', T0 + 900))).toThrow(/garage_full/);
+    expect(getResource(sql, 'p1', 'flagship_plans')).toBe(1);
+    expect(shipCount(sql, 'flagship')).toBe(0);
+  });
+
+  it('уровень мал — чертежа не касаемся', () => {
+    const { sql, tx } = world(0, 12);
+    tx(() => addResource(sql, 'p1', 'flagship_plans', 1, T0 + 2));
+    expect(() => tx(() => buyShip(sql, 'p1', 'k1', 'flagship', T0 + 100))).toThrow(/ship_locked/);
+    expect(getResource(sql, 'p1', 'flagship_plans')).toBe(1);
   });
 
   it('повтор с тем же ключом не списывает второй раз', () => {

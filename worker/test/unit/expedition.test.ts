@@ -206,6 +206,14 @@ describe('флот летает параллельно', () => {
     expect(two.active.length).toBe(2);
   });
 
+/**
+   * Дальность считается по флоту, а под выбранный борт — только оценки рейса.
+   *
+   * Старое поведение игрок видел как «странную дальность»: планета выглядела
+   * закрытой, хотя в ангаре стоял корабль, который туда летает, — замок висел на
+   * первом борту списка. Теперь `locked` означает «летать нечем», а «этот борт не
+   * дотягивает» отделён (`shipTooFar`) и лечится выбором корабля рядом.
+   */
   it('/me считает планеты под выбранный корабль, а не только под первый', () => {
     const { sql, tx } = makeWorld();
     tx(() => createPlayer(sql, 'p1', T0));
@@ -217,19 +225,37 @@ describe('флот летает параллельно', () => {
     // Vesper — сектор 3: скаут туда не долетает, разведчик долетает.
     const vesperScout = byScout.planets.find((p: { id: string }) => p.id === 'vesper')!;
     const vesperExplorer = byExplorer.planets.find((p: { id: string }) => p.id === 'vesper')!;
-    expect(vesperScout.locked).toBe(true);
-    expect(vesperScout.lock).toMatch(/не долетает/);
+    expect(vesperScout.locked).toBe(false);
+    expect(vesperScout.shipTooFar).toBe(true);
+    expect(vesperScout.options).toEqual([]);
+    expect(vesperScout.lock).toMatch(/Выберите борт с дальностью ≥ 3/);
     expect(vesperExplorer.locked).toBe(false);
+    expect(vesperExplorer.shipTooFar).toBe(false);
     expect(vesperExplorer.options.length).toBe(3);
+    // Дальность видна клиенту обоими числами: флота и выбранного борта.
+    expect(vesperExplorer.fleetRange).toBe(4);
+    expect(vesperScout.shipRange).toBe(2);
     // Топливо считается по выбранному корпусу: у explorer расход 1, у scout — 1,
     // а на средней дистанции оба платят по 2; важнее другое — оценки свои у каждого.
     expect(byScout.planets.find((p: { id: string }) => p.id === 'ferra')!.options[0].fuel)
       .toBe(byExplorer.planets.find((p: { id: string }) => p.id === 'ferra')!.options[0].fuel);
-    // Несуществующий корабль не ломает состояние: сервер откатывается к первому.
+    // Несуществующий корабль не ломает состояние: сервер откатывается к первому,
+    // но планета при этом остаётся открытой — флот-то долетает.
     const broken = buildState(sql, 'p1', T0, false, 'no-such-ship');
-    expect(broken.planets.find((p: { id: string }) => p.id === 'vesper')!.locked).toBe(true);
-    // И без параметра — как раньше: считает по первому кораблю.
-    expect(buildState(sql, 'p1', T0, false).planets.find((p: { id: string }) => p.id === 'vesper')!.locked).toBe(true);
+    expect(broken.planets.find((p: { id: string }) => p.id === 'vesper')!.locked).toBe(false);
+    expect(broken.planets.find((p: { id: string }) => p.id === 'vesper')!.shipTooFar).toBe(true);
+    // И без параметра — то же: планета доступна, вопрос только в борте.
+    expect(buildState(sql, 'p1', T0, false).planets.find((p: { id: string }) => p.id === 'vesper')!.locked).toBe(false);
+  });
+
+  it('одним скаутом сектор 3 закрыт честно — и это видно в замке', () => {
+    const { sql, tx } = makeWorld();
+    tx(() => createPlayer(sql, 'p1', T0));
+    tx(() => setLevel(sql, 'p1', 12));
+    const vesper = buildState(sql, 'p1', T0, false).planets.find((p: { id: string }) => p.id === 'vesper')!;
+    expect(vesper.locked).toBe(true);
+    expect(vesper.shipTooFar).toBe(false);
+    expect(vesper.lock).toMatch(/Нужен корабль с дальностью ≥ 3 — сейчас у флота 2/);
   });
 });
 describe('экспедиция', () => {

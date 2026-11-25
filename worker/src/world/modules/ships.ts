@@ -2,14 +2,19 @@ import { SHIPS, type ShipType } from '../../shared/gameData';
 import { applyDelta, getBalance } from '../balances';
 import { ApiError } from '../errors';
 import { withIdempotency } from '../idempotency';
-import { assertPlayable } from './maintenance';
+import { applyResourceDelta, assertPlayable, getResource } from './maintenance';
 import { applyDurability, playerLevel } from './progress';
 import { playerExists } from './players';
 import { garageSlots } from './garage';
 
 // Покупка корабля (этап 2, срез 5). Один корпус каждого типа: флот растёт по
-// уровням, а не по количеству одинаковых Scout'ов. Flagship не продаётся за
-// ASTRA — он появится вместе с чертежом и крафтом.
+// уровням, а не по количеству одинаковых Scout'ов.
+//
+// У корабля два пути в ангар: цена в ASTRA или чертёж. Второй нужен там, где
+// первый превращается в тупик: Flagship не продаётся, и пока у него не было
+// чертежа, игрок упирался в «корабль не продаётся за ASTRA» без всякой
+// подсказки, а вместе с ним навсегда закрывался и 5-й сектор — единственный
+// борт, который туда долетает.
 
 export interface BuyResult {
   ship: { id: string; type: ShipType; name: string };
@@ -24,7 +29,8 @@ export function buyShip(
     assertPlayable(sql);
     const def = SHIPS[type as ShipType];
     if (!def) throw new ApiError(400, 'bad_ship_type');
-    if (def.price == null) throw new ApiError(400, 'ship_not_for_sale');
+    // `price === null` без чертежа — это не товар вообще (Scout выдаётся на старте).
+    if (def.price == null && !def.blueprint) throw new ApiError(400, 'ship_not_for_sale');
 
     if (!playerExists(sql, playerId)) throw new ApiError(404, 'player_not_found');
     // Гейт по опыту, а не по колонке level: у набегавших раньше игроков она
@@ -39,10 +45,25 @@ export function buyShip(
     const fleet = sql.exec('SELECT COUNT(*) AS n FROM ships WHERE player_id = ?', playerId).toArray()[0];
     if (Number(fleet?.n ?? 0) >= garageSlots(sql, playerId, premium)) throw new ApiError(409, 'garage_full');
 
-    if (getBalance(sql, playerId, 'astra') < def.price) throw new ApiError(409, 'insufficient_funds');
-    const price = def.price;
+    const price = def.price ?? 0;
+    if (def.price != null && getBalance(sql, playerId, 'astra') < def.price) throw new ApiError(409, 'insufficient_funds');
+    // Чертеж проверяем после уровня, «уже есть» и свободного слота: отказ не
+    // должен съедать чертёж, игрок доносит его до первой свободной ячейки.
+    if (def.blueprint && getResource(sql, playerId, def.blueprint) < 1) {
+      throw new ApiError(409, 'blueprint_required');
+    }
     const shipId = crypto.randomUUID();
-    applyDelta(sql, { playerId, asset: 'astra', delta: -price, reason: 'ship_purchase', sourceRef: shipId, idemKey }, now);
+    if (price > 0) {
+      applyDelta(sql, { playerId, asset: 'astra', delta: -price, reason: 'ship_purchase', sourceRef: shipId, idemKey }, now);
+    }
+    if (def.blueprint) {
+      // Чертёж сгорает: иначе один документ открывал бы флагмана каждому, кто
+      // его нашёл, и «последний корабль» переставал быть целью.
+      applyResourceDelta(sql, {
+        playerId, resource: def.blueprint, delta: -1,
+        reason: 'ship_blueprint', sourceRef: shipId, idemKey,
+      }, now);
+    }
     // Как и стартовый корабль: вставляем с нулевой прочностью и начисляем 100
     // через журнал, иначе сумма журнала не сойдётся с полем durability.
     sql.exec(`INSERT INTO ships (id, player_id, type, durability, status) VALUES (?, ?, ?, 0, 'idle')`, shipId, playerId, def.type);

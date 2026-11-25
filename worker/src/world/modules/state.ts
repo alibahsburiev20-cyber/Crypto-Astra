@@ -59,19 +59,29 @@ export function buildState(
     } else if (durability < 100) {
       repair = { blocked: 'ok', cost: repairCost(100 - durability, def.repairCoef, repairMult), plate: false };
     }
-    return { id: String(raw.id), type, name: def.name, durability, status, repair };
+    return { id: String(raw.id), type, name: def.name, durability, status, repair, maxSector: def.maxSector };
   });
   // Корабль, под который считается планировщик рейсов. Чужой или неизвестный id
   // молча возвращает к первому кораблю: /me не должен падать из-за устаревшего
   // выбора в интерфейсе.
   const activeShip = (shipId ? ships.find((sh) => sh.id === shipId) : null) ?? ships[0];
   const shipFx = activeShip ? (fxByShip.get(activeShip.id) ?? NEUTRAL_FX) : NEUTRAL_FX;
+  // Дальность — свойство флота, а не первого корабля. Раньше замок считался по
+  // activeShip (при заходе без `?ship=` это всегда первый борт, Scout), и
+  // игрок с Cruiser'ом в ангаре видел «Корабль не долетает до сектора» на
+  // планетах, куда его Cruiser летит за полчаса. Теперь: закрыто — только если
+  // долететь нечем ВООБЩЕ; а «этот борт не дотягивает» — отдельная, поправимая
+  // причина: сменить корабль в списке рядом.
+  const fleetRange = ships.reduce((best, sh) => Math.max(best, SHIPS[sh.type].maxSector), 0);
+  const shipRange = activeShip ? SHIPS[activeShip.type].maxSector : 0;
+  const shipName = activeShip ? SHIPS[activeShip.type].name : 'корабль';
   const planets = PLANETS.map((planet) => {
     const sector = sectorById(planet.sector);
     const levelLocked = base.level < sector.level;
-    const rangeLocked = !activeShip || SHIPS[activeShip.type].maxSector < planet.sector;
+    const rangeLocked = fleetRange < planet.sector;
+    const shipTooFar = !levelLocked && !rangeLocked && shipRange < planet.sector;
     const locked = levelLocked || rangeLocked;
-    const options = locked || !activeShip ? [] : (['short', 'medium', 'long'] as ExpeditionKind[]).map((kind) => {
+    const options = locked || shipTooFar || !activeShip ? [] : (['short', 'medium', 'long'] as ExpeditionKind[]).map((kind) => {
       const type = EXPEDITION_TYPES[kind];
       const range = rewardRange(planet.id, activeShip.type, kind, shipFx);
       return {
@@ -83,7 +93,13 @@ export function buildState(
       id: planet.id, name: planet.name, sector: planet.sector, sectorName: sector.name,
       resources: planet.resources.map((id) => ({ id, name: RESOURCE_NAMES[id] ?? id })),
       difficulty: planet.difficulty, locked,
-      lock: levelLocked ? `Нужен уровень ${sector.level}` : rangeLocked ? 'Корабль не долетает до сектора' : null,
+      // Дальность наружу: и флота, и выбранного борта. Клиент по `shipTooFar`
+      // подсвечивает те корабли, которые справятся, а не показывает замок.
+      shipTooFar, fleetRange, shipRange,
+      lock: levelLocked ? `Нужен уровень ${sector.level}`
+        : rangeLocked ? `Нужен корабль с дальностью ≥ ${planet.sector} — сейчас у флота ${fleetRange}`
+        : shipTooFar ? `${shipName} долетает до ${shipRange}, а сюда — нет. Выберите борт с дальностью ≥ ${planet.sector}`
+        : null,
       options,
     };
   });
@@ -123,8 +139,12 @@ export function buildState(
       const def = SHIPS[type];
       return {
         type, name: def.name, rarity: def.rarity, cargo: def.cargo, tank: def.tank, consumption: def.consumption,
-        mining: def.mining, price: def.price, unlockLevel: def.unlockLevel, owned: owned.has(type),
+        mining: def.mining, maxSector: def.maxSector, blueprint: def.blueprint, price: def.price,
+        unlockLevel: def.unlockLevel, owned: owned.has(type),
+        // «Заперто» и «нечем купить» — разные состояния: для корабля из чертежа
+        // цены нет, и замок надо объяснять чертежом, а не деньгами.
         locked: !owned.has(type),
+        blueprintCount: def.blueprint ? getResource(sql, playerId, def.blueprint) : null,
       };
     }),
     sectors: SECTORS.map((s) => ({ id: s.id, name: s.name, level: s.level, open: base.level >= s.level })),
