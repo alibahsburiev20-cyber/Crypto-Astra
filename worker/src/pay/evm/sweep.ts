@@ -78,8 +78,9 @@ export interface EvmSweepInput {
 /**
  * Адреса, с которых имеет смысл что-то забирать: `0x`-формат и `active = 1`.
  *
- * `LIKE '0x%'` — не косметика: в той же таблице лежат TRON-адреса, оставшиеся с
- * прошлой цепи, и попытка прочитать `T…` как EVM-адрес уронила бы весь план.
+ * Фильтр по `chain` — не косметика: в той же таблице лежат адреса прошлой цепи
+ * (они остаются активными, пока на них деньги), и попытка прочитать `T…` как
+ * EVM-адрес уронила бы весь план.
  */
 export interface ActiveAddressSet {
   rows: Array<{ address: string; user_id: string | null }>;
@@ -88,19 +89,20 @@ export interface ActiveAddressSet {
 }
 
 /**
- * Активные адреса EVM-цепи. `LIKE '0x%'` — не косметика: в той же таблице лежат
- * адреса прошлой цепи, и попытка прочитать `T…` как EVM-адрес уронила бы весь
- * план, а в отчёте это выглядело бы как «балансов нет».
+ * Активные адреса EVM-цепи — те, у которых `chain = 'bsc'`. Сортировка по сети,
+ * а не по маске адреса: формат говорит «похоже на EVM», колонка — «мы выдали
+ * его под EVM и сами его сканируем». План без этого фильтра выглядел бы как
+ * «балансов нет», а не «не та сеть».
  */
 export async function evmActiveAddresses(db: D1Database, limit: number): Promise<ActiveAddressSet> {
   const [rows, count] = await Promise.all([
     db.prepare(
       `SELECT address, user_id FROM pay_addresses
-        WHERE active = 1 AND address LIKE '0x%'
+        WHERE active = 1 AND chain = 'bsc'
         ORDER BY created_at DESC LIMIT ?`,
     ).bind(limit).all<{ address: string; user_id: string | null }>(),
     db.prepare(
-      `SELECT COUNT(*) AS n FROM pay_addresses WHERE active = 1 AND address LIKE '0x%'`,
+      `SELECT COUNT(*) AS n FROM pay_addresses WHERE active = 1 AND chain = 'bsc'`,
     ).first<number>('n'),
   ]);
   const raw = Number(count ?? 0);

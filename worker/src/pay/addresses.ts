@@ -1,4 +1,10 @@
-// Адреса игроков: один адрес, навсегда.
+// Адреса игроков: один адрес на цепь, навсегда.
+//
+// «Навсегда» теперь привязано к сети, а не к игроку: у одной и той же пары
+// (игрок, цепь) адрес не меняется никогда, а смена `PAY_CHAIN` выдаёт игроку
+// адрес НОВОЙ цепи, не отменяя старый. Старый продолжает светиться в отчётах
+// (казна, plan сбора) до тех пор, пока на нём есть деньги, — иначе переезд
+// сети означал бы «адрес игроков исчез вместе с их балансом».
 //
 // Адрес не генерируется в основном Worker: он спрашивает его у Signer-контура,
 // который знает семя. Основной Worker видит только результат — адрес и индекс.
@@ -31,19 +37,22 @@ export interface AddressDeriver {
 
 export interface PlayerAddress {
   address: string;
+  /** Сеть, к которой адрес относится — то, что хранит колонка `chain`. */
+  chain: PayChain;
   index: number;
   hex: string;
   createdAt: number;
   created: boolean;
 }
 
-export async function findAddress(db: D1Database, userId: string): Promise<PlayerAddress | null> {
+export async function findAddress(db: D1Database, userId: string, chain: PayChain): Promise<PlayerAddress | null> {
   const row = await db.prepare(
-    'SELECT address, derivation_index, hex, created_at FROM pay_addresses WHERE user_id = ?',
-  ).bind(userId).first<{ address: string; derivation_index: number; hex: string; created_at: number }>();
+    'SELECT address, chain, derivation_index, hex, created_at FROM pay_addresses WHERE user_id = ? AND chain = ?',
+  ).bind(userId, chain).first<{ address: string; derivation_index: number; hex: string; created_at: number }>();
   if (!row) return null;
   return {
     address: String(row.address),
+    chain,
     index: Number(row.derivation_index),
     hex: String(row.hex),
     createdAt: Number(row.created_at),
@@ -56,8 +65,9 @@ export async function ensureAddress(
   userId: string,
   deriver: AddressDeriver,
   now: number,
+  chain: PayChain,
 ): Promise<PlayerAddress> {
-  const existing = await findAddress(db, userId);
+  const existing = await findAddress(db, userId, chain);
   if (existing) return existing;
 
   for (let attempt = 0; attempt < 4; attempt += 1) {
@@ -69,15 +79,16 @@ export async function ensureAddress(
     const hex = derived.hex ?? addressToHex(derived.address);
 
     const res = await db.prepare(
-      `INSERT INTO pay_addresses (id, user_id, address, hex, derivation_index, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)
+      `INSERT INTO pay_addresses (id, user_id, chain, address, hex, derivation_index, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT DO NOTHING`,
-    ).bind(`ad_${index}_${userId}`.slice(0, 64), userId, derived.address, hex, index, now).run();
+    ).bind(`ad_${index}_${userId}`.slice(0, 64), userId, chain, derived.address, hex, index, now).run();
 
     const changes = Number((res as { meta?: { changes?: number } }).meta?.changes ?? 0);
     if (changes) {
       return {
         address: derived.address,
+        chain,
         index,
         hex,
         createdAt: now,
@@ -85,8 +96,8 @@ export async function ensureAddress(
       };
     }
 
-    // Кто-то успел раньше — возможно, для этого же игрока.
-    const again = await findAddress(db, userId);
+    // Кто-то успел раньше — возможно, для этого же игрока и этой же цепи.
+    const again = await findAddress(db, userId, chain);
     if (again) return again;
   }
   throw new Error('address_allocation_failed');
@@ -96,10 +107,11 @@ export async function ensureAddress(
  * Клиент Signer-контура. В бою это service binding на отдельный Worker;
  * если биндинг не настроен, адреса не выдаются — и это правильно, лучше
  * ошибка, чем адрес от неизвестного источника.
- */
-/**
- * @param chain сеть, адрес которой просим. Одна строка `pay_addresses` относится
- *   ровно к одной цепи — формат адреса это и различает.
+ *
+ * @param chain сеть, адрес которой просим. Одна строка `pay_addresses`
+ *   относится ровно к одной цепи, и деривация должна идти по той же сети, под
+ *   которой адрес потом ляжет в базу: разъехаться они имеют право только вместе
+ *   с ошибкой.
  */
 export function signerDeriver(env: Env, chain: PayChain = 'tron'): AddressDeriver {
   return {

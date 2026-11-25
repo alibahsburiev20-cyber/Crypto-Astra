@@ -5,6 +5,9 @@
 // обещание игроку там, где код ещё ничего не умеет.
 import { describe, expect, it } from 'vitest';
 import { payAddress, payStatus } from '../../src/routes/pay';
+import { handleAddress } from '../../../signer/src/index';
+import { makeD1 } from '../helpers/d1';
+import { ensurePaySchema, resetPaySchemaForTests } from '../../src/pay/schema';
 import { activeChain, chainSpec } from '../../src/pay/chain';
 import { depositTxidFromRef } from '../../src/pay/ledger';
 import { payFlags, walletState } from '../../src/pay/flags';
@@ -163,5 +166,121 @@ describe('ссылка на перевод в истории', () => {
     expect(depositTxidFromRef('dep:' + 'ab'.repeat(31))).toBe('');
     expect(depositTxidFromRef('')).toBe('');
     expect(depositTxidFromRef(null)).toBe('');
+  });
+});
+
+// Этап 1 переезда: адрес хранится вместе с сетью (`pay_addresses.chain`).
+//
+// До этой правки «один адрес на игрока» означало «один адрес вообще», и смена
+// `PAY_CHAIN` превращалась в тупик: старый адрес в базе, новой цепи у игрока не
+// будет, приём стоит. Здесь проверяется ровно то, что этот тупик разобран:
+// вторая сеть = второй адрес, а первая строка остаётся на месте.
+describe('выдача адреса после смены сети', () => {
+  const SEED = '000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f';
+  const SIGNER_TOKEN = 'signer-test-token-0123456789abcdef';
+  const T0 = 1_700_000_000_000;
+
+  /** Signer как service binding: тот же обработчик, та же семенная фраза. */
+  function signerStub() {
+    return {
+      fetch: async (_url: string, init: { body?: BodyInit | null }) => handleAddress(
+        new Request('https://signer/address', {
+          method: 'POST',
+          headers: { authorization: `Bearer ${SIGNER_TOKEN}`, 'content-type': 'application/json' },
+          body: init.body,
+        }),
+        { SIGNER_TOKEN, SIGNER_SEED: SEED } as never,
+      ),
+    };
+  }
+
+  /** Игрок, который жил в TRON: одна строка `pay_addresses` с сетью `tron`. */
+  async function dbWithTronAddress() {
+    resetPaySchemaForTests();
+    const { db } = makeD1();
+    await ensurePaySchema(db);
+    await db.prepare(
+      `INSERT INTO pay_addresses (id, user_id, chain, address, hex, derivation_index, created_at)
+       VALUES ('a0', 'u1', 'tron', ?, ?, 0, ?)`,
+    ).bind(TRON_ADDR, `41${'11'.repeat(20)}`, T0).run();
+    return db;
+  }
+
+  const bscEnv = (db: D1Database) => ({
+    DB: db,
+    PAYMENTS_ENABLED: 'on', DEPOSITS_ENABLED: 'on',
+    PAY_CHAIN: 'bsc', PAY_NETWORK: 'mainnet',
+    SIGNER: signerStub(), SIGNER_TOKEN,
+  }) as never;
+
+  it('вторая сеть даёт игроку второй адрес — и это не 409', async () => {
+    const db = await dbWithTronAddress();
+    const res = await payAddress(bscEnv(db), { userId: 'u1' } as never);
+    // 201, а не 200: маршрут отвечает «создан», когда строка появилась только
+    // что. После переезда именно так и будет у каждого игрока — второй адрес.
+    expect(res.status).toBe(201);
+    const body = await res.json() as { address: string; chain: string; created: boolean };
+    expect(body.chain).toBe('bsc');
+    expect(body.created).toBe(true);
+    // Наружу — EIP-55: кошелёк игрока сверяет контрольную сумму, а не угадывает.
+    expect(/^0x[0-9a-fA-F]{40}$/.test(body.address)).toBe(true);
+
+    // Эталон — ответ того же Signer-контура по следующему индексу. Индекс
+    // глобальный: #0 занят TRON-адресом, значит BSC-адрес — #1, а не «тот же
+    // номер в другой сети» (иначе два игрока получили бы одну цепочку).
+    const reference = await handleAddress(
+      new Request('https://signer/address', {
+        method: 'POST',
+        headers: { authorization: `Bearer ${SIGNER_TOKEN}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ index: 1, chain: 'bsc' }),
+      }),
+      { SIGNER_TOKEN, SIGNER_SEED: SEED } as never,
+    );
+    expect(body.address.toLowerCase()).toBe(((await reference.json()) as { address: string }).address.toLowerCase());
+  });
+
+  it('старый адрес остаётся в базе: деньги на нём не сироты', async () => {
+    const db = await dbWithTronAddress();
+    await payAddress(bscEnv(db), { userId: 'u1' } as never);
+    const rows = await db.prepare(
+      'SELECT chain, address FROM pay_addresses WHERE user_id = ? ORDER BY chain',
+    ).bind('u1').all<{ chain: string; address: string }>();
+    expect((rows.results ?? []).map((r) => r.chain)).toEqual(['bsc', 'tron']);
+    expect(rows.results?.[1].address).toBe(TRON_ADDR);
+  });
+
+  it('повторный запрос в ту же сеть идемпотентен и не занимает новый индекс', async () => {
+    const db = await dbWithTronAddress();
+    const first = await payAddress(bscEnv(db), { userId: 'u1' } as never);
+    const again = await payAddress(bscEnv(db), { userId: 'u1' } as never);
+    const a = await first.json() as { address: string; created: boolean };
+    const b = await again.json() as { address: string; created: boolean };
+    // Тот же адрес, и `created` больше не «true»: второй запрос ничего не создал.
+    expect(b.address).toBe(a.address);
+    expect([a.created, b.created]).toEqual([true, false]);
+    const count = await db.prepare('SELECT COUNT(*) AS n FROM pay_addresses').first<number>('n');
+    expect(Number(count)).toBe(2);
+  });
+
+  it('TRON остаётся рабочей сетью, пока `PAY_CHAIN` не переключён', async () => {
+    // Тот же игрок, та же база, конфиг как в проде сегодня: второй адрес ему не
+    // выдаётся — маршрут отдаёт существующий. Переезд делает ровно одно: меняет
+    // сеть, и весь остальной код к нему готов.
+    const db = await dbWithTronAddress();
+    const res = await payAddress(
+      { DB: db, PAYMENTS_ENABLED: 'on', DEPOSITS_ENABLED: 'on', SIGNER: signerStub(), SIGNER_TOKEN } as never,
+      { userId: 'u1' } as never,
+    );
+    const body = await res.json() as { address: string; chain: string; created: boolean };
+    expect(body).toMatchObject({ address: TRON_ADDR, chain: 'tron', created: false });
+  });
+
+  it('кривая метка в базе — отказ, а не «покажем что нашли»', async () => {
+    // Строка заявлена как BSC, а по факту в ней TRON-адрес (ручная правка).
+    // Начисления по такому адресу не будет, поэтому молча показать его нельзя.
+    const db = await dbWithTronAddress();
+    await db.prepare("UPDATE pay_addresses SET chain = 'bsc' WHERE user_id = 'u1'").run();
+    await expect(payAddress(bscEnv(db), { userId: 'u1' } as never))
+      .rejects.toMatchObject({ status: 409, code: 'address_chain_mismatch' });
   });
 });

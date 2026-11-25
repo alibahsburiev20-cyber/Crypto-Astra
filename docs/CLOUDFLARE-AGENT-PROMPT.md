@@ -26,9 +26,15 @@ D1: astra-global (прод), astra-preview (превью). Сеть: mainnet, US
   wallets:"ready", schema:"ready", tables:14. Шаг 3 ПОВТОРЯТЬ НЕ НУЖНО —
   только сверку из шага 4.
 - Секреты основного Worker стоят: JWT_SECRET, ADMIN_TOKEN, ADMIN_EMAIL,
-  TURNSTILE_SECRET, SIGNER_TOKEN, PAY_HOT_ADDRESS
-  (TEpNofrztMUwq3HgRjQARLF4ScxSbWRgFp — адрес публичный, сверяй с ним).
-  Проверь наличие, не перезаписывай без причины.
+  TURNSTILE_SECRET, SIGNER_TOKEN, PAY_HOT_ADDRESS =
+  TAzT9Qz1zaK5bJiLTNA8yPq1i7VJkXjnPB (казна сгенерирована заново 25.11, офлайн
+  файлом; прежний TEpNofrztMUwq3HgRjQARLF4ScxSbWRgFp больше не казна — адреса
+  публичные, сверяй с ними). SIGNER_PRIVATE_KEY в main не появляется никогда:
+  ключ живёт только в astra-pay-signer. Проверь наличие, не перезаписывай без причины.
+- Схема: у `pay_addresses` появилась колонка `chain` (миграция 0008). После
+  деплоя кода с этой правкой сверь `PRAGMA table_info(pay_addresses)` — колонка
+  обязана быть; если её нет и таблица непустая, `pay_unavailable` лечится только
+  `wrangler d1 migrations apply DB --remote`, руками таблицу не правь.
 - Секреты Signer: SIGNER_SEED (уже лежит — перегенерировать нельзя никогда) и
   SIGNER_TOKEN. SIGNER_PRIVATE_KEY в Signer нет НАМЕРЕННО: без него нечем
   двигать деньги, а деньги не включены. Он понадобится только для sweep/payouts

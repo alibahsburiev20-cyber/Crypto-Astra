@@ -8,7 +8,7 @@ import { makeD1 } from '../helpers/d1';
 import { ensurePaySchema, resetPaySchemaForTests } from '../../src/pay/schema';
 import { payBalanceMicro } from '../../src/pay/ledger';
 import { addressToTopic, TRANSFER_TOPIC0 } from '../../src/pay/evm/rpc';
-import { applyEvmDeposits, readCursor, scanEvmBlocks } from '../../src/pay/evm/deposits';
+import { applyEvmDeposits, bscActiveAddresses, readCursor, scanEvmBlocks } from '../../src/pay/evm/deposits';
 
 const USDT = '0x55d398326f99059ff775485246999027b3197955';
 const PLAYER = '0x' + '11'.repeat(20);
@@ -20,9 +20,11 @@ async function freshDb() {
   resetPaySchemaForTests();
   const { db } = makeD1();
   await ensurePaySchema(db);
+  // `chain = 'bsc'`: с колонкой сети сканер выбирает адреса по метке, а не по
+  // формату — адрес без метки этой цепи для него не существует.
   await db.prepare(
-    `INSERT INTO pay_addresses (id, user_id, address, hex, derivation_index, created_at)
-     VALUES ('ad_1', 'u1', ?, ?, 1, ?)`,
+    `INSERT INTO pay_addresses (id, user_id, chain, address, hex, derivation_index, created_at)
+     VALUES ('ad_1', 'u1', 'bsc', ?, ?, 1, ?)`,
   ).bind(PLAYER, PLAYER.slice(2), T0).run();
   return db;
 }
@@ -182,6 +184,26 @@ describe('сканер BSC', () => {
     const row = await db.prepare('SELECT status FROM pay_chain_events WHERE to_addr = ?')
       .bind(orphanAddress).first<string>('status');
     expect(row).toBe('orphan');
+  });
+
+  it('в список сканирования попадают только адреса этой цепи', async () => {
+    const db = await freshDb();
+    // Ряд прошлой цепи того же игрока: он активен (на нём деньги), но этот
+    // сканер его не трогает — за него отвечает TRON-монитор.
+    await db.prepare(
+      `INSERT INTO pay_addresses (id, user_id, chain, address, hex, derivation_index, created_at)
+       VALUES ('ad_2', 'u1', 'tron', ?, ?, 2, ?)`,
+    ).bind('T' + 'x'.repeat(33), `41${'aa'.repeat(20)}`, T0).run();
+    // Формат `0x`, а метка — чужая сеть. Разрешает спор именно метка: она
+    // записана в момент выдачи, и по ней же этот адрес был бы и зачислен.
+    await db.prepare(
+      `INSERT INTO pay_addresses (id, user_id, chain, address, hex, derivation_index, created_at)
+       VALUES ('ad_3', 'u3', 'tron', ?, ?, 3, ?)`,
+    ).bind('0x' + '33'.repeat(20), '33'.repeat(20), T0).run();
+    // Наш адрес, но снятый с обслуживания.
+    await db.prepare("UPDATE pay_addresses SET active = 0 WHERE id = 'ad_3'").run();
+
+    expect(await bscActiveAddresses(db)).toEqual([PLAYER.toLowerCase()]);
   });
 
   it('адресов нет — к ноде не идём вовсе', async () => {

@@ -126,7 +126,7 @@ export default {
       // сами они не зачтутся — об этом надо узнать до анонса, а не после.
       try {
         const stranded = await env.DB.prepare(
-          "SELECT COUNT(*) AS n FROM pay_addresses WHERE active = 1 AND address LIKE 'T%'",
+          "SELECT COUNT(*) AS n FROM pay_addresses WHERE active = 1 AND chain = 'tron'",
         ).first<number>('n');
         if (Number(stranded ?? 0) > 0 && spec.chain !== 'tron') {
           console.error('pay: активные TRON-адреса при другой цепи', { count: Number(stranded), chain: spec.chain });

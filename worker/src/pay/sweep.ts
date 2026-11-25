@@ -115,15 +115,16 @@ export async function sweepPlan(input: SweepPlanInput): Promise<SweepPlan> {
   const now = input.now ?? Date.now();
   const limit = input.limit ?? SWEEP_PLAN_LIMIT;
 
-  // `LIKE 'T%'`: в той же таблице живут адреса другой цепи, и TronGrid на них
-  // отвечает ошибкой — план выглядел бы как «балансы не читаются», а не «не та сеть».
+  // `chain = 'tron'`: в той же таблице живут адреса другой цепи, и TronGrid на
+  // них отвечает ошибкой — план выглядел бы как «балансы не читаются», а не
+  // «не та сеть». По формату адреса («T%») фильтр жить не обязан, колонка точнее.
   const [rows, count] = await Promise.all([
     input.db.prepare(
       `SELECT address, user_id FROM pay_addresses
-        WHERE active = 1 AND address LIKE 'T%' ORDER BY created_at DESC LIMIT ?`,
+        WHERE active = 1 AND chain = 'tron' ORDER BY created_at DESC LIMIT ?`,
     ).bind(limit).all<{ address: string; user_id: string }>(),
     input.db.prepare(
-      `SELECT COUNT(*) AS n FROM pay_addresses WHERE active = 1 AND address LIKE 'T%'`,
+      `SELECT COUNT(*) AS n FROM pay_addresses WHERE active = 1 AND chain = 'tron'`,
     ).first<number>('n'),
   ]);
   const found = (rows.results ?? []) as Array<{ address: string; user_id: string }>;

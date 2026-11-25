@@ -130,11 +130,13 @@ async function depositAddress(env: Env, auth: AuthContext): Promise<{ address: s
   if (!spec.contract) throw new ApiError(503, 'usdt_contract_missing');
   if (!(await ensurePaySchema(env.DB))) throw new ApiError(503, 'pay_unavailable');
 
-  const existing = await findAddress(env.DB, auth.userId);
+  const existing = await findAddress(env.DB, auth.userId, spec.chain);
   if (existing) {
     if (!addressMatchesChain(existing.address, spec.chain)) {
-      // Игрок уже видел адрес другой сети — это не «ошибка ввода», а повод
-      // остановиться: деньги по такому адресу мы не найдём.
+      // Колонка `chain` говорит «этот адрес нашей цепи», а формат — что нет.
+      // Такое возможно только после ручной правки базы; показывать его нельзя,
+      // начисление на него невозможно, и молча перевыпустить тоже (старый
+      // адрес мог уже светиться игроку).
       throw new ApiError(409, 'address_chain_mismatch');
     }
     return { address: displayAddress(spec.chain, existing.address), spec };
@@ -142,7 +144,7 @@ async function depositAddress(env: Env, auth: AuthContext): Promise<{ address: s
 
   try {
     const created = await ensureAddress(
-      env.DB, auth.userId, signerDeriver(env, spec.chain), Date.now(),
+      env.DB, auth.userId, signerDeriver(env, spec.chain), Date.now(), spec.chain,
     );
     return { address: displayAddress(spec.chain, created.address), spec, index: created.index, isNew: created.created } as {
       address: string; spec: ChainSpec; index: number; isNew: boolean;
@@ -374,9 +376,11 @@ export async function adminPay(request: Request, env: Env): Promise<Response> {
     readCursor(env.DB, spec.chain, spec.contract).catch(() => 0),
     // Сколько активных адресов относится к активной цепи: при переезде это
     // единственное число, по которому видно, что игрокам надо выдать новые.
+    // Считается по колонке `chain`, а не по маске адреса: «T%»/«0x%» — эвристика
+    // формата, `chain` — утверждение, сделанное при выдаче.
     env.DB.prepare(
-      `SELECT SUM(CASE WHEN address LIKE '0x%' THEN 1 ELSE 0 END) AS bsc,
-              SUM(CASE WHEN address LIKE 'T%' THEN 1 ELSE 0 END) AS tron
+      `SELECT SUM(CASE WHEN chain = 'bsc' THEN 1 ELSE 0 END) AS bsc,
+              SUM(CASE WHEN chain = 'tron' THEN 1 ELSE 0 END) AS tron
          FROM pay_addresses WHERE active = 1`,
     ).first<{ bsc: number | null; tron: number | null }>(),
   ]);

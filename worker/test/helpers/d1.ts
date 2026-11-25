@@ -15,7 +15,15 @@ export interface FakeD1 {
 }
  
 export function makeD1(): FakeD1 {
-  const raw = new DatabaseSync(':memory:');
+  return d1From(new DatabaseSync(':memory:'));
+}
+
+/**
+ * Тот же фасад поверх уже готовой базы: нужно, когда состояние «до» собирается
+ * миграционным SQL, а проверять его надо методами D1 (например, что
+ * `upgradePayAddressChains` перестраивает таблицу, а не роняет контур).
+ */
+export function d1From(raw: DatabaseSync): FakeD1 {
 
   const exec = (sql: string, params: unknown[]) => {
     const st = raw.prepare(sql);
