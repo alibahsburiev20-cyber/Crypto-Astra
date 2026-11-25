@@ -269,15 +269,41 @@ describe('перестройка pay_addresses под сеть (миграция
       VALUES ('a4', 'u1', 'tron', 'TAddr9', '41ee', 3, ?)`).run(T0)).toThrow(/UNIQUE/);
   });
 
-  it('непустая старая база без надзора не перестраивается', async () => {
-    // Перестройка денежной таблицы — дело миграции и человека, а не фонового
-    // запроса первого визита: молча переписать таблицу с балансами опаснее,
-    // чем остановить приём понятной ошибкой.
+  it('непустая старая база перестраивается кодом: строки и курсоры на месте', async () => {
+    // Ровно состояние прода после деплоя этапа 1: адресов уже два, колонки ещё
+    // нет. Ждать, пока кто-то доберётся до терминала и прогонит 0008, значит
+    // «приём стоит неизвестно сколько», поэтому перенос делает сам код.
+    const raw = fromMigrationBefore();
+    raw.prepare(`INSERT INTO pay_addresses (id, user_id, address, hex, derivation_index, active, last_scanned_ts, created_at)
+                 VALUES ('a1', 'u1', 'TAddr1', '41aa', 0, 1, 12345, ?)`).run(T0);
+    raw.prepare(`INSERT INTO pay_addresses (id, user_id, address, hex, derivation_index, active, last_scanned_ts, created_at)
+                 VALUES ('a2', 'u2', ?, ?, 1, 0, 0, ?)`).run('0x' + 'cc'.repeat(20), 'cc'.repeat(20), T0);
+
+    await upgradePayAddressChains(d1Over(raw));
+
+    expect(columns(raw, 'pay_addresses')).toContain('chain');
+    expect(raw.prepare('SELECT user_id, chain, address, active, last_scanned_ts, derivation_index FROM pay_addresses ORDER BY derivation_index')
+      .all()).toEqual([
+      { user_id: 'u1', chain: 'tron', address: 'TAddr1', active: 1, last_scanned_ts: 12345, derivation_index: 0 },
+      { user_id: 'u2', chain: 'bsc', address: '0x' + 'cc'.repeat(20), active: 0, last_scanned_ts: 0, derivation_index: 1 },
+    ]);
+    // Снятая с обслуживания строка (`active = 0`) осталась снятой: перестройка
+    // не имеет права «вернуть в оборот» чужой адрес.
+  });
+
+  it('адрес неизвестной формы = отказ, и база остаётся как была', async () => {
+    // «Что-то в колонке address, но не T… и не 0x…» — это ручная правка или
+    // битая миграция. Придумывать ему сеть нельзя, а молча перестроить таблицу
+    // вокруг мусора — значит потом искать, куда делась строка.
     const raw = fromMigrationBefore();
     raw.prepare(`INSERT INTO pay_addresses (id, user_id, address, hex, derivation_index, created_at)
                  VALUES ('a1', 'u1', 'TAddr1', '41aa', 0, ?)`).run(T0);
-    await expect(upgradePayAddressChains(d1Over(raw))).rejects.toThrow(/0008/);
+    raw.prepare(`INSERT INTO pay_addresses (id, user_id, address, hex, derivation_index, created_at)
+                 VALUES ('a2', 'u2', 'SOL111', 'ff', 1, ?)`).run(T0);
+
+    await expect(upgradePayAddressChains(d1Over(raw))).rejects.toThrow(/миграцию 0008/);
     expect(columns(raw, 'pay_addresses')).not.toContain('chain');
+    expect(raw.prepare('SELECT COUNT(*) AS c FROM pay_addresses').get()).toEqual({ c: 2 });
   });
 
   it('актуальная база — no-op: таблицы и строки не трогаются', async () => {
@@ -301,10 +327,11 @@ describe('ensurePaySchema', () => {
     resetPaySchemaForTests();
     const { db, seen } = countingDb();
     expect(await ensurePaySchema(db)).toBe(true);
-    // +1: проба «есть ли колонка chain» — она идёт отдельным запросом и на
-    // актуальной базе ничем, кроме как этого запроса, не заканчивается.
+    // +2: `pay_addresses` поднимается и проверяется до общего списка (иначе DDL
+    // с `chain` падает на старой базе), поэтому отдельный прогон DDL этой таблицы
+    // плюс проба «есть ли колонка chain» — два запроса сверх списка.
     const total = PAY_STATEMENTS.length + PAY_PARTIAL_INDEXES.length
-      + PAY_CHAIN_INDEXES.length + PAY_TRIGGERS.length + 1;
+      + PAY_CHAIN_INDEXES.length + PAY_TRIGGERS.length + 2;
     expect(seen).toHaveLength(total);
     expect(seen.some((s) => s.includes('pay_ledger_no_update'))).toBe(true);
     // Индекс против ветвления журнала — отдельной группой: он создаётся с
