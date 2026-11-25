@@ -186,7 +186,7 @@ worker/src/pay/
 
 | Таблица | Ключевые поля | Инварианты |
 |---|---|---|
-| `pay_addresses` | `id`, `user_id`, `address` (base58), `hex`, `derivation_index`, `created_at`, `active` | `address` UNIQUE, `derivation_index` UNIQUE, `user_id` UNIQUE (один постоянный адрес) |
+| `pay_addresses` | `id`, `user_id`, `chain` (`tron`/`bsc`), `address`, `hex`, `derivation_index`, `created_at`, `active` | `address` UNIQUE, `derivation_index` UNIQUE (глобально: один индекс = один адрес семени), UNIQUE `(user_id, chain)` — один адрес на игрока **внутри сети**, поэтому при смене `PAY_CHAIN` игрок получает второй адрес, а старый остаётся сканироваться прошлым рельсом (миграция `0008`) |
 | `pay_invoices` | `id`, `user_id`, `product_id`, `amount_micro`, `status`, `address`, `created_at`, `expires_at`, `paid_at`, `deposit_txid` | один активный счёт на игрока: частичный UNIQUE-индекс по `status='open'` |
 | `pay_chain_blocks` | `height`, `block_id`, `parent_id`, `solidified_at`, `processed_at` | PK `height`; пропуск высоты — авария, а не норма |
 | `pay_chain_events` | `txid`, `event_index`, `block_height`, `from_addr`, `to_addr`, `contract`, `amount_micro`, `status`, `raw` | PK `(txid, event_index)`; фильтр контракта на записи |
@@ -335,7 +335,7 @@ worker/src/pay/
 | 1 | Фундамент | флаги (6 шт.), `Env`, гварды окружения (на превью всё выключено), `ensurePaySchema`, тесты флагов | `worker/src/pay/flags.ts`, `worker/src/env.ts`, `db/bootstrap.ts` | флаги по умолчанию `false`; тест: превью не может включить платежи; `tsc` чистый |
 | 2 | Миграция | `0007_astra_pay.sql` — 14 таблиц, индексы, append-only триггеры | `worker/migrations/d1/0007_astra_pay.sql` | миграция применяется на локальной D1; тест схемы: PK/UNIQUE/триггеры на месте |
 | 3 | TRON-примитивы | base58check, hex↔base58, ABI `Transfer`, парсинг сумм, `keccak`/`sha256` | `pay/tron/*` | векторы из реальных транзакций; сумма 1 USDT = 1 000 000; неверный контракт отклоняется |
-| 4 | Адреса | HD-деривация `m/44'/195'/0'/0/{i}` (secp256k1), выдача постоянного адреса, `pay_addresses` | `pay/addresses/*` | один адрес на игрока навсегда; `derivation_index` не повторяется; приватный ключ не покидает Signer-контур |
+| 4 | Адреса | HD-деривация `m/44'/195'/0'/0/{i}` (secp256k1), выдача постоянного адреса, `pay_addresses` | `pay/addresses/*` | один адрес на игрока в пределах сети (`(user_id, chain)`), навсегда и без перевыпуска; `derivation_index` не повторяется; приватный ключ не покидает Signer-контур |
 | 5 | Monitor | опрос solid-блоков, события USDT, дедуп `(txid,event_index)`, курсор, DLQ | `pay/monitor/*` | повторная доставка не создаёт дубль; пропуск высоты добирается; fake TronGrid в тестах |
 | 6 | Депозиты | сопоставление, статусы, недоплата/переплата/поздний платёж, ручная очередь, зачисление в `pay_ledger` | `pay/deposits/*` | сумма депозита = Ledger ровно один раз; недоплата не выдаёт товар; спор уходит в `manual` |
 | 7 | Магазин | товары, счета, покупка за USDT-баланс, выдача косметики/Premium, идемпотентность | `pay/products/*`, `pay/entitlements/*`, `routes/pay/*` | повторный запрос возвращает тот же ответ; товар выдаётся ровно один раз |

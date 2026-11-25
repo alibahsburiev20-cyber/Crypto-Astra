@@ -22,11 +22,13 @@ async function freshDb() {
   return db;
 }
 
-async function addAddress(db: D1Database, userId: string, address: string, index: number) {
+async function addAddress(
+  db: D1Database, userId: string, address: string, index: number, chain: 'tron' | 'bsc' = 'tron',
+) {
   await db.prepare(
-    `INSERT INTO pay_addresses (id, user_id, address, hex, derivation_index, created_at)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-  ).bind(`ad_${index}`, userId, address, `41${String(index).padStart(40, '0')}`, index, T0).run();
+    `INSERT INTO pay_addresses (id, user_id, chain, address, hex, derivation_index, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).bind(`ad_${index}`, userId, chain, address, `41${String(index).padStart(40, '0')}`, index, T0).run();
 }
 
 /** TronGrid по адресам: то, что реально отдаёт `/v1/accounts/{address}`. */
@@ -89,6 +91,29 @@ describe('план сбора USDT', () => {
     expect(byAddr.get('TAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA')?.blocker).toBeNull();
     expect(byAddr.get('TBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB')?.blocker).toBe('trx_missing');
     expect(byAddr.get('TCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC')?.blocker).toBe('no_usdt');
+  });
+
+  it('план TRON не трогает ряды другой цепи', async () => {
+    // После переезда в одной таблице живут оба адреса игрока. TRON-план обязан
+    // видеть только tron-ряды: запрос баланса по `0x…` TronGrid не понимает, и
+    // без фильтра по сети это выглядело бы как «балансы не читаются».
+    const db = await freshDb();
+    await addAddress(db, 'u1', 'TAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', 1);
+    // Тот же игрок, второй адрес — новой цепи.
+    await addAddress(db, 'u1', '0x' + 'bb'.repeat(20), 2, 'bsc');
+    // И обратный случай: формат «tron», а метка — чужая сеть. Первична метка.
+    await addAddress(db, 'u2', 'TCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC', 3, 'bsc');
+
+    const { fetchJson } = fakeChain({
+      TAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA: { trx: 20_000_000, usdt: 12_000_000 },
+    });
+    const plan = await sweepPlan({
+      db,
+      deps: { fetchJson, apiBase: TRON_API_MAINNET, contract: USDT_MAINNET },
+      network: 'mainnet', destination: DEST, sweepEnabled: true, now: T0,
+    });
+    expect(plan.addresses).toBe(1);
+    expect(plan.rows.map((r) => r.address)).toEqual(['TAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA']);
   });
 
   it('мелкие суммы не собирает: комиссия дороже самих денег', async () => {

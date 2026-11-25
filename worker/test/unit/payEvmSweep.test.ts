@@ -43,17 +43,26 @@ function node(balances: Record<string, { usdtRaw: bigint; bnbWei: bigint; fail?:
   return { rpc: rpc as never, calls };
 }
 
-async function dbWithAddresses(rows: Array<{ address: string; user: string; active?: number }>) {
+/**
+ * `chain` по умолчанию берётся из формата адреса — ровно как это делает
+ * миграция 0008 при переносе старых строк. Так тестам не приходится вручать
+ * «правильную сеть» руками, а случай «метка не совпала с форматом» задаётся
+ * явно (`chain:`) и остаётся отдельной проверкой.
+ */
+async function dbWithAddresses(
+  rows: Array<{ address: string; user: string; active?: number; chain?: 'bsc' | 'tron' }>,
+) {
   resetPaySchemaForTests();
   const { db } = makeD1();
   await ensurePaySchema(db);
   let i = 0;
   for (const row of rows) {
     i += 1;
+    const chain = row.chain ?? (row.address.startsWith('0x') ? 'bsc' : 'tron');
     await db.prepare(
-      `INSERT INTO pay_addresses (id, user_id, address, hex, derivation_index, active, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    ).bind(`ad_${i}`, row.user, row.address, row.address.slice(2), i, row.active ?? 1, T0 - i).run();
+      `INSERT INTO pay_addresses (id, user_id, chain, address, hex, derivation_index, active, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(`ad_${i}`, row.user, chain, row.address, row.address.slice(2), i, row.active ?? 1, T0 - i).run();
   }
   return db;
 }
@@ -125,11 +134,14 @@ describe('вердикт «чем платить»', () => {
 });
 
 describe('план сбора в BSC', () => {
-  it('читает только `0x…`-адреса и только активные', async () => {
+  it('читает только адреса BSC-цепи и только активные', async () => {
     const db = await dbWithAddresses([
       { address: PLAYER, user: 'u1' },
       { address: 'T' + 'x'.repeat(33), user: 'u2' },
       { address: '0x' + '33'.repeat(20), user: 'u3', active: 0 },
+      // Адрес после переезда: тот же игрок, другая сеть. В план обязан попасть
+      // только bsc-ряд — старый `tron` заберёт предыдущий рельс.
+      { address: '0x' + '77'.repeat(20), user: 'u1', chain: 'tron' },
     ]);
     const set = await evmActiveAddresses(db, 10);
     expect(set.rows.map((r) => r.address)).toEqual([PLAYER]);

@@ -165,30 +165,61 @@ describe('адреса игроков', () => {
     return db;
   }
 
-  it('адрес выдаётся один раз и не меняется', async () => {
+  it('адрес выдаётся один раз на цепь и не меняется', async () => {
     const db = await freshDb();
-    const first = await ensureAddress(db, 'u1', localDeriver, T0);
+    const first = await ensureAddress(db, 'u1', localDeriver, T0, 'tron');
     expect(first.created).toBe(true);
     expect(first.index).toBe(0);
+    expect(first.chain).toBe('tron');
 
-    const second = await ensureAddress(db, 'u1', localDeriver, T0 + 1000);
+    const second = await ensureAddress(db, 'u1', localDeriver, T0 + 1000, 'tron');
     expect(second.created).toBe(false);
     expect(second.address).toBe(first.address);
     expect(second.index).toBe(0);
   });
 
+  it('вторая цепь — второй адрес у того же игрока, старый остаётся', async () => {
+    // Это и есть переезд TRON -> BSC в одном тесте: сеть в конфиге меняется,
+    // адрес прошлой сети не аннулируется (на нём лежат деньги), а новый
+    // выдаётся по этой же цепи и со следующего индекса.
+    const db = await freshDb();
+    const tron = await ensureAddress(db, 'u1', localDeriver, T0, 'tron');
+    const bsc = await ensureAddress(db, 'u1', localDeriver, T0 + 1000, 'bsc');
+
+    expect(bsc.created).toBe(true);
+    expect(bsc.index).toBe(tron.index + 1);
+    expect(bsc.address).not.toBe(tron.address);
+
+    // Повторный запрос в ту же цепь идемпотентен и не создаёт третью строку.
+    const again = await ensureAddress(db, 'u1', localDeriver, T0 + 2000, 'bsc');
+    expect(again.address).toBe(bsc.address);
+    expect(again.created).toBe(false);
+    expect(await findAddress(db, 'u1', 'tron')).toMatchObject({ address: tron.address, chain: 'tron' });
+    expect(await findAddress(db, 'u1', 'bsc')).toMatchObject({ address: bsc.address, chain: 'bsc' });
+    const rows = await db.prepare('SELECT COUNT(*) AS n FROM pay_addresses').first<number>('n');
+    expect(Number(rows)).toBe(2);
+  });
+
+  it('чужую цепь запрос не видит', async () => {
+    // Сосед по базе не должен «унаследовать» адрес: `findAddress` ищет по паре
+    // (игрок, сеть), иначе BSC-сканер начал бы зачитывать TRON-адрес как свой.
+    const db = await freshDb();
+    await ensureAddress(db, 'u1', localDeriver, T0, 'tron');
+    expect(await findAddress(db, 'u1', 'bsc')).toBeNull();
+  });
+
   it('разным игрокам — разные индексы и адреса', async () => {
     const db = await freshDb();
-    const a = await ensureAddress(db, 'u1', localDeriver, T0);
-    const b = await ensureAddress(db, 'u2', localDeriver, T0);
+    const a = await ensureAddress(db, 'u1', localDeriver, T0, 'tron');
+    const b = await ensureAddress(db, 'u2', localDeriver, T0, 'tron');
     expect(b.index).toBe(a.index + 1);
     expect(b.address).not.toBe(a.address);
-    expect((await findAddress(db, 'u2'))?.address).toBe(b.address);
+    expect((await findAddress(db, 'u2', 'tron'))?.address).toBe(b.address);
   });
 
   it('занятый индекс не выдаётся повторно', async () => {
     const db = await freshDb();
-    await ensureAddress(db, 'u1', localDeriver, T0);
+    await ensureAddress(db, 'u1', localDeriver, T0, 'tron');
     // «Сломанный» дериватор всегда возвращает индекс 0 — второй игрок должен
     // получить следующий свободный, а не тот же адрес.
     const broken: AddressDeriver = {
@@ -197,9 +228,9 @@ describe('адреса игроков', () => {
         return { index: 0, address: key.address };
       },
     };
-    const b = await ensureAddress(db, 'u2', broken, T0 + 1);
+    const b = await ensureAddress(db, 'u2', broken, T0 + 1, 'tron');
     expect(b.index).toBe(1);
-    expect(b.address).not.toBe((await findAddress(db, 'u1'))?.address);
+    expect(b.address).not.toBe((await findAddress(db, 'u1', 'tron'))?.address);
   });
 
   it('без service binding адрес не выдаётся', async () => {

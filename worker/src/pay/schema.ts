@@ -1,6 +1,8 @@
 // Схема Astra Pay Core: 15 таблиц `pay_*`.
 //
-// Канон — миграция `worker/migrations/d1/0007_astra_pay.sql`. Здесь тот же DDL,
+// Канон — миграции `worker/migrations/d1/0007_astra_pay.sql` (создаёт) и
+// `0008_pay_addresses_chain.sql` (перестраивает `pay_addresses` под сеть).
+// Здесь тот же DDL,
 // но идемпотентный (`IF NOT EXISTS`), потому что прод деплоится из браузера:
 // `wrangler d1 migrations apply --remote` оттуда не запустить. На уже
 // мигрированной базе эти запросы — no-op.
@@ -9,14 +11,21 @@
 // (1 USDT = 1 000 000). Никаких `REAL` и плавающей точки.
 //
 // Основные инварианты, зашитые в схему:
-//   * один активный адрес на игрока (`user_id` UNIQUE) и один `derivation_index`;
+//   * один адрес на пару «игрок + цепь» (UNIQUE `(user_id, chain)`) и один
+//     `derivation_index` на весь мир; адрес не «на вечность», а «на цепь»:
+//     при переезде сети игрок получает второй, а первый остаётся видимым
+//     монитору старой цепи, пока на нём есть деньги;
 //   * один открытый счёт на игрока (частичный UNIQUE-индекс по `status='open'`);
 //   * один открытый цикл пула (частичный UNIQUE-индекс по `status='open'`);
 //   * одно событие блокчейна — одна строка (`PRIMARY KEY (txid, event_index)`);
 //   * `pay_ledger` и `pay_audit_log` нельзя изменить или удалить (триггеры);
 //   * повтор операции не удваивает учёт: `idem_key` UNIQUE / `PRIMARY KEY (scope, idem_key)`.
 
-export const PAY_SCHEMA_VERSION = 1;
+// 1 — схема «один адрес на игрока вообще»; 2 — адрес привязан к сети
+// (`pay_addresses.chain`): игроки могут иметь по одному адресу на цепь.
+// Версию видно в `/pay/status.json`: по ней оператор определяет, что переезд
+// схемы дошёл до базы, а не только в код.
+export const PAY_SCHEMA_VERSION = 2;
 
 /** Имена таблиц. Используются в тестах, сверке и админке. */
 export const PAY_TABLES = [
@@ -37,18 +46,39 @@ export const PAY_TABLES = [
   'pay_chain_cursor',
 ] as const;
 
-export const PAY_STATEMENTS: string[] = [
-  // 1. Депозитные адреса. Адрес выдаётся один раз и навсегда: менять адрес —
-  // значит терять депозиты, отправленные на старый.
-  `CREATE TABLE IF NOT EXISTS pay_addresses (
+export const PAY_ADDRESSES_DDL = `CREATE TABLE IF NOT EXISTS pay_addresses (
      id TEXT PRIMARY KEY,
-     user_id TEXT NOT NULL UNIQUE,
+     user_id TEXT NOT NULL,
+     chain TEXT NOT NULL DEFAULT 'tron' CHECK (chain IN ('tron', 'bsc')),
      address TEXT NOT NULL UNIQUE,
      hex TEXT NOT NULL UNIQUE,
      derivation_index INTEGER NOT NULL UNIQUE,
      active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
      last_scanned_ts INTEGER NOT NULL DEFAULT 0,
-     created_at INTEGER NOT NULL)`,
+     created_at INTEGER NOT NULL)`;
+
+
+/**
+ * Что делает код, если застал пустую `pay_addresses` старой формы. Совпадает с
+ * хвостом миграции 0008; отдельно держим, чтобы тест мог сверить форму таблицы,
+ * собранной из этих же строк, с таблицей после `d1 migrations apply`.
+ */
+export const PAY_ADDRESSES_REBUILD: string[] = [
+  'DROP TABLE pay_addresses',
+  PAY_ADDRESSES_DDL,
+  'CREATE UNIQUE INDEX IF NOT EXISTS ux_pay_addresses_user_chain ON pay_addresses (user_id, chain)',
+  'CREATE INDEX IF NOT EXISTS idx_pay_addresses_active ON pay_addresses (active, created_at)',
+];
+
+export const PAY_STATEMENTS: string[] = [
+  // 1. Депозитные адреса. Внутри одной цепи адрес выдаётся один раз и навсегда:
+  // менять адрес — значит терять депозиты, отправленные на старый. `chain` —
+  // сеть, к которой адрес относится: он же и ответ на вопрос «что делать при
+  // переезде» (выдать адрес новой цепи, старый не трогать). DEFAULT 'tron' —
+  // компромисс с прошлым: старые строки, скопированные миграцией 0008, — ровно
+  // TRON-овские.
+  PAY_ADDRESSES_DDL,
+  'CREATE UNIQUE INDEX IF NOT EXISTS ux_pay_addresses_user_chain ON pay_addresses (user_id, chain)',
   'CREATE INDEX IF NOT EXISTS idx_pay_addresses_active ON pay_addresses (active, created_at)',
 
   // 2. Счета на оплату. Сумма фиксируется при выставлении: игрок платит ровно её.
@@ -269,6 +299,48 @@ export const PAY_CHAIN_INDEXES: string[] = [
   `CREATE UNIQUE INDEX IF NOT EXISTS ux_pay_ledger_prev ON pay_ledger (prev_hash)`,
 ];
 
+/**
+ * Перестройка `pay_addresses` под колонку `chain`.
+ *
+ * Старая таблица имела `user_id UNIQUE` на уровне таблицы — это «один адрес на
+ * игрока вообще», и вторую цепь в такой схеме не разместить (миграция 0007).
+ * Инлайн-UNIQUE из SQLite не выбрасывается, поэтому только перестройка. Правила:
+ *   * колонка `chain` уже есть — ничего не делаем (обычный путь);
+ *   * колонки нет, таблица пуста — пересоздаём как надо: терять нечего, а
+ *     именно такое состояние было в проде на момент переезда;
+ *   * колонки нет, строки есть — НЕ ТРОГАЕМ и поднимаем ошибку: молча
+ *     перестраивать непустую денежную таблицу код не имеет права, для этого
+ *     есть миграция 0008 и человек, который смотрит в дамп.
+ * Отказ здесь означает «схема не готова»: денежные маршруты ответят 503 и
+ * приём встанет. Приём на непонятной схеме стоил бы дороже.
+ */
+export async function upgradePayAddressChains(db: D1Database): Promise<void> {
+  type D1Like = {
+    prepare(sql: string): {
+      run(): Promise<unknown>;
+      first<T>(column?: string): Promise<T | null>;
+    };
+    batch(statements: unknown[]): Promise<unknown>;
+  };
+  const d = db as unknown as D1Like;
+  try {
+    await d.prepare('SELECT chain FROM pay_addresses LIMIT 1').first('chain');
+    return; // колонка есть — схема актуальна
+  } catch {
+    /* нет таблицы или нет колонки — разбираемся ниже */
+  }
+  // `null` — таблицы нет (её создаст PAY_STATEMENTS этим же прогоном); `0` —
+  // она есть и пуста. Различать надо именно так: проверка «на ложность»
+  // спутала бы пустую таблицу с отсутствующей и оставила бы базу старой формы
+  // навсегда — ровно тот случай, которого переезд боится больше всего.
+  const count = await d.prepare('SELECT COUNT(*) AS n FROM pay_addresses').first<number>('n').catch(() => null);
+  if (count === null || count === undefined) return;
+  if (Number(count) > 0) {
+    throw new Error('pay_addresses без колонки chain и с данными: примените миграцию 0008 (npm run db:migrate)');
+  }
+  await d.batch(PAY_ADDRESSES_REBUILD.map((sql) => d.prepare(sql)));
+}
+
 let payReady: Promise<boolean> | null = null;
 
 /** true — таблицы `pay_*` на месте. После ошибки следующий вызов пробует снова. */
@@ -276,6 +348,7 @@ export function ensurePaySchema(db: D1Database): Promise<boolean> {
   if (!payReady) {
     payReady = (async () => {
       for (const statement of PAY_STATEMENTS) await db.prepare(statement).run();
+      await upgradePayAddressChains(db);
       for (const index of PAY_PARTIAL_INDEXES) await db.prepare(index).run();
       for (const index of PAY_CHAIN_INDEXES) {
         try {

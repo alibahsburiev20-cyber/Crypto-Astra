@@ -171,16 +171,18 @@ export async function scanEvmBlocks(
 /**
  * Активные адреса BSC.
  *
- * Отдельной колонки «цепь» в `pay_addresses` нет и не нужно: форматы адресов
- * не пересекаются (`T…` base58 у TRON, `0x…` у EVM), поэтому фильтр по форме —
- * это и есть фильтр по сети, и он не врёт после переключения `PAY_CHAIN`.
+ * Фильтр — по колонке `chain`, а не по форме адреса: `T…`/`0x…` различают сети
+ * не хуже, но `chain` — то, что мы сами записали в момент выдачи. После
+ * переключения `PAY_CHAIN` в таблице живут и старые адреса: их сканирует
+ * предыдущий рельс, а не этот, и притаскивать их сюда — значит искать
+ * пополнения там, где их быть не может.
  *
  * Отдаём в нижнем регистре: `transferFromLog` возвращает адрес получателя именно
  * так, и сравнение должно быть посимвольным.
  */
 export async function bscActiveAddresses(db: D1Database, limit = MAX_ADDRESSES_PER_PASS): Promise<string[]> {
   const { results } = await db.prepare(
-    'SELECT address FROM pay_addresses WHERE active = 1 ORDER BY last_scanned_ts, created_at LIMIT ?',
+    "SELECT address FROM pay_addresses WHERE active = 1 AND chain = 'bsc' ORDER BY last_scanned_ts, created_at LIMIT ?",
   ).bind(Math.max(1, Math.min(MAX_ADDRESSES_PER_PASS, limit))).all<{ address: string }>();
   return (results ?? [])
     .map((row) => String(row.address).toLowerCase())

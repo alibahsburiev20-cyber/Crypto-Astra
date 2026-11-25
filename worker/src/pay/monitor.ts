@@ -141,7 +141,7 @@ export async function scanAll(
   maxAddresses = 50,
 ): Promise<ScanAllResult> {
   const { results } = await db.prepare(
-    'SELECT address FROM pay_addresses WHERE active = 1 ORDER BY last_scanned_ts, created_at LIMIT ?',
+    "SELECT address FROM pay_addresses WHERE active = 1 AND chain = 'tron' ORDER BY last_scanned_ts, created_at LIMIT ?",
   ).bind(Math.max(1, Math.min(500, maxAddresses))).all<{ address: string }>();
 
   const summary: ScanAllResult = { addresses: 0, stored: 0, duplicates: 0, rejected: 0, errors: [] };

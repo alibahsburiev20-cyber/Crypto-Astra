@@ -22,7 +22,7 @@ const DICT = {
     'deposit.title': 'Пополнить баланс',
     // Сеть здесь не называется намеренно: её показывает сервер (`networkLabel`).
     // Живой текст «TRC-20» пережил бы переезд на BEP-20 и соврал бы игроку.
-    'deposit.lead': 'Пополнение идёт переводом USDT на личный адрес игрока. Адрес выдаётся один раз и не меняется: по нему сервер узнаёт, чей это перевод. Сеть указана под адресом — другая сеть или другая монета не дойдут.',
+    'deposit.lead': 'Пополнение идёт переводом USDT на личный адрес игрока. Адрес выдаётся один раз на сеть и не меняется: по нему сервер узнаёт, чей это перевод. Сеть указана под адресом — другая сеть или другая монета не дойдут, а адрес каждой сети свой.',
     'deposit.address': 'Войдите в игру, чтобы получить адрес.',
     'deposit.get': 'Получить адрес',
     'deposit.copy': 'Скопировать',
@@ -52,7 +52,7 @@ const DICT = {
     'wallet.hint': 'Sign in to see your balance.',
     'wallet.login': 'Sign in',
     'deposit.title': 'Top up balance',
-    'deposit.lead': 'Top-ups are USDT transfers to your personal address. The address is issued once and never changes: it is how the server knows whose transfer it is. The network is shown under the address — a different network or coin will not arrive.',
+    'deposit.lead': 'Top-ups are USDT transfers to your personal address. Each network gets its own address, issued once and never changed: it is how the server knows whose transfer it is. The network is shown under the address — a different network or coin will not arrive.',
     'deposit.address': 'Sign in to get your address.',
     'deposit.get': 'Get address',
     'deposit.copy': 'Copy',
@@ -84,7 +84,7 @@ const DICT = {
     'wallet.hint': 'Melde dich an, um dein Guthaben zu sehen.',
     'wallet.login': 'Anmelden',
     'deposit.title': 'Guthaben aufladen',
-    'deposit.lead': 'Aufgeladen wird per USDT-Überweisung an deine persönliche Adresse. Die Adresse wird einmal vergeben und bleibt gleich: daran erkennt der Server, wessen Überweisung es ist. Das Netz steht unter der Adresse — ein anderes Netz oder eine andere Münze kommt nicht an.',
+    'deposit.lead': 'Aufgeladen wird per USDT-Überweisung an deine persönliche Adresse. Jedes Netz hat eine eigene Adresse; sie wird einmal vergeben und bleibt gleich: daran erkennt der Server, wessen Überweisung es ist. Das Netz steht unter der Adresse — ein anderes Netz oder eine andere Münze kommt nicht an.',
     'deposit.address': 'Melde dich an, um die Adresse zu erhalten.',
     'deposit.get': 'Adresse anfordern',
     'deposit.copy': 'Kopieren',
