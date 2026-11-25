@@ -69,6 +69,11 @@ async function main(): Promise<void> {
   const timings: number[] = [];
   const statuses = new Map<number, number>();
   let errors = 0;
+  // Отдельно от ошибок: 429 — это не «маршрут упал», а отказ затвора
+  // (http/floodGuard.ts) или личного лимита. Считать их временем ответа нельзя
+  // (отказ быстрее), но и молча проглотить нельзя: тест идёт в один адрес, и
+  // после FLOOD_GLOBAL_PER_MIN в минуту начинают прилетать 429-и.
+  let throttled = 0;
   let next = 0;
 
   async function worker(): Promise<void> {
@@ -82,6 +87,7 @@ async function main(): Promise<void> {
         const res = await fetch(`${args.base}${path}`, { headers });
         await res.arrayBuffer();
         statuses.set(res.status, (statuses.get(res.status) ?? 0) + 1);
+        if (res.status === 429) throttled += 1;
         if (!res.ok) errors += 1;
       } catch {
         errors += 1;
@@ -107,6 +113,7 @@ async function main(): Promise<void> {
     concurrency: args.concurrency,
     paths,
     errorRate: Number(errorRate.toFixed(4)),
+    throttled,
     rps: Number(rps.toFixed(1)),
     ms: {
       p50: Number(p50.toFixed(1)),
@@ -116,6 +123,14 @@ async function main(): Promise<void> {
     },
     statuses: Object.fromEntries([...statuses.entries()].sort((a, b) => a[0] - b[0])),
   }, null, 2));
+
+  if (throttled > 0) {
+    console.error(
+      `429-х ответов: ${throttled}. Это не сбой маршрута, а лимит (floodGuard по IP либо` +
+        ' личный потолок игрока). Такой прогон ничего не измеряет: либо снизьте' +
+        ' --concurrency/--requests, либо поднимите FLOOD_GLOBAL_PER_MIN на время замера.',
+    );
+  }
 
   if (errorRate > 0.01 || p95 > 500) {
     console.error('нагрузочная проверка не пройдена: ошибки > 1 % или p95 > 500 мс');

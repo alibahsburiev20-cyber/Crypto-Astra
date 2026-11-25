@@ -50,7 +50,7 @@ jobs:
           # SIGNUP_GUARD=off: в CI не нужен ни DNS, ни потолок на домен (иначе
           # восьмая прогонка подряд падала бы 429). Фильтры почты ловит
           # emailGuard.test.ts, а здесь важна сама игра.
-          printf 'JWT_SECRET=ci-secret-ci-secret-ci-secret-12345678\nADMIN_TOKEN=ci-admin-token\nSIGNUP_GUARD=off\n' > .dev.vars
+          printf 'JWT_SECRET=ci-secret-ci-secret-ci-secret-12345678\nADMIN_TOKEN=ci-admin-token-for-local-e2e-32c\nSIGNUP_GUARD=off\n' > .dev.vars
           npx wrangler d1 migrations apply DB --local
       - name: E2E против wrangler dev
         run: |

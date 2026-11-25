@@ -103,6 +103,7 @@ export const STATUS_BY_CODE: Record<string, number> = {
   admin_token_required: 401,
   admin_forbidden: 403,
   admin_disabled: 503,
+  admin_weak_token: 503,
   pool_unavailable: 503,
   season_not_found: 404,
   // Этап 5: боксы. У каждого кода обязан быть статус, иначе игрок увидит internal.

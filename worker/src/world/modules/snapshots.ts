@@ -1,6 +1,6 @@
 import { SNAPSHOT_BATCH } from '../../shared/constants';
 import { sha256Hex } from '../../shared/sha256';
-import { verifyLedger } from '../ledger';
+import { verifyNow } from '../ledger';
 import { activeSeason, getSeason } from './season';
 
 // Снимок мира (этап 3). Задача `snapshot_export` раз в неделю и при закрытии
@@ -52,7 +52,7 @@ function sum(sql: SqlStorage, query: string): number {
 export function buildSnapshot(sql: SqlStorage, kind: SnapshotKind, now: number, seasonId?: string): WorldSnapshot {
   // Для закрытого сезона показываем закрытый сезон, а не тот, что уже начался.
   const season = (seasonId ? getSeason(sql, seasonId) : null) ?? activeSeason(sql);
-  const report = verifyLedger(sql);
+  const report = verifyNow(sql);
   const resources: Record<string, number> = {};
   for (const row of sql.exec('SELECT resource, SUM(amount) AS total FROM resources GROUP BY resource ORDER BY resource').toArray()) {
     resources[String(row.resource)] = Number(row.total);

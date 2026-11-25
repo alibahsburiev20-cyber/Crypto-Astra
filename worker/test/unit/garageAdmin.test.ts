@@ -237,22 +237,22 @@ describe('админка: доступ по токену и почте', () => {
   });
 
   it('пустой и неверный токен отбиваются', async () => {
-    await expect(requireAdmin(req(), env({ ADMIN_TOKEN: 'secret-token' }))).rejects.toThrow(/admin_token_required/);
-    await expect(requireAdmin(req({ 'X-Admin-Token': 'wrong' }), env({ ADMIN_TOKEN: 'secret-token' }))).rejects.toThrow(/admin_forbidden/);
-    await expect(requireAdmin(req({ 'X-Admin-Token': 'secret-token' }), env({ ADMIN_TOKEN: 'secret-token' }))).resolves.toBeUndefined();
+    await expect(requireAdmin(req(), env({ ADMIN_TOKEN: 'secret-token-for-unit-tests-32!' }))).rejects.toThrow(/admin_token_required/);
+    await expect(requireAdmin(req({ 'X-Admin-Token': 'wrong' }), env({ ADMIN_TOKEN: 'secret-token-for-unit-tests-32!' }))).rejects.toThrow(/admin_forbidden/);
+    await expect(requireAdmin(req({ 'X-Admin-Token': 'secret-token-for-unit-tests-32!' }), env({ ADMIN_TOKEN: 'secret-token-for-unit-tests-32!' }))).resolves.toBeUndefined();
   });
 
   it('если задан ADMIN_EMAIL, почта обязательна и сверяется без учёта регистра', async () => {
-    const e = env({ ADMIN_TOKEN: 'secret-token', ADMIN_EMAIL: 'alibahsburiev20@gmail.com' });
-    await expect(requireAdmin(req({ 'X-Admin-Token': 'secret-token' }), e)).rejects.toThrow(/admin_email_forbidden/);
-    await expect(requireAdmin(req({ 'X-Admin-Token': 'secret-token', 'X-Admin-Email': 'other@example.com' }), e)).rejects.toThrow(/admin_email_forbidden/);
+    const e = env({ ADMIN_TOKEN: 'secret-token-for-unit-tests-32!', ADMIN_EMAIL: 'alibahsburiev20@gmail.com' });
+    await expect(requireAdmin(req({ 'X-Admin-Token': 'secret-token-for-unit-tests-32!' }), e)).rejects.toThrow(/admin_email_forbidden/);
+    await expect(requireAdmin(req({ 'X-Admin-Token': 'secret-token-for-unit-tests-32!', 'X-Admin-Email': 'other@example.com' }), e)).rejects.toThrow(/admin_email_forbidden/);
     await expect(requireAdmin(
-      req({ 'X-Admin-Token': 'secret-token', 'X-Admin-Email': 'Alibahsburiev20@Gmail.com' }), e,
+      req({ 'X-Admin-Token': 'secret-token-for-unit-tests-32!', 'X-Admin-Email': 'Alibahsburiev20@Gmail.com' }), e,
     )).resolves.toBeUndefined();
   });
 
   it('без ADMIN_EMAIL почта не требуется', async () => {
-    await expect(requireAdmin(req({ 'X-Admin-Token': 'secret-token' }), env({ ADMIN_TOKEN: 'secret-token' }))).resolves.toBeUndefined();
+    await expect(requireAdmin(req({ 'X-Admin-Token': 'secret-token-for-unit-tests-32!' }), env({ ADMIN_TOKEN: 'secret-token-for-unit-tests-32!' }))).resolves.toBeUndefined();
   });
 });
 
