@@ -161,6 +161,22 @@
 .pay-address.is-ready { border-style: solid; border-color: rgba(143, 230, 255, 0.55); color: #bff3ff; }
 .pay-actions { display: flex; flex-wrap: wrap; gap: 10px; }
 
+/* QR и ссылка на эксплорер: адрес нужно уметь проверить НЕ глядя на наш сайт,
+   поэтому картинка и ссылка стоят рядом с адресом, а не «где-то внизу». */
+.pay-qr { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
+.pay-qr img {
+  display: block;
+  width: 184px;
+  height: 184px;
+  background: #fff;
+  border-radius: 12px;
+  padding: 6px;
+  image-rendering: pixelated;
+}
+.pay-qr-side { display: flex; flex-direction: column; gap: 8px; max-width: 32ch; }
+.pay-qr-link { align-self: flex-start; text-decoration: none; }
+.pay-tx-link { margin-left: 8px; font-size: 12px; }
+
 /* Переключатель языка: маленький, но с нормальной площадью нажатия. */
 .lang-switch { display: inline-flex; gap: 4px; margin-left: 6px; }
 .lang-btn { padding: 4px 8px; min-height: 32px; font-size: 11px; letter-spacing: .04em; }

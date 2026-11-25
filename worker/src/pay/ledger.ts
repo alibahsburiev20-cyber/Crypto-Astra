@@ -273,6 +273,19 @@ export async function verifyPayLedger(db: D1Database): Promise<PayLedgerReport> 
 }
 
 /** История игрока для кабинета: суммы, причины, без чужих данных. */
+/**
+ * Обратная операция к ключу идемпотентности депозита (`dep:<txid>:<событие>`):
+ * транзакция пополнения по записи журнала. Пустая строка — если это не депозит
+ * или идентификатор не похож на txid. Живёт рядом с построителем ключа затем,
+ * чтобы формат не разъехался: менять их можно только вместе.
+ */
+export function depositTxidFromRef(ref: string | null | undefined): string {
+  const raw = String(ref ?? '');
+  if (!raw.startsWith('dep:')) return '';
+  const txid = raw.slice(4).split(':')[0] ?? '';
+  return /^[0-9a-fA-F]{64}$/.test(txid) ? txid : '';
+}
+
 export async function payHistory(
   db: D1Database,
   userId: string,

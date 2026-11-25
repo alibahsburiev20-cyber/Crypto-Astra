@@ -60,6 +60,15 @@
           <button type="button" class="cta cta-small" data-pay="address-btn" data-i18n="deposit.get">Получить адрес</button>
           <button type="button" class="ghost" data-pay="copy-btn" data-i18n="deposit.copy" hidden>Скопировать</button>
         </div>
+        <div class="pay-qr" data-pay="qr-box" hidden>
+          <img data-pay="qr" alt="" width="184" height="184" decoding="async">
+          <div class="pay-qr-side">
+            <p class="pay-muted" data-i18n="deposit.qrHint">Наведите камеру кошелька на код: в нём только ваш адрес.</p>
+            <a class="ghost pay-qr-link" data-pay="explorer" href="#" rel="noopener noreferrer" target="_blank" hidden data-i18n="deposit.explorer">
+              Проверить адрес в эксплорере
+            </a>
+          </div>
+        </div>
         <p class="pay-muted" data-pay="deposit-note" data-i18n="deposit.note">Сеть и токен — под адресом.</p>
       </div>
     </section>

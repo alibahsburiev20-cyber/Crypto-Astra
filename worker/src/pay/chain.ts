@@ -56,7 +56,12 @@ export interface ChainSpec {
   addressHex(value: string): string;
   /** Ссылка на транзакцию в эксплорере — её игрок видит в квитанции. */
   txUrl(txid: string): string;
+  /** Страница адреса: по ней игрок проверяет, что перевод увиден сетью. */
+  addressUrl(address: string): string;
   explorer: string;
+  /** Как называть эксплорер в интерфейсе: игроку важна не ссылка, а «куда мне
+   * смотреть, чтобы проверить себя». */
+  explorerName: string;
   /** Готовность рельса в этой сборке: «сеть сконфигурирована» ≠ «код дописан». */
   ready: RailReadiness;
 }
@@ -81,7 +86,9 @@ function tronSpec(env: Env, network: PayNetworkLike): ChainSpec {
     normalizeAddress: normalizeTronAddress,
     addressHex: addressToHex,
     txUrl: (txid) => `${testnet ? 'https://nile.tronscan.org' : 'https://tronscan.org'}/#/transaction/${txid}`,
+    addressUrl: (address) => `${testnet ? 'https://nile.tronscan.org' : 'https://tronscan.org'}/#/address/${address}`,
     explorer: testnet ? 'https://nile.tronscan.org' : 'https://tronscan.org',
+    explorerName: testnet ? 'Tronscan (Nile)' : 'Tronscan',
     ready: { addresses: true, deposits: true, payouts: true, reason: '' },
   };
 }
@@ -115,7 +122,9 @@ function bscSpec(env: Env, network: PayNetworkLike): ChainSpec {
     // В EVM «hex» — это адрес без `0x`: тот же смысл, что и у TRON-колонок.
     addressHex: (value: string) => toChecksumAddress(value).slice(2).toLowerCase(),
     txUrl: (txid) => `${config.explorer}/tx/${txid}`,
+    addressUrl: (address) => `${config.explorer}/address/${address}`,
     explorer: config.explorer,
+    explorerName: testnet ? 'BscScan (testnet)' : 'BscScan',
     ready: bscReadiness(addressOk),
   };
 }

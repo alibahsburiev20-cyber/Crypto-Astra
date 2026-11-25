@@ -2,8 +2,10 @@ import type { AuthContext } from '../auth/guards';
 import type { Env } from '../env';
 import { json, readJsonSoft } from '../http/response';
 import { addressMatchesChain, displayAddress, ensureAddress, findAddress, signerDeriver } from '../pay/addresses';
+import { chainSpec, type ChainSpec } from '../pay/chain';
 import { payFlags, publicFlags, walletState } from '../pay/flags';
-import { payBalanceMicro, payHistory } from '../pay/ledger';
+import { depositTxidFromRef, payBalanceMicro, payHistory } from '../pay/ledger';
+import { qrPng } from '../pay/qr';
 import { prizeSharePercent, usdtPoolBlock } from '../pay/pool';
 import { SWEEP_FEE_SUN, accountBalances, sweepChainDeps, sweepPlan } from '../pay/sweep';
 import { BSC_MAINNET, BSC_TESTNET } from '../pay/evm/config';
@@ -12,7 +14,6 @@ import { evmAccountBalances, evmHotWalletState, formatBnb, gasCostWei } from '..
 import { releaseNonce, reserveNonce } from '../pay/evm/payouts';
 import { evmSweepPlan, formatSweepTotals } from '../pay/evm/sweep';
 import { isTestnetNetwork } from '../pay/flags';
-import type { ChainSpec } from '../pay/chain';
 import { hotWalletState } from '../pay/hotwallet';
 import { solvencySheet } from '../pay/solvency';
 import {
@@ -22,7 +23,6 @@ import { ensurePaySchema, PAY_SCHEMA_VERSION, PAY_TABLES } from '../pay/schema';
 import { ShopError, catalogForClient, entitlements, premiumStatus, purchase } from '../pay/shop';
 import { formatMicroUsdt, isMicroAmount, parseUsdtToMicro } from '../pay/tron/amount';
 import { usdtContract } from '../pay/tron/contracts';
-import { chainSpec } from '../pay/chain';
 import { readCursor } from '../pay/evm/deposits';
 import { requireAdmin } from '../http/admin';
 import {
@@ -105,7 +105,12 @@ export async function payProducts(env: Env): Promise<Response> {
  * Без Signer-контура адрес не выдаётся: `503 signer_not_configured`. Это
  * осознанно — «временный» адрес из ниоткуда хуже, чем понятная ошибка.
  */
-export async function payAddress(env: Env, auth: AuthContext): Promise<Response> {
+/**
+ * Адрес пополнения текущего игрока — одна функция на `/pay/address.json` и на
+ * `/pay/qr`. Разделять проверки нельзя: картинка, показанная там, где адрес
+ * ещё не готов, отправляет деньги в никуда точно так же, как нажатая «Купить».
+ */
+async function depositAddress(env: Env, auth: AuthContext): Promise<{ address: string; spec: ChainSpec }> {
   const flags = payFlags(env);
   if (!flags.deposits) throw new ApiError(503, 'deposits_disabled');
   // Сеть «похожа на неизвестную» — это не «возьмём первую»: игрок может увидеть
@@ -126,32 +131,72 @@ export async function payAddress(env: Env, auth: AuthContext): Promise<Response>
       // остановиться: деньги по такому адресу мы не найдём.
       throw new ApiError(409, 'address_chain_mismatch');
     }
-    return json({
-      ok: true, address: displayAddress(spec.chain, existing.address),
-      index: existing.index, created: false,
-      network: flags.network, chain: spec.chain, networkLabel: spec.label,
-      asset: 'USDT', contract: spec.contract,
-      // Витрина печатает предупреждение про дробную часть только там, где она
-      // правда отбрасывается, — поэтому знаки и подтверждения едут вместе с адресом.
-      decimals: spec.decimals, confirmations: spec.confirmations,
-    });
+    return { address: displayAddress(spec.chain, existing.address), spec };
   }
 
-  let address;
   try {
-    address = await ensureAddress(env.DB, auth.userId, signerDeriver(env, spec.chain), Date.now());
+    const created = await ensureAddress(
+      env.DB, auth.userId, signerDeriver(env, spec.chain), Date.now(),
+    );
+    return { address: displayAddress(spec.chain, created.address), spec, index: created.index, isNew: created.created } as {
+      address: string; spec: ChainSpec; index: number; isNew: boolean;
+    };
   } catch (e) {
+    if (e instanceof ApiError) throw e;
     const code = e instanceof Error ? e.message : 'signer_error';
     if (code === 'signer_not_configured') throw new ApiError(503, 'signer_not_configured');
     throw new ApiError(502, 'signer_unavailable');
   }
+}
 
+export async function payAddress(env: Env, auth: AuthContext): Promise<Response> {
+  const flags = payFlags(env);
+  const found = await depositAddress(env, auth);
+  const spec = found.spec;
+  const created = 'isNew' in found ? found.isNew : false;
   return json({
-    ok: true, address: displayAddress(spec.chain, address.address),
-    index: address.index, created: address.created,
+    ok: true,
+    address: found.address,
+    index: 'index' in found ? found.index : undefined,
+    created,
     network: flags.network, chain: spec.chain, networkLabel: spec.label,
-    asset: 'USDT', contract: spec.contract, decimals: spec.decimals, confirmations: spec.confirmations,
-  }, 201);
+    asset: 'USDT', contract: spec.contract,
+    // Витрина печатает предупреждение про дробную часть только там, где она
+    // правда отбрасывается, — поэтому знаки и подтверждения едут вместе с адресом.
+    decimals: spec.decimals, confirmations: spec.confirmations,
+    // Ссылка на эксплорер — не «украшение», а способ игрока проверить себя без
+    // нашего слова: адрес и сеть он видит, а «записан ли перевод» — только в сети.
+    explorer: { name: spec.explorerName, addressUrl: spec.addressUrl(found.address) },
+  }, created ? 201 : 200);
+}
+
+/**
+ * QR адреса пополнения. Рендерит сервер: клиентская библиотека QR означала бы,
+ * что адрес игрока уходит на чужой CDN или что в бандле лежит ещё один
+ * криптографический код, который никто не сверял. Сюда игрок попадает только со
+ * своей сессией, и в картинке не может оказаться ничего, кроме его адреса.
+ */
+export async function payQr(env: Env, auth: AuthContext, request: Request): Promise<Response> {
+  const found = await depositAddress(env, auth);
+  const url = new URL(request.url);
+  const scale = Number.parseInt(url.searchParams.get('scale') ?? '6', 10);
+  const png = await qrPng(found.address, { scale: Number.isFinite(scale) ? scale : undefined });
+  return new Response(png, {
+    status: 200,
+    headers: {
+      'Content-Type': 'image/png',
+      // Приватное и без кэша: адрес игрока не должен остаться в общем кэше
+      // прокси — и не пережить отзыв сессии.
+      'Cache-Control': 'private, no-store',
+      // Картинка генерируется под запрос, и любое её переиспользование — это
+      // чужой попытка угадать ссылку. `nosniff` запрещает браузеру «догадаться»,
+      // что в ответе не растр; CSP и DENY на всякий случай закрывают и просмотр
+      // ответа как документа (вкладка «открыть картинку по ссылке»).
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Security-Policy': "default-src 'none'; sandbox",
+      'X-Frame-Options': 'DENY',
+    },
+  });
 }
 
 /** Баланс, история и купленная косметика — только для владельца. */
@@ -165,13 +210,22 @@ export async function payAccount(env: Env, auth: AuthContext): Promise<Response>
     entitlements(env.DB, auth.userId),
     premiumStatus(env.DB, auth.userId, now),
   ]);
+  // Ссылка на перевод — для строк пополнения: `source_ref` депозита это
+  // `dep:<txid>:<номер события>`, то есть идентификатор транзакции уже в базе, и
+  // игроку не нужно ничего вставлять руками. Для остальных причин ссылки нет:
+  // выдумывать её хуже, чем не показать.
+  const spec = chainSpec(env, flags);
+  const rows = history.map((row) => {
+    const txid = row.reason === 'deposit' ? depositTxidFromRef(row.ref) : '';
+    return txid ? { ...row, txUrl: spec.txUrl(txid) } : row;
+  });
   return json({
     ok: true,
     asset: 'USDT',
     balanceMicro,
     balance: formatMicroUsdt(balanceMicro),
     purchasesEnabled: flags.purchases,
-    history,
+    history: rows,
     entitlements: owned,
     premium,
     now,

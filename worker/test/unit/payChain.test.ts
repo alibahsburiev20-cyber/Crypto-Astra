@@ -6,6 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import { payAddress, payStatus } from '../../src/routes/pay';
 import { activeChain, chainSpec } from '../../src/pay/chain';
+import { depositTxidFromRef } from '../../src/pay/ledger';
 import { payFlags, walletState } from '../../src/pay/flags';
 import { hexToBase58 } from '../../src/pay/tron/address';
 import { USDT_MAINNET, USDT_NILE } from '../../src/pay/tron/contracts';
@@ -50,6 +51,15 @@ describe('TRON-контур (ничего не поехало)', () => {
     const nile = chainSpec({ PAY_NETWORK: 'nile' } as never, flagsFor({ PAY_NETWORK: 'nile' }));
     expect(nile.contract).toBe(USDT_NILE);
     expect(nile.apiBase).toBe('https://nile.trongrid.io');
+  });
+
+  it('ссылки в эксплорер строятся сетью, а не догадкой клиента', () => {
+    const mainnet = chainSpec({ PAY_NETWORK: 'mainnet' } as never, flagsFor({ PAY_NETWORK: 'mainnet' }));
+    expect(mainnet.addressUrl(TRON_ADDR)).toBe(`https://tronscan.org/#/address/${TRON_ADDR}`);
+    expect(mainnet.explorerName).toBe('Tronscan');
+    const nile = chainSpec({ PAY_NETWORK: 'nile' } as never, flagsFor({ PAY_NETWORK: 'nile' }));
+    expect(nile.addressUrl(TRON_ADDR)).toContain('nile.tronscan.org');
+    expect(nile.explorerName).toContain('Nile');
   });
 
   it('адрес приводится к канону сети, а hex — то, что лежит в базе', () => {
@@ -132,5 +142,26 @@ describe('BSC-контур', () => {
       flagsFor({ PAY_CHAIN: 'bsc', PAY_NETWORK: 'mainnet' }),
     );
     expect(custom.apiBase).toBe('https://my.node/rpc');
+  });
+  it('адрес игрока ведёт на страницу адреса, а не на транзакцию', () => {
+    const spec = chainSpec({ PAY_CHAIN: 'bsc', PAY_NETWORK: 'mainnet' } as never,
+      flagsFor({ PAY_CHAIN: 'bsc', PAY_NETWORK: 'mainnet' }));
+    expect(spec.addressUrl(EVM_ADDR)).toBe(`https://bscscan.com/address/${EVM_ADDR}`);
+    expect(spec.explorerName).toBe('BscScan');
+  });
+});
+
+describe('ссылка на перевод в истории', () => {
+  it('txid достаётся из ключа идемпотентности депозита', () => {
+    const txid = 'ab'.repeat(32);
+    expect(depositTxidFromRef(`dep:${txid}:3`)).toBe(txid);
+  });
+
+  it('всё остальное остаётся без ссылки: выдумывать адрес транзакции нельзя', () => {
+    expect(depositTxidFromRef('purchase:uuid-1')).toBe('');
+    expect(depositTxidFromRef('dep:не-шестнадцатеричное:0')).toBe('');
+    expect(depositTxidFromRef('dep:' + 'ab'.repeat(31))).toBe('');
+    expect(depositTxidFromRef('')).toBe('');
+    expect(depositTxidFromRef(null)).toBe('');
   });
 });

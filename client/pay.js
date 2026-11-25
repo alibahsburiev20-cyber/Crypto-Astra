@@ -154,6 +154,18 @@ function renderHistory(history) {
     date.textContent = new Date(row.createdAt).toLocaleString('ru-RU');
     const what = document.createElement('td');
     what.textContent = REASON_TEXT[row.reason] || row.reason;
+    // Для пополнения даём ссылку на перевод: игрок сверяет его в сети, а не по
+    // нашей строчке. `txUrl` строит сервер — у клиента нет ни карты эксплореров,
+    // ни права решать, какая сеть сейчас активна.
+    if (row.txUrl) {
+      const tx = document.createElement('a');
+      tx.className = 'pay-tx-link';
+      tx.href = row.txUrl;
+      tx.target = '_blank';
+      tx.rel = 'noopener noreferrer';
+      tx.textContent = t(lang, 'history.tx');
+      what.append(tx);
+    }
     const sum = document.createElement('td');
     sum.className = row.delta > 0 ? 'pay-plus' : 'pay-minus';
     sum.textContent = `${row.delta > 0 ? '+' : ''}${row.amount} USDT`;
@@ -235,11 +247,63 @@ const DEPOSIT_ERRORS = {
   no_session: 'Войдите в игру, чтобы получить адрес.',
 };
 
+/**
+ * PNG как `data:`-ссылка. Иначе нельзя: маршрут закрыт Bearer-токеном (cookie
+ * сервер не принимает намеренно), а `<img>` заголовок `Authorization` отправить
+ * не может — картинку забираем сами и отдаём её через URL, который разрешает CSP
+ * страницы (`img-src 'self' data:`). В `innerHTML` ничего не вставляем: `<img>`
+ * с растровым источником безопасен по определению, и политика клиента запрещает
+ * SVG в интерфейсе (worker/test/unit/sprites.test.ts).
+ */
+function pngDataUri(bytes) {
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return `data:image/png;base64,${btoa(binary)}`;
+}
+
+async function loadQr() {
+  const box = $('[data-pay="qr-box"]');
+  const img = $('[data-pay="qr"]');
+  if (!box || !img) return;
+  try {
+    // Расширения у пути намеренно нет: по политике ассетов векторные файлы —
+    // только для иконок из client/, а это генерируемый сервером ответ (PNG).
+    const res = await fetch('/pay/qr', {
+      credentials: 'include',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) throw new Error(String(res.status));
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    // Сигнатура PNG вместо «доверяем content-type»: маршрут может ответить и
+    // JSON-ошибкой (например, прокси), а в `<img>` должно попасть только изображение.
+    if (bytes.length < 8 || bytes[0] !== 0x89 || bytes[1] !== 0x50 || bytes[2] !== 0x4e || bytes[3] !== 0x47) {
+      throw new Error('not an image');
+    }
+    img.src = pngDataUri(bytes);
+    img.alt = t(lang, 'deposit.qrAlt');
+    box.hidden = false;
+  } catch {
+    // Картинка — способ не перепечатать адрес, а не условие оплаты: без неё
+    // адрес всё равно на экране, поэтому просто прячем блок.
+    box.hidden = true;
+    img.removeAttribute('src');
+  }
+}
+
 function addressBlock(state) {
   const node = $('[data-pay="address"]');
   if (node) {
     node.textContent = state.address;
     node.classList.toggle('is-ready', state.ready);
+  }
+  const link = $('[data-pay="explorer"]');
+  if (link) {
+    // Ссылка приходит с сервера вместе с сетью: «Tronscan» для TRON и «BscScan»
+    // для BNB — это разные сайты, и зашивать их в клиент нельзя.
+    const url = state.explorer?.addressUrl || '';
+    link.href = url;
+    link.hidden = !url;
+    if (url) link.textContent = `${t(lang, 'deposit.explorer')}: ${state.explorer.name}`;
   }
   const copy = $('[data-pay="copy-btn"]');
   if (copy) copy.hidden = !state.ready;
@@ -267,11 +331,13 @@ async function loadDeposit() {
       address: res.data.address,
       ready: true,
       canAsk: false,
+      explorer: res.data.explorer,
       // Сеть приходит с сервера. Раньше она выводилась из пути в URL и из
       // зашитого «TRON mainnet» — при смене цепи это означало бы «на экране одна
       // сеть, а деньги идут в другую».
       note: networkNote(res.data, lang),
     });
+    await loadQr();
     return;
   }
   addressBlock({

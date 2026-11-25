@@ -64,14 +64,32 @@ reason }`. Это не украшение: «сеть выбрана» и «ко
 | Метод | Путь | Ответ |
 |---|---|---|
 | GET | `/pay/account.json` | баланс USDT, история операций, купленная косметика |
-| GET | `/pay/address.json` | личный адрес пополнения USDT: `{ address, chain, networkLabel, contract, decimals, confirmations }` |
+| GET | `/pay/address.json` | личный адрес пополнения USDT: `{ address, chain, networkLabel, contract, decimals, confirmations, explorer }` |
+| GET | `/pay/qr` | адрес игрока как QR-картинка (PNG), рисуется сервером; `{ error }` вместо картинки, если рельс не готов |
 | GET | `/pay/withdrawals` | свои заявки на вывод, лимиты и стоп-флаг |
 | POST | `/pay/withdraw` | заявка на вывод: `{ address, amountMicro }` + `Idempotency-Key` |
 | POST | `/pay/purchase` | покупка за баланс: `{ productId }` + заголовок `Idempotency-Key` |
 
 `/pay/account.json` отдаёт `{ ok, asset: "USDT", balanceMicro, balance,
 purchasesEnabled, history[], entitlements[] }`. История — только своя: `delta`,
-`reason`, `ref`, `amount` в USDT.
+`reason`, `ref`, `amount` в USDT, и `txUrl` у записей о пополнении.
+
+`explorer` в `/pay/address.json` — `{ name, addressUrl }`: ссылка на страницу
+адреса в обозревателе **активной** цепи (`Tronscan` / `BscScan`). Ссылку
+строит сервер, а не клиент: клиент не должен догадываться, как в этой сети
+выглядит URL транзакции, иначе при смене цепи он начнёт вести в другое место.
+
+`GET /pay/qr` — тот же адрес, закодированный без чужих библиотек
+(`worker/src/pay/qr.ts`). QR нужен ровно один: отсканировать и перевести;
+адрес на экране остаётся главным, картинка его не заменяет. Формат — PNG
+(1 бит/пиксель; SVG в интерфейсе запрещён политикой ассетов), маска выбирается
+по минимальному штрафу, размер модуля — `?scale=` (1–16, по умолчанию 6).
+Клиент вставляет картинку как `data:`-ссылку: маршрут закрыт Bearer-токеном,
+который `<img>` отправить не умеет.
+Ответ живёт одну загрузку страницы (`Cache-Control: private, no-store`) и
+отказывается, если депозиты выключены, рельс не готов, адрес в базе принадлежит
+другой цепи или сам Address Rail выключен — тогда вместо картинки `503` с
+`reason`, тот же, что у `/pay/address.json`.
 
 `POST /pay/purchase` списывает цену **серверного** каталога: клиент присылает
 только `productId` и ключ идемпотентности, цену подменить нельзя. Ответы:
