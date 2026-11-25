@@ -109,7 +109,10 @@ POST /admin/pay/stop   { "stop": true, "reason": "сверка: расхожде
 2. Включить `PAY_EVM_CONTRACT` (mainnet — `0x55d398326f99059ff775485246999027b3197955`,
    Binance-Peg BSC-USD; **18 знаков**, это не тот USDT, что в TRON).
 3. Тот же контракт — в секрет `SIGNER_EVM_CONTRACT`, `SIGNER_EVM_CHAIN_IDS = "56"`. Деплой Signer.
-4. `PAY_HOT_ADDRESS` = `0x`-форма того же горячего ключа; завести на неё USDT и BNB.
+4. `PAY_HOT_ADDRESS` = `0x`-форма того же горячего ключа:
+   `SIGNER_PRIVATE_KEY=<hex> npm run pay:hot-address -- --check <адрес> --chain bsc`
+   печатает обе формы и не даёт оставить в конфиге адрес прошлой сети.
+   Завести на неё USDT и BNB.
 5. `PAY_CHAIN = "bsc"`, деплой. Дальше смотреть `/admin/pay`: строка `chain`
    показывает рельс (`ready`), курсор блока и сколько активных адресов относится
    к активной цепи (`addresses.otherChain` — сколько игроков сидят на старых `T…`).
