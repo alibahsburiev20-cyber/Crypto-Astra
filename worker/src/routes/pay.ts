@@ -84,6 +84,12 @@ export async function payStatus(env: Env): Promise<Response> {
 /** Каталог. Цены — серверные; выключенные товары не показываются. */
 export async function payProducts(env: Env): Promise<Response> {
   const flags = payFlags(env);
+  // Выключенный контур не должен выглядеть как «магазин с пустыми полками»:
+  // 200 с пустым каталогом индексируется поисковиками, цитируется игроками как
+  // «магазин сломался» и вообще ничем не отличается от реальной пустоты.
+  // Включённые покупки при пустом каталоге — другое дело: это честное «товаров
+  // пока нет», оно остаётся 200.
+  if (!flags.payments) throw new ApiError(503, 'payments_disabled');
   return json({
     ok: true,
     purchasesEnabled: flags.purchases,

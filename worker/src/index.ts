@@ -9,15 +9,15 @@ import { applyEvmPayoutConfirmations } from './pay/evm/payouts';
 import { applyDeposits, scanAll, trongridFetcher } from './pay/monitor';
 import { tronApiBase } from './pay/tron/contracts';
 import { ensurePaySchema } from './pay/schema';
-import { reconcileAndFlag } from './pay/reconcile';
+import { pruneChainEvents } from './pay/cleanup';
+import { reconcileDaily } from './pay/reconcile';
 import { usdtContracts } from './pay/tron/contracts';
 import { cleanupSessions } from './auth/sessions';
 import type { Env } from './env';
 import { route } from './http/router';
-import { securityHeaders } from './http/security';
+import { staticResponse } from './http/static';
 import { withBudget } from './ops/guard';
 import { WorldLobby } from './lobby/WorldLobby';
-import { SITE_FILES } from './static/site';
 import { World } from './world/World';
 
 export { World, WorldLobby };
@@ -44,22 +44,6 @@ async function worldIds(env: Env): Promise<string[]> {
     console.error('world_seats fallback failed', e);
     return [];
   }
-}
-
-function staticResponse(pathname: string, method: string): Response | null {
-  const path = pathname === '/' ? '/index.html' : pathname;
-  const file = SITE_FILES[path];
-  // Отдача строго по точному ключу из `SITE_FILES`: путь не склеивается и не
-  // нормализуется, поэтому `/../worker/src/env.ts`, `//etc/passwd` и `%2e%2e%2f`
-  // просто не находят файла (проверено тестом).
-  if (!file) return null;
-  const headers: Record<string, string> = {
-    'Content-Type': file.type,
-    'Cache-Control': 'no-cache',
-    ...securityHeaders(),
-  };
-  if (method === 'HEAD') return new Response(null, { status: 200, headers });
-  return new Response(file.body, { status: 200, headers });
 }
 
 export default {
@@ -168,14 +152,24 @@ export default {
       }
     }
 
-    // Сверка — раз в сутки ночью. Расхождение само поднимает стоп-флаг выплат:
-    // лучше остановиться и разобраться, чем продолжать платить по битым данным.
-    if (pay.payments && String(controller.cron ?? '') === '0 3 * * *') {
+    // Сверка — не реже раза в сутки, но без сравнения с текстом расписания:
+    // периодичность держит отметка в самой базе (reconcileDaily). Расхождение
+    // само поднимает стоп-флаг выплат: лучше остановиться и разобраться, чем
+    // продолжать платить по битым данным.
+    if (pay.payments) {
       try {
-        const report = await reconcileAndFlag(env.DB, Date.now());
-        if (!report.ok) console.error('pay reconcile mismatch', report);
+        const report = await reconcileDaily(env.DB, Date.now());
+        if (report && !report.ok) console.error('pay reconcile mismatch', report);
       } catch (e) {
         console.error('pay reconcile failed', e);
+      }
+      // Ротация сырых событий сети: без неё платёжный журнал съедает лимит D1,
+      // и обнаруживается это в момент, когда приходят настоящие деньги.
+      try {
+        const pruned = await pruneChainEvents(env.DB, Date.now());
+        if (pruned.deleted) console.log('pay chain events pruned', pruned);
+      } catch (e) {
+        console.error('pay prune failed', e);
       }
     }
     try {

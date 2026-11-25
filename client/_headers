@@ -8,3 +8,12 @@
   Cross-Origin-Opener-Policy: same-origin
   X-Permitted-Cross-Domain-Policies: none
   Strict-Transport-Security: max-age=31536000
+
+# Денежные страницы закрываем от индексирования заголовком — на стороне Worker
+# это делает `staticResponse`, здесь та же политика для Pages. Зеркало
+# проверяется тестом attackSurface.test.ts.
+/pay.html
+  X-Robots-Tag: noindex
+
+/admin.html
+  X-Robots-Tag: noindex

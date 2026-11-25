@@ -137,3 +137,37 @@ export async function reconcileAndFlag(db: D1Database, now: number): Promise<Rec
   }
   return report;
 }
+
+/**
+ * Суточная сверка без привязки к тексту расписания.
+ *
+ * Раньше в `scheduled` стояло сравнение `controller.cron === '0 3 * * *'`:
+ * малейшая правка `crons` в `wrangler.toml` — и сверка молча перестаёт бегать,
+ * а вместе с ней и автостоп при расхождении журнала. Теперь периодичность
+ * хранится в самой базе (та же таблица `pay_operations`, где живёт стоп-флаг):
+ * сработал любой тик — сверяемся, если с прошлой сверки прошло не меньше порога.
+ * Как часто будит расписание — Worker'у больше не важно.
+ */
+const RECONCILE_MARK = 'reconcile_last';
+export const RECONCILE_MIN_INTERVAL_MS = 20 * 60 * 60_000; // сутки с запасом на пропущенный тик
+
+export async function reconcileDaily(db: D1Database, now: number): Promise<ReconcileReport | null> {
+  let last = 0;
+  try {
+    const row = await db.prepare('SELECT response FROM pay_operations WHERE scope = ? AND idem_key = ?')
+      .bind('system', RECONCILE_MARK).first<string>('response');
+    last = Number((JSON.parse(String(row ?? '{}')) as { ts?: unknown }).ts ?? 0) || 0;
+  } catch {
+    last = 0; // нет строки или битый JSON — считаем, что сверки давно не было
+  }
+  if (now - last < RECONCILE_MIN_INTERVAL_MS) return null;
+  // Отметку пишем ТОЛЬКО после успешной сверки: если база упала — следующий тик
+  // попробует снова, вместо «ещё сутки никто не смотрел».
+  const report = await reconcileAndFlag(db, now);
+  await db.prepare(
+    `INSERT INTO pay_operations (scope, idem_key, user_id, request_hash, response, created_at)
+     VALUES ('system', ?, NULL, 'cron', ?, ?)
+     ON CONFLICT (scope, idem_key) DO UPDATE SET response = excluded.response, created_at = excluded.created_at`,
+  ).bind(RECONCILE_MARK, JSON.stringify({ ts: now }), now).run();
+  return report;
+}
