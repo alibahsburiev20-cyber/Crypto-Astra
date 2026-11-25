@@ -11,7 +11,7 @@ import {
   adminPay, adminPayPrize, adminPayPrizeAward, adminPaySend, adminPaySolvency, adminPayStop,
   adminPaySweepPlan, adminPayWithdrawal,
   payAccount, payAddress, payProducts, payPurchase,
-  payStatus, payWithdraw, payWithdrawals,
+  payQr, payStatus, payWithdraw, payWithdrawals,
 } from '../routes/pay';
 import { adminPool, adminPoolEntry, poolPublic } from '../routes/pool';
 import { adminFreeze, adminGrant, adminWorld } from '../routes/admin';
@@ -87,12 +87,15 @@ export async function route(request: Request, env: Env): Promise<Response> {
     if (m === 'GET' && p === '/pay/status.json') return await payStatus(env);
     if (m === 'GET' && p === '/pay/products.json') return await payProducts(env);
     if (p === '/pay/account.json' || p === '/pay/purchase' || p === '/pay/withdrawals'
-      || p === '/pay/withdraw' || p === '/pay/address.json') {
+      || p === '/pay/withdraw' || p === '/pay/address.json' || p === '/pay/qr') {
       const auth = await requireAuth(request, env);
       if (m === 'GET' && p === '/pay/account.json') return await payAccount(env, auth);
       if (m === 'POST' && p === '/pay/purchase') return await payPurchase(request, env, auth);
       if (m === 'GET' && p === '/pay/withdrawals') return await payWithdrawals(env, auth);
       if (m === 'GET' && p === '/pay/address.json') return await payAddress(env, auth);
+      // QR — только со своей сессией и только про свой адрес: отдельного параметра
+      // «какой адрес нарисовать» у маршрута нет намеренно.
+      if (m === 'GET' && p === '/pay/qr') return await payQr(env, auth, request);
       if (m === 'POST' && p === '/pay/withdraw') return await payWithdraw(request, env, auth);
       return json({ error: 'not_found' }, 404);
     }

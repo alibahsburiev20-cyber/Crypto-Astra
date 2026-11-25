@@ -38,32 +38,62 @@ application/json; charset=utf-8`. Ответы не кэшируются (`Cache
 | GET | `/pool.json` | публичный отчёт пула: итоги по валютам, последние операции, флаг выплат |
 | GET | `/pool/report` | алиас `/pool.json` |
 | GET | `/pay/status.json` | состояние Astra Pay: сеть, контракт USDT, флаги, версия схемы |
-| GET | `/pay/products.json` | каталог: косметика и услуги, цены строкой, `purchasesEnabled` |
+| GET | `/pay/products.json` | каталог: косметика и услуги, цены строкой, `purchasesEnabled`; `503 payments_disabled`, если контур выключен |
 
 Пул ведётся отдельно от Ledger: ASTRA — внутриигровая валюта, её нельзя купить
 или вывести. Правила и запись — `docs/POOL.md`.
 
 `/pay/status.json` — единственный публичный маршрут Astra Pay на этапе 1. Он
-отдаёт `{ ok, service: "astra-pay", version, network, asset: "USDT", decimals: 6,
-contract, flags, schema, tables, now }`, где `flags` — шесть переключателей
-(`payments`, `deposits`, `purchases`, `pool`, `payouts`, `sweep`), а `schema` —
-`"off"` (база не проверялась, деньги выключены), `"ready"` или `"error"`.
+отдаёт `{ ok, service: "astra-pay", version, network, chain, networkLabel, asset:
+"USDT", decimals, contract, confirmations, rail, flags, schema, tables, now }`,
+где `flags` — шесть переключателей (`payments`, `deposits`, `purchases`, `pool`,
+`payouts`, `sweep`), а `schema` — `"off"` (база не проверялась, деньги выключены),
+`"ready"` или `"error"`.
+
+`chain` — активная цепь (`tron` | `bsc`), `decimals` — знаки USDT в ней (6 и 18
+соответственно), `networkLabel` — как сеть называть для игрока. `rail` —
+готовность рельса этой цепи в текущей сборке: `{ addresses, deposits, payouts,
+reason }`. Это не украшение: «сеть выбрана» и «код умеет» — разные вещи, и пока
+`rail.addresses` ложный, `/pay/address.json` отвечает `503` с тем же `reason`,
+а не выдаёт адрес, который никто не умеет смотреть.
 Ключей, адресов игроков и сумм в ответе нет. Пока все флаги `off`, денежных
-маршрутов не существует: запросы к ним вернут `404`.
+маршрутов не существует: запросы к ним вернут `404`, а публичные
+`/pay/status.json` и `/pay/products.json` — `503 payments_disabled`: выключенный
+магазин не должен выглядеть как пустой. Платёжная витрина (`/pay.html`) и админка
+отдаются с `X-Robots-Tag: noindex` (зеркало — в `client/_headers`); публичный
+`/pool.html` открыт индексированию намеренно.
 
 ## Astra Pay (с авторизацией)
 
 | Метод | Путь | Ответ |
 |---|---|---|
 | GET | `/pay/account.json` | баланс USDT, история операций, купленная косметика |
-| GET | `/pay/address.json` | личный адрес пополнения USDT (TRC-20) |
+| GET | `/pay/address.json` | личный адрес пополнения USDT: `{ address, chain, networkLabel, contract, decimals, confirmations, explorer }` |
+| GET | `/pay/qr` | адрес игрока как QR-картинка (PNG), рисуется сервером; `{ error }` вместо картинки, если рельс не готов |
 | GET | `/pay/withdrawals` | свои заявки на вывод, лимиты и стоп-флаг |
 | POST | `/pay/withdraw` | заявка на вывод: `{ address, amountMicro }` + `Idempotency-Key` |
 | POST | `/pay/purchase` | покупка за баланс: `{ productId }` + заголовок `Idempotency-Key` |
 
 `/pay/account.json` отдаёт `{ ok, asset: "USDT", balanceMicro, balance,
 purchasesEnabled, history[], entitlements[] }`. История — только своя: `delta`,
-`reason`, `ref`, `amount` в USDT.
+`reason`, `ref`, `amount` в USDT, и `txUrl` у записей о пополнении.
+
+`explorer` в `/pay/address.json` — `{ name, addressUrl }`: ссылка на страницу
+адреса в обозревателе **активной** цепи (`Tronscan` / `BscScan`). Ссылку
+строит сервер, а не клиент: клиент не должен догадываться, как в этой сети
+выглядит URL транзакции, иначе при смене цепи он начнёт вести в другое место.
+
+`GET /pay/qr` — тот же адрес, закодированный без чужих библиотек
+(`worker/src/pay/qr.ts`). QR нужен ровно один: отсканировать и перевести;
+адрес на экране остаётся главным, картинка его не заменяет. Формат — PNG
+(1 бит/пиксель; SVG в интерфейсе запрещён политикой ассетов), маска выбирается
+по минимальному штрафу, размер модуля — `?scale=` (1–16, по умолчанию 6).
+Клиент вставляет картинку как `data:`-ссылку: маршрут закрыт Bearer-токеном,
+который `<img>` отправить не умеет.
+Ответ живёт одну загрузку страницы (`Cache-Control: private, no-store`) и
+отказывается, если депозиты выключены, рельс не готов, адрес в базе принадлежит
+другой цепи или сам Address Rail выключен — тогда вместо картинки `503` с
+`reason`, тот же, что у `/pay/address.json`.
 
 `POST /pay/purchase` списывает цену **серверного** каталога: клиент присылает
 только `productId` и ключ идемпотентности, цену подменить нельзя. Ответы:
@@ -92,11 +122,12 @@ purchasesEnabled, history[], entitlements[] }`. История — только 
 | POST | `/admin/pay/withdrawal` | админ | `{ id, action }`: `approve`, `reserve`, `broadcast`, `sent`, `confirm`, `fail` |
 | POST | `/admin/pay/stop` | админ | `{ stop: true/false, reason }` — стоп-флаг выплат |
 | POST | `/admin/pay/send` | админ | `{ id }` — собрать, подписать в Signer и отправить заявку в состоянии `reserved` |
-| GET | `/admin/pay/sweep/plan` | админ | план сбора: по каждому адресу USDT, TRX, хватает ли на комиссию; ничего не двигает |
+| GET | `/admin/pay/sweep/plan` | админ | план сбора: по каждому адресу USDT и нативная монета на комиссию (TRX в TRON, BNB в BSC), хватает ли на газ, и сколько газа занести, чтобы собрать остальное; ничего не двигает |
 | GET | `/admin/pay/prize` | админ | сколько в призовом фонде, сколько выдано, баланс кошелька (USDT/TRX) и последние призы |
 | POST | `/admin/pay/prize/award` | админ | начислить приз из фонда на баланс игрока; `dryRun` по умолчанию, сумма не больше остатка фонда |
-| POST | `/admin/pay/send` | админ | подпись и отправка зарезервированной выплаты; `409 hot_wallet_insufficient_usdt` / `409 hot_wallet_no_trx` — платить нечем, заявка остаётся `reserved` |
-| GET | `/admin/pay/solvency` | админ | обязательства (балансы игроков + призовой фонд) против активов в блокчейне: покрытие, дефицит |
+| POST | `/admin/pay/send` | админ | подпись и отправка зарезервированной выплаты; `409 hot_wallet_insufficient_usdt` / `hot_wallet_no_trx` (TRON) / `hot_wallet_no_bnb` (BSC) — платить нечем, заявка остаётся `reserved`; `502 chain_id_mismatch`, `gas_price_too_high`, `nonce_busy`, `hot_address_mismatch`, `signer_contract_mismatch` — конфигурация, деньги не двинулись |
+| (cron) | — | — | в BSC подтверждение выплаты по квитанции сети (`pay/evm/payouts.ts`) делает cron: `sent → confirmed`, реверт → `failed` с возвратом. Вручную подтверждения не требуются |
+| GET | `/admin/pay/solvency` | админ | обязательства (балансы игроков + призовой фонд) против активов в блокчейне: покрытие, дефицит. `plan.truncated: true` означает «адресов больше, чем мы прочитали» — в этом случае активы считаются неполными и «покрыто» не утверждается |
 
 Админка пока закрыта заголовком `X-Admin-Token` (срез 5.3 заменит его на
 Cloudflare Access, токен останется вторым замком).

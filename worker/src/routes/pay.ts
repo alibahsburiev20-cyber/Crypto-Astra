@@ -1,11 +1,19 @@
 import type { AuthContext } from '../auth/guards';
 import type { Env } from '../env';
 import { json, readJsonSoft } from '../http/response';
-import { ensureAddress, findAddress, signerDeriver } from '../pay/addresses';
+import { addressMatchesChain, displayAddress, ensureAddress, findAddress, signerDeriver } from '../pay/addresses';
+import { chainSpec, type ChainSpec } from '../pay/chain';
 import { payFlags, publicFlags, walletState } from '../pay/flags';
-import { payBalanceMicro, payHistory } from '../pay/ledger';
+import { depositTxidFromRef, payBalanceMicro, payHistory } from '../pay/ledger';
+import { qrPng } from '../pay/qr';
 import { prizeSharePercent, usdtPoolBlock } from '../pay/pool';
 import { SWEEP_FEE_SUN, accountBalances, sweepChainDeps, sweepPlan } from '../pay/sweep';
+import { BSC_MAINNET, BSC_TESTNET } from '../pay/evm/config';
+import { BroadcastError as EvmBroadcastError, DEFAULT_MAX_GAS_PRICE_WEI, evmRpcFor, evmSignerClient, payoutGas, sendUsdtEvm } from '../pay/evm/broadcast';
+import { evmAccountBalances, evmHotWalletState, formatBnb, gasCostWei } from '../pay/evm/balances';
+import { releaseNonce, reserveNonce } from '../pay/evm/payouts';
+import { evmSweepPlan, formatSweepTotals } from '../pay/evm/sweep';
+import { isTestnetNetwork } from '../pay/flags';
 import { hotWalletState } from '../pay/hotwallet';
 import { solvencySheet } from '../pay/solvency';
 import {
@@ -15,9 +23,10 @@ import { ensurePaySchema, PAY_SCHEMA_VERSION, PAY_TABLES } from '../pay/schema';
 import { ShopError, catalogForClient, entitlements, premiumStatus, purchase } from '../pay/shop';
 import { formatMicroUsdt, isMicroAmount, parseUsdtToMicro } from '../pay/tron/amount';
 import { usdtContract } from '../pay/tron/contracts';
+import { readCursor } from '../pay/evm/deposits';
 import { requireAdmin } from '../http/admin';
 import {
-  DAILY_LIMIT_MICRO, MIN_WITHDRAW_MICRO, PayoutError, approveWithdrawal, confirmWithdrawal,
+  DAILY_LIMIT_MICRO, MIN_WITHDRAW_MICRO, PayoutError, approveWithdrawal, confirmWithdrawal, minWithdrawMicro,
   failWithdrawal, listWithdrawals, markBroadcast, markSent, requestWithdrawal, reserveWithdrawal,
   withdrawalQueue,
 } from '../pay/payouts';
@@ -39,6 +48,10 @@ import { ApiError } from '../world/errors';
 
 export async function payStatus(env: Env): Promise<Response> {
   const flags = payFlags(env);
+  // Всё, что касается сети, — из одного места (`pay/chain.ts`). Раньше `decimals`
+  // и `contract` были записаны здесь руками, и при появлении второй сети это
+  // стало бы «показываем игроку одну сеть, а смотрим другую».
+  const spec = chainSpec(env, flags);
   // Базу трогаем только когда это осмысленно: при выключенных деньгах запрос не
   // должен стоить ни одного DDL-запроса к D1.
   const touchDb = flags.payments || flags.schemaCheck;
@@ -48,9 +61,15 @@ export async function payStatus(env: Env): Promise<Response> {
     service: 'astra-pay',
     version: PAY_SCHEMA_VERSION,
     network: flags.network,
+    chain: spec.chain,
+    networkLabel: spec.label,
     asset: 'USDT',
-    decimals: 6,
-    contract: usdtContract(env, flags.network),
+    decimals: spec.decimals,
+    contract: spec.contract,
+    // Что из денежного контура реально готово на этой цепи: «сеть выбрана» и
+    // «код умеет» — разные вещи, и игрок должен видеть вторую.
+    rail: spec.ready,
+    confirmations: spec.confirmations,
     flags: publicFlags(flags),
     // off — деньги выключены; signer_required — включены, но кошельки ещё не
     // выдаются (не настроен Signer); ready — можно покупать и принимать USDT.
@@ -65,11 +84,21 @@ export async function payStatus(env: Env): Promise<Response> {
 /** Каталог. Цены — серверные; выключенные товары не показываются. */
 export async function payProducts(env: Env): Promise<Response> {
   const flags = payFlags(env);
+  // Выключенный контур не должен выглядеть как «магазин с пустыми полками»:
+  // 200 с пустым каталогом индексируется поисковиками, цитируется игроками как
+  // «магазин сломался» и вообще ничем не отличается от реальной пустоты.
+  // Включённые покупки при пустом каталоге — другое дело: это честное «товаров
+  // пока нет», оно остаётся 200.
+  if (!flags.payments) throw new ApiError(503, 'payments_disabled');
   return json({
     ok: true,
     purchasesEnabled: flags.purchases,
     wallets: walletState(env, flags),
+    // Витрина обязана назвать сеть: адрес `0x…` игрок может по ошибке выбрать в
+    // Ethereum или Polygon, и тогда деньги застрянут (ключ-то наш, а газа нет).
     asset: 'USDT',
+    chain: chainSpec(env, flags).chain,
+    networkLabel: chainSpec(env, flags).label,
     products: catalogForClient(),
     now: Date.now(),
   }, 200, { 'Cache-Control': 'public, max-age=300' });
@@ -82,32 +111,98 @@ export async function payProducts(env: Env): Promise<Response> {
  * Без Signer-контура адрес не выдаётся: `503 signer_not_configured`. Это
  * осознанно — «временный» адрес из ниоткуда хуже, чем понятная ошибка.
  */
-export async function payAddress(env: Env, auth: AuthContext): Promise<Response> {
+/**
+ * Адрес пополнения текущего игрока — одна функция на `/pay/address.json` и на
+ * `/pay/qr`. Разделять проверки нельзя: картинка, показанная там, где адрес
+ * ещё не готов, отправляет деньги в никуда точно так же, как нажатая «Купить».
+ */
+async function depositAddress(env: Env, auth: AuthContext): Promise<{ address: string; spec: ChainSpec }> {
   const flags = payFlags(env);
   if (!flags.deposits) throw new ApiError(503, 'deposits_disabled');
+  // Сеть «похожа на неизвестную» — это не «возьмём первую»: игрок может увидеть
+  // адрес одной сети, а монитор будет смотреть другую. Молчать дороже.
+  if (flags.chainConfigError) throw new ApiError(503, 'pay_chain_unknown');
+  // Адрес выдаём только когда рельс этой цепи дописан от конца до конца:
+  // выдать адрес в сети, где монитор ещё не умеет искать переводы, — это
+  // означает «игрок прислал деньги, а мы их не нашли».
+  const spec = chainSpec(env, flags);
+  if (!spec.ready.addresses) throw new ApiError(503, spec.ready.reason || 'rail_not_ready');
+  if (!spec.contract) throw new ApiError(503, 'usdt_contract_missing');
   if (!(await ensurePaySchema(env.DB))) throw new ApiError(503, 'pay_unavailable');
 
   const existing = await findAddress(env.DB, auth.userId);
   if (existing) {
-    return json({
-      ok: true, address: existing.address, index: existing.index, created: false,
-      network: flags.network, asset: 'USDT', contract: usdtContract(env, flags.network),
-    });
+    if (!addressMatchesChain(existing.address, spec.chain)) {
+      // Игрок уже видел адрес другой сети — это не «ошибка ввода», а повод
+      // остановиться: деньги по такому адресу мы не найдём.
+      throw new ApiError(409, 'address_chain_mismatch');
+    }
+    return { address: displayAddress(spec.chain, existing.address), spec };
   }
 
-  let address;
   try {
-    address = await ensureAddress(env.DB, auth.userId, signerDeriver(env), Date.now());
+    const created = await ensureAddress(
+      env.DB, auth.userId, signerDeriver(env, spec.chain), Date.now(),
+    );
+    return { address: displayAddress(spec.chain, created.address), spec, index: created.index, isNew: created.created } as {
+      address: string; spec: ChainSpec; index: number; isNew: boolean;
+    };
   } catch (e) {
+    if (e instanceof ApiError) throw e;
     const code = e instanceof Error ? e.message : 'signer_error';
     if (code === 'signer_not_configured') throw new ApiError(503, 'signer_not_configured');
     throw new ApiError(502, 'signer_unavailable');
   }
+}
 
+export async function payAddress(env: Env, auth: AuthContext): Promise<Response> {
+  const flags = payFlags(env);
+  const found = await depositAddress(env, auth);
+  const spec = found.spec;
+  const created = 'isNew' in found ? found.isNew : false;
   return json({
-    ok: true, address: address.address, index: address.index, created: address.created,
-    network: flags.network, asset: 'USDT', contract: usdtContract(env, flags.network),
-  }, 201);
+    ok: true,
+    address: found.address,
+    index: 'index' in found ? found.index : undefined,
+    created,
+    network: flags.network, chain: spec.chain, networkLabel: spec.label,
+    asset: 'USDT', contract: spec.contract,
+    // Витрина печатает предупреждение про дробную часть только там, где она
+    // правда отбрасывается, — поэтому знаки и подтверждения едут вместе с адресом.
+    decimals: spec.decimals, confirmations: spec.confirmations,
+    // Ссылка на эксплорер — не «украшение», а способ игрока проверить себя без
+    // нашего слова: адрес и сеть он видит, а «записан ли перевод» — только в сети.
+    explorer: { name: spec.explorerName, addressUrl: spec.addressUrl(found.address) },
+  }, created ? 201 : 200);
+}
+
+/**
+ * QR адреса пополнения. Рендерит сервер: клиентская библиотека QR означала бы,
+ * что адрес игрока уходит на чужой CDN или что в бандле лежит ещё один
+ * криптографический код, который никто не сверял. Сюда игрок попадает только со
+ * своей сессией, и в картинке не может оказаться ничего, кроме его адреса.
+ */
+export async function payQr(env: Env, auth: AuthContext, request: Request): Promise<Response> {
+  const found = await depositAddress(env, auth);
+  const url = new URL(request.url);
+  const scale = Number.parseInt(url.searchParams.get('scale') ?? '6', 10);
+  const png = await qrPng(found.address, { scale: Number.isFinite(scale) ? scale : undefined });
+  return new Response(png, {
+    status: 200,
+    headers: {
+      'Content-Type': 'image/png',
+      // Приватное и без кэша: адрес игрока не должен остаться в общем кэше
+      // прокси — и не пережить отзыв сессии.
+      'Cache-Control': 'private, no-store',
+      // Картинка генерируется под запрос, и любое её переиспользование — это
+      // чужой попытка угадать ссылку. `nosniff` запрещает браузеру «догадаться»,
+      // что в ответе не растр; CSP и DENY на всякий случай закрывают и просмотр
+      // ответа как документа (вкладка «открыть картинку по ссылке»).
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Security-Policy': "default-src 'none'; sandbox",
+      'X-Frame-Options': 'DENY',
+    },
+  });
 }
 
 /** Баланс, история и купленная косметика — только для владельца. */
@@ -121,13 +216,22 @@ export async function payAccount(env: Env, auth: AuthContext): Promise<Response>
     entitlements(env.DB, auth.userId),
     premiumStatus(env.DB, auth.userId, now),
   ]);
+  // Ссылка на перевод — для строк пополнения: `source_ref` депозита это
+  // `dep:<txid>:<номер события>`, то есть идентификатор транзакции уже в базе, и
+  // игроку не нужно ничего вставлять руками. Для остальных причин ссылки нет:
+  // выдумывать её хуже, чем не показать.
+  const spec = chainSpec(env, flags);
+  const rows = history.map((row) => {
+    const txid = row.reason === 'deposit' ? depositTxidFromRef(row.ref) : '';
+    return txid ? { ...row, txUrl: spec.txUrl(txid) } : row;
+  });
   return json({
     ok: true,
     asset: 'USDT',
     balanceMicro,
     balance: formatMicroUsdt(balanceMicro),
     purchasesEnabled: flags.purchases,
-    history,
+    history: rows,
     entitlements: owned,
     premium,
     now,
@@ -208,7 +312,9 @@ export async function payWithdrawals(env: Env, auth: AuthContext): Promise<Respo
     balance: formatMicroUsdt(balanceMicro),
     payoutsEnabled: flags.payouts && !stopped,
     stopped,
-    minAmountMicro: MIN_WITHDRAW_MICRO,
+    // Планка зависит от сети: на BEP-20 она ниже, и игрок должен видеть ровно ту,
+    // которая действует для выбранной им цепи.
+    minAmountMicro: minWithdrawMicro(chainSpec(env, flags).chain),
     dailyLimitMicro: DAILY_LIMIT_MICRO,
     items,
     now: Date.now(),
@@ -229,6 +335,9 @@ export async function payWithdraw(request: Request, env: Env, auth: AuthContext)
       address: String(body.address ?? ''),
       amountMicro: Number(body.amountMicro ?? 0),
       idemKey,
+      // Формат адреса — по активной цепи: TRON и BSC проверяются по-разному, и
+      // «примем любой» означает «зарезервируем деньги на несуществующий адрес».
+      chain: chainSpec(env, flags).chain,
     }, Date.now());
     return json({
       ok: true,
@@ -256,12 +365,33 @@ export async function adminPay(request: Request, env: Env): Promise<Response> {
   await requireAdmin(request, env);
   if (!(await ensurePaySchema(env.DB))) throw new ApiError(503, 'pay_unavailable');
   const now = Date.now();
-  const [report, queue, poolBlock] = await Promise.all([
+  const flags = payFlags(env);
+  const spec = chainSpec(env, flags);
+  const [report, queue, poolBlock, cursor, addrSplit] = await Promise.all([
     reconcile(env.DB, now), withdrawalQueue(env.DB, 50), usdtPoolBlock(env.DB, now),
+    // Где стоит сканер: по курсору видно, что приём встал (нода молчит, сеть
+    // выросла, а мы всё ещё на старом блоке).
+    readCursor(env.DB, spec.chain, spec.contract).catch(() => 0),
+    // Сколько активных адресов относится к активной цепи: при переезде это
+    // единственное число, по которому видно, что игрокам надо выдать новые.
+    env.DB.prepare(
+      `SELECT SUM(CASE WHEN address LIKE '0x%' THEN 1 ELSE 0 END) AS bsc,
+              SUM(CASE WHEN address LIKE 'T%' THEN 1 ELSE 0 END) AS tron
+         FROM pay_addresses WHERE active = 1`,
+    ).first<{ bsc: number | null; tron: number | null }>(),
   ]);
   return json({
     ok: true,
-    flags: publicFlags(payFlags(env)),
+    flags: publicFlags(flags),
+    chain: {
+      name: spec.chain, label: spec.label, network: spec.network,
+      decimals: spec.decimals, contract: spec.contract, confirmations: spec.confirmations,
+      cursor, ready: spec.ready,
+      addresses: {
+        active: spec.chain === 'bsc' ? Number(addrSplit?.bsc ?? 0) : Number(addrSplit?.tron ?? 0),
+        otherChain: spec.chain === 'bsc' ? Number(addrSplit?.tron ?? 0) : Number(addrSplit?.bsc ?? 0),
+      },
+    },
     reconcile: report,
     queue,
     // Призовой фонд сезона: доля выручки магазина (POOL_PRIZE_SHARE), не взносы.
@@ -336,9 +466,28 @@ export async function adminPaySend(request: Request, env: Env): Promise<Response
   if (row.status !== 'reserved') throw new ApiError(409, 'not_reserved');
 
   const flags = payFlags(env);
+  // Сборщик транзакций умеет пока только TRON. Отдавать команду «отправить» на
+  // другой цепи нельзя даже по ошибке: транзакция-то ушла бы в TRON.
+  const sendSpec = chainSpec(env, flags);
   const owner = String(env.PAY_HOT_ADDRESS ?? '');
+  // Сначала то, что чинится одной строчкой в секретах, потом «рельс не готов»:
+  // среди причин 503 самая полезная та, по которой оператор может что-то сделать.
   if (!owner) throw new ApiError(503, 'hot_wallet_missing');
   if (!env.SIGNER) throw new ApiError(503, 'signer_not_configured');
+  if (!sendSpec.ready.payouts) throw new ApiError(503, sendSpec.ready.reason || 'payouts_unavailable');
+  // В EVM адрес получателя обязан пройти формат активной цепи: заявка
+  // могла быть создана, когда сеть была другая.
+  if (sendSpec.chain === 'bsc' && !sendSpec.isAddress(String(row.address ?? '').trim())) {
+    throw new ApiError(409, 'address_chain_mismatch');
+  }
+
+  const attemptRow = await env.DB.prepare('SELECT COUNT(*) AS c FROM pay_payouts WHERE withdrawal_id = ?')
+    .bind(id).first<number>('c');
+  const attempt = Number(attemptRow ?? 0) + 1;
+
+  if (sendSpec.chain === 'bsc') {
+    return await sendEvmPayout(env, sendSpec, row.id, row.address, Number(row.amount_micro), attempt);
+  }
 
   // Платить нечем — говорим сразу и оставляем заявку в `reserved`.
   // Раньше такой перевод уходил в сеть и падал там, а игрок видел «отправляется».
@@ -364,10 +513,6 @@ export async function adminPaySend(request: Request, env: Env): Promise<Response
     }, 409);
   }
 
-  const attemptRow = await env.DB.prepare('SELECT COUNT(*) AS c FROM pay_payouts WHERE withdrawal_id = ?')
-    .bind(id).first<number>('c');
-  const attempt = Number(attemptRow ?? 0) + 1;
-
   try {
     const sent = await sendUsdt(trongridTransport(env), signerClient(env), {
       owner,
@@ -387,6 +532,94 @@ export async function adminPaySend(request: Request, env: Env): Promise<Response
 }
 
 
+/**
+ * Выплата в BNB Chain: газ, кошелёк, замок на nonce, подпись, отправка.
+ *
+ * Порядок такой специально: сначала «нечем платить» (409, заявка остаётся
+ * `reserved`), и только потом занимаем nonce и что-либо подписываем. Разрыв
+ * между «подписали» и «отправили» — единственное место, где деньги могут
+ * застрять, и он должен быть как можно короче.
+ */
+async function sendEvmPayout(
+  env: Env, spec: ChainSpec, id: string, address: string, amountMicro: number, attempt: number,
+): Promise<Response> {
+  const flags = payFlags(env);
+  const owner = String(env.PAY_HOT_ADDRESS ?? '').trim();
+  const recipient = spec.normalizeAddress(String(address ?? ''));
+  if (!spec.isAddress(recipient)) throw new ApiError(422, 'bad_destination_chain');
+
+  const rpc = evmRpcFor(env);
+  const chainId = isTestnetNetwork(flags.network) ? BSC_TESTNET.chainId : BSC_MAINNET.chainId;
+
+  let gas: { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint };
+  try {
+    gas = await payoutGas(rpc, owner, gasPriceCap(env));
+  } catch (e) {
+    if (e instanceof EvmBroadcastError) throw new ApiError(502, e.code);
+    throw e;
+  }
+
+  // «Нечем платить» говорим сразу и ничего не подписываем.
+  const wallet = await evmHotWalletState(rpc, spec.contract, owner, amountMicro, gasCostWei(gas.maxFeePerGas));
+  if (wallet.blocker) {
+    return json({
+      ok: false,
+      error: wallet.blocker,
+      withdrawal: { id, status: 'reserved', amount: formatMicroUsdt(amountMicro) },
+      wallet: {
+        address: wallet.address, usdt: wallet.usdt, shortfall: wallet.shortfall,
+        bnb: wallet.bnb, needBnb: formatBnb(gasCostWei(gas.maxFeePerGas)),
+      },
+    }, 409);
+  }
+
+  let reservation: { nonce: number; key: string } | null = null;
+  // Отправляли ли мы что-то в сеть: после успешной отправки замок держать НЕЧЕГО,
+  // он уже «израсходован» самим nonce. Освобождать его можно только до отправки.
+  let broadcastStarted = false;
+  try {
+    reservation = await reserveNonce(env.DB, rpc, chainId, owner, Date.now());
+    const sent = await sendUsdtEvm(rpc, evmSignerClient(env), {
+      owner, recipient, amountMicro, contract: spec.contract, chainId,
+      nonce: reservation.nonce, maxGasPriceWei: gasPriceCap(env),
+    });
+    broadcastStarted = true;
+    const updated = await markBroadcast(env.DB, id, { txid: sent.txid, attempt }, Date.now());
+    return json({
+      ok: true, txid: sent.txid, withdrawal: updated,
+      explorer: spec.txUrl(sent.txid), nonce: sent.nonce, maxGasCost: sent.maxCostWei.toString(),
+    });
+  } catch (e) {
+    // В сеть ничего не ушло — замок освобождаем, иначе этот nonce зарезервирован
+    // навечно и следующая отправка уйдёт с номером через один.
+    if (reservation && !broadcastStarted) await releaseNonce(env.DB, reservation.key);
+    if (e instanceof EvmBroadcastError) {
+      await markBroadcast(env.DB, id, { attempt, error: e.message }, Date.now()).catch(() => null);
+      throw new ApiError(502, e.code);
+    }
+    if (e instanceof PayoutError) throw new ApiError(409, e.code);
+    throw e;
+  }
+}
+
+/**
+ * Баланс кошелька для отчёта о фонде. Поля названы как у TRON (`trxSun`), чтобы
+ * не переписывать вывод: в EVM это wei, и ниже по коду оно не используется.
+ */
+async function evmPrizeBalances(env: Env, owner: string): Promise<{ usdtMicro: number; trxSun: number }> {
+  const spec = chainSpec(env, payFlags(env));
+  const balances = await evmAccountBalances(evmRpcFor(env), spec.contract, owner);
+  return { usdtMicro: balances.usdtMicro, trxSun: Number(balances.gasWei / 10n ** 10n) };
+}
+
+/** Потолок ставки газа: заградитель против «нода посоветовала 500 gwei». */
+function gasPriceCap(env: Env): bigint {
+  const raw = String(env.PAY_MAX_GAS_PRICE_WEI ?? '').trim();
+  if (!/^\d{1,24}$/.test(raw)) return DEFAULT_MAX_GAS_PRICE_WEI;
+  const cap = BigInt(raw);
+  return cap > 0n ? cap : DEFAULT_MAX_GAS_PRICE_WEI;
+}
+
 // --- План сбора (sweep): только чтение ---------------------------------------
 
 /**
@@ -397,18 +630,40 @@ export async function adminPaySweepPlan(request: Request, env: Env): Promise<Res
   await requireAdmin(request, env);
   if (!(await ensurePaySchema(env.DB))) throw new ApiError(503, 'pay_unavailable');
   const flags = payFlags(env);
+  const spec = chainSpec(env, flags);
+  const destination = String(env.PAY_HOT_ADDRESS ?? '').trim();
+
+  if (spec.chain === 'bsc') {
+    const plan = await evmSweepPlan({
+      db: env.DB,
+      rpc: evmRpcFor(env),
+      contract: spec.contract,
+      network: flags.network,
+      destination,
+      sweepEnabled: flags.sweep,
+      // Оценка «хватит ли BNB» на худшем случае. Ставку берём минимально
+      // правдоподобную (1 gwei): план показывает структуру, а не цену момента —
+      // цена нужна в `/sign`, где она читается из сети прямо перед подписью.
+      maxFeePerGas: 1_000_000_000n,
+    });
+    return json({
+      ok: true,
+      flags: { sweep: flags.sweep, payouts: flags.payouts, network: flags.network, chain: spec.chain },
+      plan: { ...plan, totals: { ...plan.totals, gasWei: plan.totals.gasWei.toString(), gasNeededWei: plan.totals.gasNeededWei.toString(), feePerSweepWei: plan.totals.feePerSweepWei.toString() }, rows: plan.rows.map((row) => ({ ...row, gasWei: row.gasWei.toString() })), display: formatSweepTotals(plan) },
+    }, 200, { 'Cache-Control': 'no-store' });
+  }
 
   const plan = await sweepPlan({
     db: env.DB,
     deps: sweepChainDeps(trongridFetcher(env.TRONGRID_API_KEY), flags.network, env),
     network: flags.network,
-    destination: String(env.PAY_HOT_ADDRESS ?? '').trim(),
+    destination,
     sweepEnabled: flags.sweep,
   });
 
   return json({
     ok: true,
-    flags: { sweep: flags.sweep, payouts: flags.payouts, network: flags.network },
+    flags: { sweep: flags.sweep, payouts: flags.payouts, network: flags.network, chain: spec.chain },
     plan,
   }, 200, { 'Cache-Control': 'no-store' });
 }
@@ -441,9 +696,11 @@ export async function adminPayPrize(request: Request, env: Env): Promise<Respons
   let wallet: { address: string; usdtMicro: number; usdt: string; trxSun: number; error: string | null } | null = null;
   if (owner) {
     try {
-      const balances = await accountBalances(
-        sweepChainDeps(trongridFetcher(env.TRONGRID_API_KEY), flags.network, env), owner,
-      );
+      const balances = chainSpec(env, flags).chain === 'bsc'
+        ? await evmPrizeBalances(env, owner)
+        : await accountBalances(
+          sweepChainDeps(trongridFetcher(env.TRONGRID_API_KEY), flags.network, env), owner,
+        );
       wallet = {
         address: owner,
         usdtMicro: balances.usdtMicro,
@@ -540,7 +797,44 @@ export async function adminPaySolvency(request: Request, env: Env): Promise<Resp
   if (!(await ensurePaySchema(env.DB))) throw new ApiError(503, 'pay_unavailable');
   const flags = payFlags(env);
   const owner = String(env.PAY_HOT_ADDRESS ?? '').trim();
+  const spec = chainSpec(env, flags);
   const deps = sweepChainDeps(trongridFetcher(env.TRONGRID_API_KEY), flags.network, env);
+
+  // В EVM активы читаются тем же планом сбора, но баланс кошелька — через
+  // `eth_call`: у TronGrid и RPC разные ответы на «контракт не найден», и сводить
+  // их в одну функцию значит получить «ноль» там, где на самом деле «не прочитали».
+  if (spec.chain === 'bsc') {
+    const rpc = evmRpcFor(env);
+    const plan = await evmSweepPlan({
+      db: env.DB, rpc, contract: spec.contract, network: flags.network,
+      destination: owner, sweepEnabled: flags.sweep, maxFeePerGas: 1_000_000_000n,
+    });
+    const chainErrors = plan.rows.filter((row) => row.blocker === 'chain_error').length;
+    const hot = owner ? await evmHotWalletState(rpc, spec.contract, owner, 0, 0n) : null;
+    const sheet = await solvencySheet(env.DB, {
+      // Неполный набор адресов = «мы не знаем», а не «столько и есть»: иначе
+      // отчёт показал бы «покрыто» по половине баланса.
+      addressesMicro: chainErrors > 0 || plan.truncated ? null : plan.totals.usdtMicro,
+      hotMicro: hot && !hot.error ? hot.usdtMicro : null,
+      addresses: plan.addresses,
+      chainErrors,
+    });
+    return json({
+      ok: true, sheet,
+      plan: {
+        chain: 'bsc', addresses: plan.addresses, truncated: plan.truncated, chainErrors,
+        // BigInt в JSON не живёт: наружу отдаём десятичные строки.
+        totals: {
+          usdtMicro: plan.totals.usdtMicro,
+          gasWei: plan.totals.gasWei.toString(),
+          gasNeededWei: plan.totals.gasNeededWei.toString(),
+          sweepableMicro: plan.totals.sweepableMicro,
+          belowMinMicro: plan.totals.belowMinMicro,
+        },
+        ready: plan.ready, reason: plan.reason,
+      },
+    }, 200, { 'Cache-Control': 'no-store' });
+  }
 
   const plan = await sweepPlan({
     db: env.DB,
@@ -554,8 +848,9 @@ export async function adminPaySolvency(request: Request, env: Env): Promise<Resp
   const hot = owner ? await hotWalletState(deps, owner, 0) : null;
 
   const sheet = await solvencySheet(env.DB, {
-    // Часть адресов не прочиталась — активы неполные, и «покрыто» утверждать нельзя.
-    addressesMicro: chainErrors > 0 ? null : plan.totals.usdtMicro,
+    // Часть адресов не прочиталась (или их больше, чем мы смотрели) — активы
+    // неполные, и «покрыто» утверждать нельзя.
+    addressesMicro: chainErrors > 0 || plan.truncated ? null : plan.totals.usdtMicro,
     hotMicro: hot && !hot.error ? hot.usdtMicro : null,
     addresses: plan.addresses,
     chainErrors,

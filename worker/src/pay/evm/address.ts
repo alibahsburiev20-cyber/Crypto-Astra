@@ -36,8 +36,12 @@ export function toChecksumAddress(address: string): string {
  * регистр с неверной суммой»: это самая частая опечатка при копировании.
  */
 export function isEvmAddress(input: string): boolean {
+  // Префикс принимаем в обоих написаниях (`0x` и `0X`): его печатают некоторые
+  // эксплореры и кошельки при копировании «как видно на экране». Канон — нижнее
+  // `0x`, и мы его же требуем в хранилище, но отклонять адрес только за регистр
+  // префикса значит потерять ввод, который кошелёк игрока принял бы.
   const raw = String(input ?? '').trim();
-  if (!/^0x[0-9a-fA-F]{40}$/.test(raw)) return false;
+  if (!/^0[xX][0-9a-fA-F]{40}$/.test(raw)) return false;
   const hex = raw.slice(2);
   if (hex === hex.toLowerCase() || hex === hex.toUpperCase()) return true;
   try {

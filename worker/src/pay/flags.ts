@@ -11,8 +11,15 @@
 // несколько сравнений строк.
 
 import type { Env } from '../env';
+import { isPayChain, type PayChain } from './units';
 
-/** Сеть TRON. По умолчанию тестнет: mainnet — только этап 12 и только вручную. */
+/**
+ * Среда: `nile` — тестовая, `mainnet` — боевая.
+ *
+ * Имена остались TRON'овские исторически (сеть TRON была первая), но
+ * используются они как «тестнет/прод» для любой цепи: для BSC `nile` значит
+ * `bsc-testnet`. Конкретную цепь задаёт `PAY_CHAIN`, см. `chain`.
+ */
 export type PayNetwork = 'nile' | 'mainnet';
 
 export interface PayFlags {
@@ -31,6 +38,10 @@ export interface PayFlags {
   /** Создавать таблицы `pay_*`, даже когда деньги выключены (проверка схемы). */
   schemaCheck: boolean;
   network: PayNetwork;
+  /** Какую цепь использовать. См. `pay/chain.ts`. */
+  chain: PayChain;
+  /** `PAY_CHAIN` задан, но значение незнакомо: деньги обязаны стоять. */
+  chainConfigError: boolean;
 }
 
 /** Единственное «включено» — строка `on`. Всё остальное выключено. */
@@ -42,11 +53,38 @@ export function payNetwork(env: Env): PayNetwork {
   return String(env.PAY_NETWORK ?? '').trim().toLowerCase() === 'mainnet' ? 'mainnet' : 'nile';
 }
 
+/**
+ * Как трактовать `PAY_NETWORK` после появления второй цепи.
+ *
+ * Значения исторически называются по-tron'овски (`nile` = тестнет), но смысл у
+ * них один: «тестовая среда» или «боевая». Для BSC `nile` читается как
+ * `bsc-testnet` — см. `pay/chain.ts`. Переименовывать значение в `mainnet`
+ * одним махом нельзя: оно лежит в секретах прод-воркера, и опечатка выключила
+ * бы приём денег.
+ */
+export function isTestnetNetwork(network: PayNetwork): boolean {
+  return network !== 'mainnet';
+}
+
+/**
+ * `PAY_CHAIN`: `tron` (по умолчанию) или `bsc`.
+ *
+ * Незнакомое значение — это `chainConfigError`, и деньги тогда не двигаются
+ * вообще: «опечатался в имени сети» не должно означать «принимали USDT не там,
+ * где показывали игроку».
+ */
+export function readChain(value: unknown): { chain: PayChain; unknown: boolean } {
+  const text = String(value ?? '').trim().toLowerCase();
+  if (!text) return { chain: 'tron', unknown: false };
+  return isPayChain(text) ? { chain: text, unknown: false } : { chain: 'tron', unknown: true };
+}
+
 export function payFlags(env: Env): PayFlags {
   const payments = isOn(env.PAYMENTS_ENABLED);
   // Дочерние флаги не могут быть включены при выключенном общем: это защита от
   // «включил депозиты и забыл общий тумблер» в обе стороны.
   const child = (value: unknown): boolean => payments && isOn(value);
+  const chain = readChain(env.PAY_CHAIN);
   return {
     payments,
     deposits: child(env.DEPOSITS_ENABLED),
@@ -56,6 +94,8 @@ export function payFlags(env: Env): PayFlags {
     sweep: child(env.SWEEP_ENABLED),
     schemaCheck: isOn(env.PAY_SCHEMA_CHECK),
     network: payNetwork(env),
+    chain: chain.chain,
+    chainConfigError: chain.unknown,
   };
 }
 
@@ -69,8 +109,13 @@ export function signerReady(env: Env): boolean {
 }
 
 /** Готовность денежного контура словами — для клиента и статуса. */
-export function walletState(env: Env, flags: PayFlags): 'off' | 'signer_required' | 'ready' {
+export function walletState(
+  env: Env, flags: PayFlags,
+): 'off' | 'signer_required' | 'ready' | 'chain_misconfigured' {
   if (!flags.payments) return 'off';
+  // Сеть «не та» опаснее, чем «не выбран»: адрес игроку всё равно покажем,
+  // а деньги придём смотреть в другой блокчейн.
+  if (flags.chainConfigError) return 'chain_misconfigured';
   return signerReady(env) ? 'ready' : 'signer_required';
 }
 

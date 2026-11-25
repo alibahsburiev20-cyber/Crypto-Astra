@@ -89,7 +89,7 @@ describe('GET /pay/status.json', () => {
     expect(body.asset).toBe('USDT');
     expect(body.decimals).toBe(6);
     expect(body.schema).toBe('off');
-    expect(body.tables).toBe(14);
+    expect(body.tables).toBe(15);
     expect(body.contract).toBe('TXLAQ63Xg1NAzckPwKHvzw7CSEmLMEqcdj');
     expect((body.flags as Record<string, boolean>).payments).toBe(false);
     // Никаких адресов, ключей и сумм в публичном ответе.

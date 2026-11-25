@@ -34,6 +34,24 @@ export function payCanonical(input: PayLedgerInput, prevHash: string): string {
   ]);
 }
 
+/**
+ * Сколько раз пересчитать `prev_hash` при конфликте. Конфликт — это короткая
+ * гонка двух параллельных начислений, а не сломанная база: второй вставляющий
+ * просто берёт уже занятый хвост и пробует следующий.
+ */
+const LEDGER_ATTEMPTS = 4;
+
+/**
+ * `prev_hash` под уникальным индексом (`ux_pay_ledger_prev`): журнал не может
+ * разветвляться. Без индекса два одновременных начисления читали одну и ту же
+ * голову и писали две записи с одним `prev_hash` — форк, из-за которого сверка
+ * позже давала ложный `deposits_chain_mismatch` и останавливала выплаты.
+ */
+export function isLedgerForkError(e: unknown): boolean {
+  const text = e instanceof Error ? `${e.name}: ${e.message}` : String(e ?? '');
+  return /ux_pay_ledger_prev|pay_ledger\.prev_hash/i.test(text);
+}
+
 export async function payLedgerHead(db: D1Database): Promise<string> {
   const row = await db.prepare('SELECT hash FROM pay_ledger ORDER BY created_at DESC, rowid DESC LIMIT 1')
     .first<{ hash: string }>('hash');
@@ -57,25 +75,36 @@ export async function appendPayLedger(db: D1Database, input: PayLedgerInput): Pr
     .bind(input.idemKey).first<{ hash: string }>('hash');
   if (existing) return { hash: String(existing), duplicated: true };
 
-  const prev = await payLedgerHead(db);
-  const hash = sha256Hex(payCanonical(input, prev));
-  const id = `pl_${hash.slice(0, 24)}`;
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < LEDGER_ATTEMPTS; attempt += 1) {
+    const prev = await payLedgerHead(db);
+    const hash = sha256Hex(payCanonical(input, prev));
+    const id = `pl_${hash.slice(0, 24)}`;
 
-  const res = await db.prepare(
-    `INSERT INTO pay_ledger (id, user_id, asset, delta, reason, source_ref, idem_key, prev_hash, hash, created_at)
-     VALUES (?, ?, 'USDT', ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT (idem_key) DO NOTHING`,
-  ).bind(
-    id, input.userId, input.delta, input.reason, input.sourceRef ?? '', input.idemKey, prev, hash, input.createdAt,
-  ).run();
+    let res: unknown;
+    try {
+      res = await db.prepare(
+        `INSERT INTO pay_ledger (id, user_id, asset, delta, reason, source_ref, idem_key, prev_hash, hash, created_at)
+         VALUES (?, ?, 'USDT', ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (idem_key) DO NOTHING`,
+      ).bind(
+        id, input.userId, input.delta, input.reason, input.sourceRef ?? '', input.idemKey, prev, hash, input.createdAt,
+      ).run();
+    } catch (e) {
+      // Кто-то успел встать на это же место цепи: перечитываем голову и пробуем снова.
+      if (isLedgerForkError(e)) { lastError = e; continue; }
+      throw e;
+    }
 
-  const changes = Number((res as { meta?: { changes?: number } }).meta?.changes ?? 0);
-  if (!changes) {
-    const again = await db.prepare('SELECT hash FROM pay_ledger WHERE idem_key = ?')
-      .bind(input.idemKey).first<{ hash: string }>('hash');
-    return { hash: again ? String(again) : hash, duplicated: true };
+    const changes = Number((res as { meta?: { changes?: number } }).meta?.changes ?? 0);
+    if (!changes) {
+      const again = await db.prepare('SELECT hash FROM pay_ledger WHERE idem_key = ?')
+        .bind(input.idemKey).first<{ hash: string }>('hash');
+      return { hash: again ? String(again) : hash, duplicated: true };
+    }
+    return { hash, duplicated: false };
   }
-  return { hash, duplicated: false };
+  throw new Error(`ledger_busy:${lastError instanceof Error ? lastError.message : 'fork'}`);
 }
 
 export async function payBalanceMicro(db: D1Database, userId: string): Promise<number> {
@@ -126,7 +155,6 @@ export async function creditDeposit(
     };
   }
 
-  const prev = await payLedgerHead(db);
   const entry: PayLedgerInput = {
     userId: input.userId,
     delta: input.amountMicro,
@@ -135,7 +163,13 @@ export async function creditDeposit(
     idemKey,
     createdAt: now,
   };
-  const hash = sha256Hex(payCanonical(entry, prev));
+  let hash = '';
+
+  // Голова перечитывается на каждой попытке: если параллельное начисление успело
+  // встать в цепь, наша запись обязана встать после него, а не рядом с ним.
+  for (let attempt = 0; attempt < LEDGER_ATTEMPTS; attempt += 1) {
+  const prev = await payLedgerHead(db);
+  hash = sha256Hex(payCanonical(entry, prev));
 
   try {
     await db.batch([
@@ -160,6 +194,13 @@ export async function creditDeposit(
         JSON.stringify({ txid: input.txid, eventIndex: input.eventIndex, amountMicro: input.amountMicro }), now,
       ),
     ]);
+
+    return {
+      credited: true,
+      duplicated: false,
+      hash,
+      balanceMicro: await payBalanceMicro(db, input.userId),
+    };
   } catch (e) {
     // Гонка: параллельный запрос успел зачислить тот же депозит.
     const again = await db.prepare('SELECT hash FROM pay_ledger WHERE idem_key = ?')
@@ -172,15 +213,14 @@ export async function creditDeposit(
         balanceMicro: await payBalanceMicro(db, input.userId),
       };
     }
+    // Депозит другой, а место в цепи занято — пробуем встать после того, кто
+    // успел раньше. Всё остальное идёт наверх.
+    if (isLedgerForkError(e)) continue;
     throw e;
   }
+  }
 
-  return {
-    credited: true,
-    duplicated: false,
-    hash,
-    balanceMicro: await payBalanceMicro(db, input.userId),
-  };
+  throw new Error('ledger_busy:deposit_credit');
 }
 
 export interface PayLedgerReport {
@@ -233,6 +273,19 @@ export async function verifyPayLedger(db: D1Database): Promise<PayLedgerReport> 
 }
 
 /** История игрока для кабинета: суммы, причины, без чужих данных. */
+/**
+ * Обратная операция к ключу идемпотентности депозита (`dep:<txid>:<событие>`):
+ * транзакция пополнения по записи журнала. Пустая строка — если это не депозит
+ * или идентификатор не похож на txid. Живёт рядом с построителем ключа затем,
+ * чтобы формат не разъехался: менять их можно только вместе.
+ */
+export function depositTxidFromRef(ref: string | null | undefined): string {
+  const raw = String(ref ?? '');
+  if (!raw.startsWith('dep:')) return '';
+  const txid = raw.slice(4).split(':')[0] ?? '';
+  return /^[0-9a-fA-F]{64}$/.test(txid) ? txid : '';
+}
+
 export async function payHistory(
   db: D1Database,
   userId: string,

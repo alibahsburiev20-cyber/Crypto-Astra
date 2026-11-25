@@ -153,6 +153,20 @@ async function loadPay() {
     + (r.stop ? ' · выплаты на стопе' : ' · стоп-флаг снят')
     + (data.flags ? ` · payouts: ${data.flags.payouts ? 'вкл' : 'выкл'}` : '');
 
+  // Сеть и курсор сканера — отдельной строкой: по ней видно, что приём встал,
+  // ещё до того, как игрок напишет «мне не зачислили».
+  const chain = data.chain || {};
+  setText('#pay-chain', chain.name
+    ? `Сеть: ${chain.label || chain.name} · знаков ${chain.decimals ?? '—'} · подтверждений ${chain.confirmations ?? '—'}`
+      + ` · курсор блока ${chain.cursor ?? 0}`
+      + (chain.contract ? ` · контракт ${chain.contract}` : ' · контракт не задан')
+      + (chain.ready && chain.ready.reason ? ` · ${chain.ready.reason}` : '')
+      // Что из рельса включено и сколько адресов относится к активной цепи:
+      // «игрокам надо перевыпустить адреса» видно именно по этому числу.
+      + (chain.ready ? ` · рельс: адреса ${chain.ready.addresses ? 'вкл' : 'выкл'}, приём ${chain.ready.deposits ? 'вкл' : 'выкл'}, выплаты ${chain.ready.payouts ? 'вкл' : 'выкл'}` : '')
+      + (chain.addresses ? ` · адресов ${chain.addresses.active}${chain.addresses.otherChain ? ` · другой цепи ${chain.addresses.otherChain}` : ''}` : '')
+    : 'Сеть: сервер не ответил.');
+
   const head = document.createElement('thead');
   head.innerHTML = '<tr><th>Заявка</th><th>Игрок</th><th>Сумма</th><th>Статус</th><th></th></tr>';
   const body = document.createElement('tbody');

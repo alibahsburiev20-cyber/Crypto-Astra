@@ -142,6 +142,21 @@ ASTRA, очки сезона и ресурсы аркада **не начисл�
 | `worker/test/unit/client-errors.test.ts` | у каждого кода `ApiError` есть текст клиента (`bad_game` — есть) |
 | `worker/test/e2e/arcade.spec.ts` | живые `/arcade*` против `wrangler dev`: каталог из 10 игр, `bad_game` 400, `run_not_found` 404, ход сквозь стену (`bad_trace`/`short`) сжигает попытку ровно один раз, `run_expired` 409 при повторной сдаче, честное решение лабиринта даёт XP и не трогает ASTRA, повтор с тем же `Idempotency-Key` не удваивает награду, журнал несёт `reason: 'arcade'`. Файл отдельный: частотный лимит (30 записей в минуту) считается на игрока, а аркадных запросов много |
 
+Живой воркер (dev, превью или прод) проверяется одним прогоном:
+
+```bash
+npm run smoke:arcade -- --base http://127.0.0.1:8787 --register --email t@example.com
+npm run smoke:arcade -- --base https://<домен> --email … --password …
+```
+
+`scripts/arcade-smoke.ts` проходит полный круг и печатает построчно `ok`/`FAIL`:
+каталог из десяти игр и все десять спрайтов, `409 bad_trace` на ход сквозь стену,
+`409 run_expired` на повторную сдачу, честный лабиринт (200, очки, `win`), побитово
+совпадающий повтор с тем же `Idempotency-Key`, неизменный баланс ASTRA и
+`reason: 'arcade'` в журнале. Расход — 2 попытки из суточных 10 у тестового
+аккаунта. Для исполнителя с доступом к Cloudflare это же расписано по шагам в
+`docs/ARCADE-AGENT-PROMPT.md`.
+
 Пересборка после правок в `worker/src/shared/arcade.ts`:
 
 ```bash

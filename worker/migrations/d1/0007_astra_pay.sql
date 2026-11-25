@@ -47,6 +47,15 @@ CREATE TABLE IF NOT EXISTS pay_invoices (
 -- Один активный счёт на игрока: два открытых счёта — путь к двойной оплате.
 CREATE UNIQUE INDEX IF NOT EXISTS ux_pay_invoices_open ON pay_invoices (user_id) WHERE status = 'open';
 
+-- Курсор сканера: с какого блока смотреть дальше (одна строка на цепь+контракт).
+CREATE TABLE IF NOT EXISTS pay_chain_cursor (
+  chain      TEXT NOT NULL,
+  contract   TEXT NOT NULL,
+  height     INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (chain, contract)
+);
+
 CREATE TABLE IF NOT EXISTS pay_chain_blocks (
   height         INTEGER PRIMARY KEY,
   block_id       TEXT NOT NULL,
@@ -109,6 +118,9 @@ CREATE TABLE IF NOT EXISTS pay_ledger (
 
 CREATE INDEX IF NOT EXISTS idx_pay_ledger_user ON pay_ledger (user_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_pay_ledger_reason ON pay_ledger (reason, created_at);
+-- Цепочка журнала: за данным хешем может следовать ровно одна запись, поэтому
+-- ветвление из-за гонки двух начислений ловится базой, а не сверкой постфактум.
+CREATE UNIQUE INDEX IF NOT EXISTS ux_pay_ledger_prev ON pay_ledger (prev_hash);
 
 CREATE TRIGGER IF NOT EXISTS pay_ledger_no_update BEFORE UPDATE ON pay_ledger
   BEGIN SELECT RAISE(ABORT, 'pay ledger is append-only'); END;

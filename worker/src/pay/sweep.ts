@@ -67,6 +67,12 @@ export interface SweepPlan {
   };
   /** Можно ли вообще собирать: включён флаг и задан кошелёк. */
   ready: boolean;
+  /**
+   * Активных адресов больше, чем прочитали за проход. Для списка в админке это
+   * норма, для отчёта о платёжеспособности — «мы не знаем»: суммы по части адресов
+   * нельзя выдавать за полную сверку.
+   */
+  truncated: boolean;
   reason: string | null;
   updatedAt: number;
 }
@@ -109,10 +115,19 @@ export async function sweepPlan(input: SweepPlanInput): Promise<SweepPlan> {
   const now = input.now ?? Date.now();
   const limit = input.limit ?? SWEEP_PLAN_LIMIT;
 
-  const rows = await input.db.prepare(
-    'SELECT address, user_id FROM pay_addresses WHERE active = 1 ORDER BY created_at DESC LIMIT ?',
-  ).bind(limit).all<{ address: string; user_id: string }>();
+  // `LIKE 'T%'`: в той же таблице живут адреса другой цепи, и TronGrid на них
+  // отвечает ошибкой — план выглядел бы как «балансы не читаются», а не «не та сеть».
+  const [rows, count] = await Promise.all([
+    input.db.prepare(
+      `SELECT address, user_id FROM pay_addresses
+        WHERE active = 1 AND address LIKE 'T%' ORDER BY created_at DESC LIMIT ?`,
+    ).bind(limit).all<{ address: string; user_id: string }>(),
+    input.db.prepare(
+      `SELECT COUNT(*) AS n FROM pay_addresses WHERE active = 1 AND address LIKE 'T%'`,
+    ).first<number>('n'),
+  ]);
   const found = (rows.results ?? []) as Array<{ address: string; user_id: string }>;
+  const total = Number(count ?? 0);
 
   const planRows: SweepRow[] = [];
   for (const row of found) {
@@ -163,6 +178,7 @@ export async function sweepPlan(input: SweepPlanInput): Promise<SweepPlan> {
     rows: planRows,
     totals: { usdtMicro, trxSun, trxShortfallSun, sweepableMicro, belowMinMicro },
     ready: reason === null,
+    truncated: (Number.isSafeInteger(total) ? total : Number.MAX_SAFE_INTEGER) > planRows.length,
     reason,
     updatedAt: now,
   };

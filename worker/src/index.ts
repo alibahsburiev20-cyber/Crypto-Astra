@@ -2,18 +2,22 @@ import { syncArchive } from './archive';
 import { cleanupAuthLimits } from './auth/rateLimit';
 import { ensureArchiveSchema } from './db/bootstrap';
 import { payFlags } from './pay/flags';
+import { chainSpec } from './pay/chain';
+import { applyEvmDeposits, bscActiveAddresses, scanEvmBlocks } from './pay/evm/deposits';
+import { createEvmRpc } from './pay/evm/rpc';
+import { applyEvmPayoutConfirmations } from './pay/evm/payouts';
 import { applyDeposits, scanAll, trongridFetcher } from './pay/monitor';
 import { tronApiBase } from './pay/tron/contracts';
 import { ensurePaySchema } from './pay/schema';
-import { reconcileAndFlag } from './pay/reconcile';
+import { pruneChainEvents } from './pay/cleanup';
+import { reconcileDaily } from './pay/reconcile';
 import { usdtContracts } from './pay/tron/contracts';
 import { cleanupSessions } from './auth/sessions';
 import type { Env } from './env';
 import { route } from './http/router';
-import { securityHeaders } from './http/security';
+import { staticResponse } from './http/static';
 import { withBudget } from './ops/guard';
 import { WorldLobby } from './lobby/WorldLobby';
-import { SITE_FILES } from './static/site';
 import { World } from './world/World';
 
 export { World, WorldLobby };
@@ -40,22 +44,6 @@ async function worldIds(env: Env): Promise<string[]> {
     console.error('world_seats fallback failed', e);
     return [];
   }
-}
-
-function staticResponse(pathname: string, method: string): Response | null {
-  const path = pathname === '/' ? '/index.html' : pathname;
-  const file = SITE_FILES[path];
-  // Отдача строго по точному ключу из `SITE_FILES`: путь не склеивается и не
-  // нормализуется, поэтому `/../worker/src/env.ts`, `//etc/passwd` и `%2e%2e%2f`
-  // просто не находят файла (проверено тестом).
-  if (!file) return null;
-  const headers: Record<string, string> = {
-    'Content-Type': file.type,
-    'Cache-Control': 'no-cache',
-    ...securityHeaders(),
-  };
-  if (method === 'HEAD') return new Response(null, { status: 200, headers });
-  return new Response(file.body, { status: 200, headers });
 }
 
 export default {
@@ -89,29 +77,99 @@ export default {
     if (pay.payments) await ensurePaySchema(env.DB);
     // Приём денег: смотрим блокчейн и превращаем найденное в баланс. Только при
     // включённом флаге и только подтверждённые переводы. Ошибка сети не валит cron.
-    if (pay.deposits) {
+    if (pay.deposits && pay.chainConfigError) {
+      // `PAY_CHAIN` с опечаткой: деньги не ищем вообще, но и не молчим — иначе
+      // «депозиты не пришли» будет выглядеть как проблема игрока.
+      console.error('pay deposits paused: неизвестное PAY_CHAIN', { value: String(env.PAY_CHAIN ?? '') });
+    } else if (pay.deposits) {
+      // Сканер выбирается по цепи, а не «оба сразу»: смотреть обе сети можно, но
+      // тогда одна из них крутит сеть впустую, и в логах непонятно, где деньги.
+      const spec = chainSpec(env, pay);
+      if (spec.chain === 'tron') {
+        try {
+          const summary = await scanAll(env.DB, {
+            fetchJson: trongridFetcher(env.TRONGRID_API_KEY),
+            contracts: usdtContracts(env, pay.network),
+            apiBase: tronApiBase(pay.network),
+          }, Date.now(), 20);
+          const applied = await applyDeposits(env.DB, Date.now(), 100);
+          if (summary.stored || summary.errors.length || applied.credited) {
+            console.log('pay monitor', summary, applied);
+          }
+        } catch (e) {
+          console.error('pay monitor failed', e);
+        }
+      } else if (spec.ready.deposits && spec.contract) {
+        try {
+          const addresses = await bscActiveAddresses(env.DB);
+          const scanned = await scanEvmBlocks(env.DB, {
+            rpc: createEvmRpc({ url: spec.apiBase, fetchImpl: fetch }),
+            contract: spec.contract,
+            chain: 'bsc',
+            confirmations: spec.confirmations,
+            addresses,
+          }, Date.now());
+          const applied = await applyEvmDeposits(env.DB, spec.contract, Date.now(), 100);
+          if (scanned.stored || scanned.error || applied.credited || applied.orphan) {
+            console.log('pay monitor bsc', scanned, applied);
+          }
+        } catch (e) {
+          console.error('pay monitor bsc failed', e);
+        }
+      } else {
+        // Рельс выбран, но не дописан: молча молчать нельзя, иначе «депозиты не
+        // пришли» будет выглядеть как проблема игрока.
+        console.error('pay deposits paused', { chain: spec.chain, reason: spec.ready.reason });
+      }
+      // Отдельная страховка на случай переезда: активные адреса старой цепи,
+      // которые новый сканер никогда не найдёт. Деньги на них не потеряны, но
+      // сами они не зачтутся — об этом надо узнать до анонса, а не после.
       try {
-        const summary = await scanAll(env.DB, {
-          fetchJson: trongridFetcher(env.TRONGRID_API_KEY),
-          contracts: usdtContracts(env, pay.network),
-          apiBase: tronApiBase(pay.network),
-        }, Date.now(), 20);
-        const applied = await applyDeposits(env.DB, Date.now(), 100);
-        if (summary.stored || summary.errors.length || applied.credited) {
-          console.log('pay monitor', summary, applied);
+        const stranded = await env.DB.prepare(
+          "SELECT COUNT(*) AS n FROM pay_addresses WHERE active = 1 AND address LIKE 'T%'",
+        ).first<number>('n');
+        if (Number(stranded ?? 0) > 0 && spec.chain !== 'tron') {
+          console.error('pay: активные TRON-адреса при другой цепи', { count: Number(stranded), chain: spec.chain });
         }
       } catch (e) {
-        console.error('pay monitor failed', e);
+        console.error('pay stranded check failed', e);
       }
     }
-    // Сверка — раз в сутки ночью. Расхождение само поднимает стоп-флаг выплат:
-    // лучше остановиться и разобраться, чем продолжать платить по битым данным.
-    if (pay.payments && String(controller.cron ?? '') === '0 3 * * *') {
+
+    // Подтверждение выплат по квитанции сети. Без этого шага заявка висела бы в
+    // `sent` до ручного нажатия «подтвердить»: деньги ушли, а баланс игрока
+    // «в обработке» неделями. Работает только там, где рельс дописан.
+    if (pay.payouts) {
+      const spec = chainSpec(env, pay);
+      if (spec.chain === 'bsc' && spec.ready.payouts && spec.contract) {
+        try {
+          const rpc = createEvmRpc({ url: spec.apiBase, fetchImpl: fetch });
+          const res = await applyEvmPayoutConfirmations(env.DB, rpc, spec.confirmations, Date.now());
+          if (res.checked) console.log('pay payouts confirm', { chain: 'bsc', ...res });
+        } catch (e) {
+          console.error('pay payouts confirm failed', e);
+        }
+      }
+    }
+
+    // Сверка — не реже раза в сутки, но без сравнения с текстом расписания:
+    // периодичность держит отметка в самой базе (reconcileDaily). Расхождение
+    // само поднимает стоп-флаг выплат: лучше остановиться и разобраться, чем
+    // продолжать платить по битым данным.
+    if (pay.payments) {
       try {
-        const report = await reconcileAndFlag(env.DB, Date.now());
-        if (!report.ok) console.error('pay reconcile mismatch', report);
+        const report = await reconcileDaily(env.DB, Date.now());
+        if (report && !report.ok) console.error('pay reconcile mismatch', report);
       } catch (e) {
         console.error('pay reconcile failed', e);
+      }
+      // Ротация сырых событий сети: без неё платёжный журнал съедает лимит D1,
+      // и обнаруживается это в момент, когда приходят настоящие деньги.
+      try {
+        const pruned = await pruneChainEvents(env.DB, Date.now());
+        if (pruned.deleted) console.log('pay chain events pruned', pruned);
+      } catch (e) {
+        console.error('pay prune failed', e);
       }
     }
     try {

@@ -14,21 +14,38 @@ node 20+ и терминал. Задача: довести оплачиваем�
 РЕПОЗИТОРИЙ: github.com/alibahsburiev20-cyber/Crypto-Astra, ветка main.
 ПРОД: https://crypto-astra.cryptoastra.workers.dev
 D1: astra-global (прод), astra-preview (превью). Сеть: mainnet, USDT TRC-20
-(контракт TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t).
+(контракт TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t). BSC-рельс в коде есть, но в
+продовую конфигурацию не включён: смену цепи решаю я, сам PAY_CHAIN не меняй.
 Документ с деталями и проверками: docs/CLOUDFLARE-AGENT-TASK.md — открой и
 следуй ему, этот текст задаёт порядок и границы.
 
-ТЕКУЩЕЕ СОСТОЯНИЕ (проверено):
-- Секреты основного Worker уже стоят: JWT_SECRET, ADMIN_TOKEN, ADMIN_EMAIL,
-  TURNSTILE_SECRET. Проверь, не перезаписывай без причины.
+ТЕКУЩЕЕ СОСТОЯНИЕ (сверено агентом с живым продом; если твоя проверка
+из шага 0 даёт другое — верь проверке и напиши мне, текст устаревает, база нет):
+- Signer (astra-pay-signer) задеплоен, binding [[services]] SIGNER подключён,
+  workers_dev выключен (публичный адрес Signer — 404). /pay/status.json:
+  wallets:"ready", schema:"ready", tables:14. Шаг 3 ПОВТОРЯТЬ НЕ НУЖНО —
+  только сверку из шага 4.
+- Секреты основного Worker стоят: JWT_SECRET, ADMIN_TOKEN, ADMIN_EMAIL,
+  TURNSTILE_SECRET, SIGNER_TOKEN, PAY_HOT_ADDRESS
+  (TEpNofrztMUwq3HgRjQARLF4ScxSbWRgFp — адрес публичный, сверяй с ним).
+  Проверь наличие, не перезаписывай без причины.
+- Секреты Signer: SIGNER_SEED (уже лежит — перегенерировать нельзя никогда) и
+  SIGNER_TOKEN. SIGNER_PRIVATE_KEY в Signer нет НАМЕРЕННО: без него нечем
+  двигать деньги, а деньги не включены. Он понадобится только для sweep/payouts
+  и только офлайн от меня (3.3, шаг 6).
 - Флаги: PAYMENTS_ENABLED/DEPOSITS_ENABLED/PURCHASES_ENABLED = on;
   PAYOUTS_ENABLED/SWEEP_ENABLED/POOL_ENABLED = off. Так и оставить, кроме
   одного случая, описанного в шаге 6.
-- Signer (astra-pay-signer) не задеплоен, binding [[services]] не подключён.
-  Поэтому /pay/status.json отдаёт wallets:"signer_required", а витрина пишет
-  «Нужен кошелёк».
-- В d1_migrations только 0001–0005, но все таблицы уже есть: их создаёт код
-  (ensurePaySchema/ensurePoolSchema через IF NOT EXISTS). Это норма, не авария.
+- D1 astra-global: 25 таблиц, pay_ledger 0 строк (реальных депозитов ещё не
+  было). Журнал d1_migrations отстаёт (0001–0005): таблицы 0006/0007 подняты
+  кодом через IF NOT EXISTS — это задокументированная норма, руками не правится
+  (шаг 1 объясняет, как догнать журнал безопасно).
+- Trongrid API-ключ НЕ задан: индексатор работает через публичные эндпоинты и
+  упирается в лимиты по IP (шаг 2).
+- Нагрузка: первый продовый прогон дал p95 650–750 мс при пороге 500 мс, НО
+  замер был искажён 403-ми Cloudflare на запросы без User-Agent. Скрипт
+  исправлен (UA + прогрев) — пересними замер (шаг 9.6) и выводы делай только
+  по новому числу.
 
 ЖЁСТКИЕ ПРАВИЛА (нарушение = остановка):
 1. Не включать PAYOUTS_ENABLED, SWEEP_ENABLED, POOL_ENABLED без моего
@@ -66,9 +83,12 @@ D1: astra-global (прод), astra-preview (превью). Сеть: mainnet, US
   npx wrangler d1 execute DB --remote --command "SELECT COUNT(*) AS rows FROM pay_ledger"
   npx wrangler d1 migrations apply DB --remote
   npx wrangler d1 migrations apply DB --remote --preview
-Проверка: число таблиц НЕ изменилось (в проде обычно 24 — счёт включает служебные
-d1_migrations, _cf_KV, sqlite_sequence; сверяй с числом «до», а не с 22),
-в журнале 0001–0007, pay_ledger не потерял строки.
+Проверка: число таблиц НЕ изменилось (сверяй строго с числом «до» из первой
+команды — служебные d1_migrations, _cf_KV, sqlite_sequence тоже в счётчике,
+поэтому фиксированное число здесь не пишется), в журнале после прогона
+0001–0007, pay_ledger не потерял строки. Отставание журнала («0001–0005,
+а таблицы есть») — известное состояние прода: все файлы миграций идемпотентны
+(IF NOT EXISTS), поэтому apply догоняет журнал без единого изменения данных.
 Если wrangler нет — отметь «T1 отложен» и иди дальше, это не блокирует запуск.
 
 ШАГ 2. Секреты основного Worker (только проверка и добор недостающего)
@@ -77,11 +97,13 @@ d1_migrations, _cf_KV, sqlite_sequence; сверяй с числом «до», �
 (alibahsburiev20@gmail.com), TURNSTILE_SECRET (site key 0x4AAAAAAGGq5Lt25F34cDiq).
 Если TURNSTILE_SECRET отсутствует — попроси значение у меня, не выдумывай.
 Опционально и желательно: TRONGRID_API_KEY (бесплатный тариф) — без него
-индексатор депозитов упирается в лимиты по IP.
+индексатор депозитов упирается в лимиты по IP. Сейчас ключа НЕТ — заведи, если
+дашь мне номер для регистрации; без моего ключа не регистрируй на своё имя.
 Проверка: GET /health → 200; GET /me без токена → 401; GET /admin/pool без
 токена → 401.
 
-ШАГ 3. Signer — единственное, что мешает приёму денег
+ШАГ 3. Signer — УЖЕ СДЕЛАН (см. состояние). Возвращайся к шагу целиком только
+если проверка шага 4 показала wallets:"signer_required" или пропавший binding.
   3.1 Сгенерируй секреты, но НЕ печатай их:
       openssl rand -hex 32 > /tmp/seed.txt    # SIGNER_SEED
       openssl rand -hex 32 > /tmp/token.txt   # SIGNER_TOKEN
@@ -117,9 +139,12 @@ d1_migrations, _cf_KV, sqlite_sequence; сверяй с числом «до», �
   # получить JWT игрока: POST /auth/register или /auth/login, взять access_token
   curl -s -H "Authorization: Bearer $TOKEN" $BASE/pay/address.json
   curl -s -H "Authorization: Bearer $TOKEN" $BASE/pay/address.json   # тот же адрес!
+  curl -s -H "Authorization: Bearer $TOKEN" $BASE/pay/qr -o /tmp/qr.png && file /tmp/qr.png
 Ожидаемо: адрес T…, network mainnet, asset USDT, contract
-TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t; повторный вызов — тот же адрес и index;
-без токена 401; https://astra-pay-signer.<sub>.workers.dev не открывается.
+TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t, explorer.name = Tronscan; повторный вызов —
+тот же адрес и index; без токена 401 и на /pay/address.json, и на /pay/qr;
+/pay/qr — PNG-картинка (сканер читает адрес с неё — открой телефоном или сверь
+с адресом руками); https://astra-pay-signer.<sub>.workers.dev не открывается.
 Плюс админка: без токена 401, с неверным 403, с верным 200.
 Если wallets всё ещё "signer_required" — binding не подхватился, разбирайся, не
 объявляй успех.
@@ -130,7 +155,7 @@ TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t; повторный вызов — тот ж�
   5.1 Подготовь: возьми мой адрес из /pay/address.json, сумму 1 USDT.
   5.2 Спроси меня и дождись «да» (это мои реальные деньги).
   5.3 После моего перевода проверь: GET /admin/pay (депозит виден, статус
-      credited, ровно одна строка на txid), баланс в /pay/balance.json вырос на
+      credited, ровно одна строка на txid), баланс в /pay/account.json вырос на
       1000000 микро-USDT, reconcile.issues пуст, покупка проходит один раз и
       повторная попытка не списывает второй раз.
   5.4 Если депозит не появился — не «зачисляй вручную»: смотри explorer,
@@ -172,6 +197,9 @@ TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t; повторный вызов — тот ж�
         npm run pay:loadtest -- --base $BASE --requests 500 --concurrency 25
       Порог: ошибок ≤1 %, p95 ≤500 мс. Цифры внеси в docs/MONITORING.md с
       пометкой «прод, дата». Превысил — не «крути дальше», напиши мне.
+      Предыстория: первый прогон показал 650–750 мс на p95, но запросы без
+      User-Agent ловили 403 — скрипт теперь шлёт UA и прогревает воркер;
+      замер выше — только на новой сборке, старое число не учитывать.
 
 ШАГ 10. Сверка журнала (T10 — не за один сеанс)
 Сделай день 1 и подготовь рутину на 7 дней:
@@ -191,7 +219,7 @@ TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t; повторный вызов — тот ж�
 
 ОТЧЁТ (ровно это, без секретов):
 1. Адрес: $BASE, HTTPS ok, /health build <...>
-2. D1: миграции <...>, schema ready, tables 14
+2. D1: миграции <...>, schema ready, число таблиц как «до» (шаг 1)
 3. Signer: задеплоен, wallets ready, адрес игрока выдан и повторяется
 4. PAY_HOT_ADDRESS совпадает с ключом (pay:hot-address --check): да/нет
 5. Админка: 401 без токена, 403 с неверным, 429 после 10 ошибок, 200 с верным

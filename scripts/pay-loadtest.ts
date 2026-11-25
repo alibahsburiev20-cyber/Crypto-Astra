@@ -45,7 +45,27 @@ async function main(): Promise<void> {
   if (!Number.isFinite(args.concurrency) || args.concurrency <= 0) throw new Error('bad concurrency');
 
   const paths = args.token ? [...PATH, '/pay/account.json'] : PATH;
-  const headers: Record<string, string> = args.token ? { Authorization: `Bearer ${args.token}` } : {};
+  // User-Agent обязателен. Замер с машины без браузера идёт запросами вообще без
+  // UA, и управляющие правила Cloudflare на *.workers.dev отвечают 403 —
+  // половина выборок превращается в шум отказов вместо времени ответа
+  // (проверено на проде: 500 запросов без UA давали 403-ы, p95 стал «шумным»).
+  const headers: Record<string, string> = {
+    'User-Agent': 'crypto-astra-loadtest/1.0 (ops check, см. docs/MONITORING.md)',
+  };
+  if (args.token) headers.Authorization = `Bearer ${args.token}`;
+
+  // Прогрев до замера: первый запрос к воркеру — это холодный инстанс,
+  // TLS-handshake и прогретие region'ов. В процентах ему делать нечего:
+  // замеряем steady state, а не старт.
+  for (const path of paths) {
+    try {
+      const res = await fetch(`${args.base}${path}`, { headers });
+      await res.arrayBuffer();
+    } catch {
+      // прогрев не считает ошибок: если база недоступна, основной цикл это покажет
+    }
+  }
+
   const timings: number[] = [];
   const statuses = new Map<number, number>();
   let errors = 0;

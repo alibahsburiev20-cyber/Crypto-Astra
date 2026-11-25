@@ -16,6 +16,12 @@ import { sha256Bytes } from '../../worker/src/shared/sha256';
 import { addressToHex, normalizeAddress, TronAddressError } from '../../worker/src/pay/tron/address';
 import { deriveKey } from '../../worker/src/pay/crypto/hd';
 import { signDigest } from '../../worker/src/pay/crypto/secp256k1';
+import { keccak256 } from '../../worker/src/pay/crypto/keccak';
+import { deriveEvmKey } from '../../worker/src/pay/evm/derivation';
+import { evmAddressFromPrivateKey, toChecksumAddress } from '../../worker/src/pay/evm/address';
+import { TRANSFER_SELECTOR, parseTransferCalldata, signingHash, signingPayload } from '../../worker/src/pay/evm/tx';
+import { TxError } from '../../worker/src/pay/evm/tx';
+import { chainValueToMicro, microToChainValue } from '../../worker/src/pay/units';
 
 export interface SignerEnv {
   /** Токен доступа. Обязателен: без него Worker отвечает 503. */
@@ -26,10 +32,26 @@ export interface SignerEnv {
   SIGNER_PRIVATE_KEY?: string;
   /** Максимум на одну транзакцию в микро-USDT. По умолчанию 100 USDT. */
   SIGNER_MAX_TX_MICRO?: string;
+  /**
+   * Контракт USDT в EVM-сети. Единственный `to`, которому мы подписываем
+   * транзакцию: вызов любого другого контракта — это произвольный код от имени
+   * кошелька, а не перевод.
+   */
+  SIGNER_EVM_CONTRACT?: string;
+  /** Какие chainId принимаем: «56», «97» или «56,97». По умолчанию 56 (mainnet). */
+  SIGNER_EVM_CHAIN_IDS?: string;
+  /** Потолок газа на транзакцию, wei. Выше — отказ: сеть дороже перевода. */
+  SIGNER_EVM_MAX_GAS_WEI?: string;
+  /** Потолок `gasLimit`. BEP-20 `transfer` стоит ~55k; миллион значит «в теле что-то не то». */
+  SIGNER_EVM_MAX_GAS_LIMIT?: string;
 }
 
 const MAX_INDEX = 1_000_000;
 const MAX_RAW_HEX = 8192;
+/** Значения в JSON приходят строками: BigInt в `JSON.stringify` не существует. */
+const DECIMAL_RE = /^\d{1,78}$/;
+const DEFAULT_MAX_GAS_WEI = 20_000_000_000n; // 20 gwei
+const DEFAULT_MAX_GAS_LIMIT = 200_000n;
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -76,27 +98,213 @@ function pad64(hex: string): string {
   return clean.padStart(64, '0');
 }
 
-/** Выдать адрес по индексу. Приватный ключ наружу не отдаётся никогда. */
+/**
+ * Выдать адрес по индексу. Приватный ключ наружу не отдаётся никогда.
+ *
+ * Одна сеть — один путь деривации: `m/44'/195'/0'/0/i` для TRON и
+ * `m/44'/60'/0'/0/i` для BNB Chain. Семя то же, индексы те же, ключи разные.
+ * Именно поэтому игроку можно показать оба адреса, не заводя второй кошелёк.
+ */
 export async function handleAddress(request: Request, env: SignerEnv): Promise<Response> {
   const denied = authorized(request, env);
   if (denied) return denied;
   if (!env.SIGNER_SEED) return fail('seed_missing', 503);
 
-  let body: { index?: unknown };
+  let body: { index?: unknown; chain?: unknown };
   try {
-    body = await request.json() as { index?: unknown };
+    body = await request.json() as { index?: unknown; chain?: unknown };
   } catch {
     return fail('bad_json', 400);
   }
   const index = Number(body.index);
   if (!Number.isInteger(index) || index < 0 || index >= MAX_INDEX) return fail('bad_index', 400);
+  const chain = body.chain === undefined || body.chain === null ? 'tron' : String(body.chain);
+  if (chain !== 'tron' && chain !== 'bsc') return fail('bad_chain', 400);
 
   try {
-    const derived = await deriveKey(env.SIGNER_SEED, index);
-    return json({ ok: true, index, address: derived.address });
+    const derived = chain === 'bsc'
+      ? await deriveEvmKey(env.SIGNER_SEED, index)
+      : await deriveKey(env.SIGNER_SEED, index);
+    // Наружу — адрес в той форме, в которой его видит игрок: для EVM это
+    // контрольная сумма EIP-55 (кошельки иначе ругаются), в базу уходит нижний
+    // регистр (см. `pay/chain.ts`).
+    return json({
+      ok: true, index, chain,
+      address: chain === 'bsc' ? toChecksumAddress(derived.address) : derived.address,
+    });
   } catch (e) {
     return fail(`derive_failed:${e instanceof Error ? e.message : 'unknown'}`, 500);
   }
+}
+
+function decimal(value: unknown, field: string): bigint {
+  const text = typeof value === 'number' ? String(value) : String(value ?? '').trim();
+  if (!DECIMAL_RE.test(text)) throw new Error(`bad_${field}`);
+  return BigInt(text);
+}
+
+function chainIdAllowed(env: SignerEnv, chainId: bigint): boolean {
+  const list = String(env.SIGNER_EVM_CHAIN_IDS ?? '56')
+    .split(',').map((x) => x.trim()).filter((x) => x.length > 0);
+  if (!list.length) return false;
+  return list.includes(chainId.toString());
+}
+
+function contractOf(env: SignerEnv): string {
+  const raw = String(env.SIGNER_EVM_CONTRACT ?? '').trim().toLowerCase();
+  if (!/^0x[0-9a-f]{40}$/.test(raw)) throw new Error('contract_missing');
+  return raw;
+}
+
+/**
+ * Тело запроса. `contract` здесь **не** принимается: контракт USDT берётся только
+ * из `SIGNER_EVM_CONTRACT`. Иначе «разрешённый контракт» стал бы параметром
+ * вызывающей стороны, а это ровно то, от чего Signer и нужен.
+ */
+export interface SignEvmRequest {
+  tx?: unknown;
+  signingHash?: unknown;
+  recipient?: unknown;
+  amountMicro?: unknown;
+}
+
+/**
+ * Подписать EVM-транзакцию выплаты.
+ *
+ * Signer не доверяет описанию перевода — он пересобирает транзакцию из полей,
+ * считает хеш сам и читает `data` как вызов `transfer(address,uint256)`.
+ * Отсюда порядок проверок:
+ *   1. поля транзакции собраны корректно и хеш совпадает с тем, что прислали;
+ *   2. `to` — контракт USDT из переменных окружения, а не «что попросили»;
+ *   3. `value` = 0: мы переводим токен, а не нативную монету;
+ *   4. газ и `chainId` в разрешённых пределах;
+ *   5. адрес получателя и сумма внутри `data` совпадают с телом заявки;
+ *   6. сумма не больше лимита на транзакцию (в тех же micro, что и TRON).
+ *
+ * Смысл в том, чтобы скомпрометированный Worker не смог выманить подпись на
+ * «одну транзакцию», а отправить другую: подпись привязана к хешу этих байт.
+ */
+export async function handleSignEvm(request: Request, env: SignerEnv): Promise<Response> {
+  const denied = authorized(request, env);
+  if (denied) return denied;
+  const key = String(env.SIGNER_PRIVATE_KEY ?? '').trim();
+  if (!/^[0-9a-fA-F]{64}$/.test(key)) return fail('key_missing', 503);
+
+  let body: SignEvmRequest;
+  try {
+    body = await request.json() as SignEvmRequest;
+  } catch {
+    return fail('bad_json', 400);
+  }
+
+  const raw = body.tx as Record<string, unknown> | undefined;
+  if (!raw || typeof raw !== 'object') return fail('bad_tx', 400);
+
+  let contract: string;
+  try {
+    contract = contractOf(env);
+  } catch {
+    return fail('contract_misconfigured', 503);
+  }
+
+  let tx;
+  try {
+    const chainId = decimal(raw.chainId, 'chain_id');
+    if (!chainIdAllowed(env, chainId)) return fail('chain_not_allowed', 400);
+    const nonce = decimal(raw.nonce, 'nonce');
+    if (nonce > 0xffffffffn) return fail('bad_nonce', 400);
+    const maxPriorityFeePerGas = decimal(raw.maxPriorityFeePerGas, 'priority_fee');
+    const maxFeePerGas = decimal(raw.maxFeePerGas, 'max_fee');
+    const gasLimit = decimal(raw.gasLimit, 'gas_limit');
+    const cap = decimal(env.SIGNER_EVM_MAX_GAS_WEI ?? DEFAULT_MAX_GAS_WEI.toString(), 'gas_cap');
+    const limitCap = decimal(env.SIGNER_EVM_MAX_GAS_LIMIT ?? DEFAULT_MAX_GAS_LIMIT.toString(), 'gas_limit_cap');
+    if (maxFeePerGas > cap) return fail('gas_price_too_high', 400);
+    // Нижняя граница — не перестраховка: транзакция с нулевой ставкой или с газом
+    // меньше «просто переслать монету» никогда не будет включена, а заявка
+    // уже ушла бы в `broadcasting` и висела там.
+    if (maxFeePerGas <= 0n) return fail('gas_price_too_low', 400);
+    if (gasLimit < 21_000n) return fail('gas_limit_too_low', 400);
+    if (maxPriorityFeePerGas > maxFeePerGas) return fail('priority_above_max_fee', 400);
+    if (gasLimit > limitCap) return fail('gas_limit_too_high', 400);
+    const to = String(raw.to ?? '').trim().toLowerCase();
+    if (!/^0x[0-9a-f]{40}$/.test(to)) return fail('bad_to', 400);
+    // Подписываем только вызов контракта USDT. Это единственная защита от
+    // «Worker попросил подписать approve() на всё, что лежит в кошельке».
+    if (to !== contract) return fail('contract_mismatch', 400);
+    if (decimal(raw.value ?? '0', 'value') !== 0n) return fail('value_not_zero', 400);
+    const data = String(raw.data ?? '');
+    if (!/^0x[0-9a-fA-F]*$/.test(data)) return fail('bad_data', 400);
+
+    tx = {
+      chainId: Number(chainId),
+      nonce: Number(nonce),
+      maxPriorityFeePerGas,
+      maxFeePerGas,
+      gasLimit,
+      to,
+      value: 0n,
+      data: data.toLowerCase(),
+    };
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'bad_tx';
+    return fail(message.startsWith('bad_') ? message : 'bad_tx', 400);
+  }
+
+  // 1. Хеш пересобираем сами и сверяем с присланным: расхождение = тело подменено.
+  let hash: string;
+  try {
+    hash = signingHash(tx);
+  } catch (e) {
+    if (e instanceof TxError) return fail(e.message, 400);
+    throw e;
+  }
+  const claimed = String(body.signingHash ?? '').trim().toLowerCase().replace(/^0x/, '');
+  if (claimed && claimed !== hash.slice(2)) return fail('hash_mismatch', 400);
+
+  // 5. Что внутри вызова.
+  let parsed: { to: string; amountRaw: bigint };
+  try {
+    parsed = parseTransferCalldata(tx.data);
+  } catch {
+    return fail('not_a_transfer_call', 400);
+  }
+  if (tx.data.slice(2, 10) !== TRANSFER_SELECTOR) return fail('not_a_transfer_call', 400);
+
+  let recipient: string;
+  try {
+    recipient = toChecksumAddress(String(body.recipient ?? '')).toLowerCase();
+  } catch {
+    return fail('bad_recipient', 400);
+  }
+  if (parsed.to.toLowerCase() !== recipient) return fail('recipient_mismatch', 400);
+  if (recipient === contract) return fail('recipient_is_contract', 400);
+
+  const amountMicro = Number(body.amountMicro);
+  if (!Number.isSafeInteger(amountMicro) || amountMicro <= 0) return fail('bad_amount', 400);
+  const expectedRaw = microToChainValue(amountMicro, 'bsc');
+  if (parsed.amountRaw !== expectedRaw) return fail('amount_mismatch', 400);
+  // На 18 знаках в хвосте легко потерять пыль: сумма внутри `data` обязана быть
+  // ровно этим micro, а не «округлённо близко к ним».
+  if (chainValueToMicro(parsed.amountRaw.toString(), 'bsc') !== amountMicro) return fail('amount_not_exact', 400);
+
+  // 6. Лимит на одну транзакцию — в micro, общая шкала для обеих сетей.
+  const maxMicro = Number(env.SIGNER_MAX_TX_MICRO ?? 100_000_000);
+  if (!Number.isFinite(maxMicro) || maxMicro <= 0) return fail('limit_misconfigured', 503);
+  if (amountMicro > maxMicro) return fail('above_signer_limit', 400);
+
+  // 7. Дайджест для EVM — keccak256 от тела, а не sha256: другое и не примут.
+  const digest = keccak256(signingPayload(tx));
+  const signed = signDigest(digest, key);
+  // Журнал: сеть, nonce, кому, сколько. Ни ключей, ни тел транзакций.
+  console.log('signer.sign.evm', JSON.stringify({
+    hash: hash.slice(2), chainId: tx.chainId, nonce: tx.nonce, to: recipient,
+    amountMicro, recovery: signed.recovery,
+  }));
+  // `from` — адрес подписавшего ключа. Worker сверит его с `PAY_HOT_ADDRESS`:
+  // баланс он смотрит на кошельке, а подпись стоит ключом из секрета, и эти два
+  // значения могут разойтись молча.
+  const from = toChecksumAddress(evmAddressFromPrivateKey(key)).toLowerCase();
+  return json({ ok: true, hash: hash.slice(2), from, signature: signed.signature });
 }
 
 export interface SignRequest {
@@ -183,6 +391,7 @@ export default {
     }
     if (request.method === 'POST' && url.pathname === '/address') return handleAddress(request, env);
     if (request.method === 'POST' && url.pathname === '/sign') return handleSign(request, env);
+    if (request.method === 'POST' && url.pathname === '/sign/evm') return handleSignEvm(request, env);
     return fail('not_found', 404);
   },
 };

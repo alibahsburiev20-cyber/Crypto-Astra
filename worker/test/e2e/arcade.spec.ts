@@ -69,7 +69,11 @@ if (!BASE) {
       expect(g.data.wins).toBe(0);
       expect(g.data.maxScore).toBe(600);
       expect(g.data.winScore).toBe(300);
-      expect(g.data.leaderboard).toEqual([]);
+      // Лидерборд арки — общий на мир, поэтому «пусто» мы утверждать не можем:
+      // на проде и на локальной машине до нас уже кто-то выиграл. Инвариант
+      // другой: новичок без побед в него не попадает.
+      expect((g.data.leaderboard as Array<Record<string, any>>).every((r) => r.isMe !== true)).toBe(true);
+      expect((g.data.leaderboard as Array<Record<string, any>>).every((r) => Number(r.wins) > 0)).toBe(true);
       for (const game of g.data.games) {
         expect(typeof game.title).toBe('string');
         expect(game.sprite).toMatch(/^\/sprites\/arcade\/[a-z0-9_]+\.png$/);
@@ -145,7 +149,11 @@ if (!BASE) {
       expect(view.data.wins).toBe(1);
       expect(view.data.best).toBe(finish.data.result.score);
       expect(view.data.games.find((g: { id: string }) => g.id === 'maze')).toMatchObject({ runs: 1, wins: 1 });
-      expect(view.data.leaderboard[0]).toMatchObject({ wins: 1, isMe: true });
+      // Мы обязаны быть в лидерборде, но не обязательно первыми: на проде до нас
+      // уже выигрывали, и сортировка по победам это честное равенство.
+      const mine = (view.data.leaderboard as Array<Record<string, any>>).find((r) => r.isMe === true);
+      expect(mine).toBeTruthy();
+      expect(Number(mine.wins)).toBeGreaterThanOrEqual(1);
       expect(view.data.today.xp).toBe(finish.data.rewards.xp);
     });
 
