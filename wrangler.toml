@@ -97,13 +97,13 @@ class_name = "WorldLobby"
 [previews.vars]
 TURNSTILE_SITE_KEY = ""
 ADS_ENABLED = "false"
-# Превью — песочница: деньги выключены всегда, даже если в бою когда-нибудь
-# включат. Отдельная D1 (astra-preview) и отдельный контур.
-PAYMENTS_ENABLED = "off"
-DEPOSITS_ENABLED = "off"
-PURCHASES_ENABLED = "off"
+# Превью — песочница. Временная nile-ветка: приём и выплаты на тестнете. Не мержить флаги в main.
+# Временная nile-ветка: приём и выплаты на тестнете. Не мержить флаги в main.
+PAYMENTS_ENABLED = "on"
+DEPOSITS_ENABLED = "on"
+PURCHASES_ENABLED = "on"
 POOL_ENABLED = "off"
-PAYOUTS_ENABLED = "off"
+PAYOUTS_ENABLED = "on"
 SWEEP_ENABLED = "off"
 PAY_NETWORK = "nile"
 # Превью живёт на TRON-тестнете: BSC-тестнет требует собственного USDT-контракта,
