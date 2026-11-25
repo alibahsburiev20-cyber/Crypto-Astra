@@ -115,4 +115,18 @@ describe('выполнение пачки', () => {
     });
     expect(consumed).toBe(3);
   });
+  it('упавшая операция не отдаёт наружу текст внутренней ошибки', async () => {
+    // В `String(e)` попадают сообщения Durable Object и D1: имена таблиц, куски
+    // запросов, «no such column» — всё, что не должен видеть игрок. Причина
+    // остаётся в консоли изолята, в ответе — только код.
+    const out = await runBatch({
+      ops: [op('/claim', 'key-0001')],
+      headers,
+      dispatch: async () => { throw new Error('SQLITE_ERROR: no such column: balances.amout'); },
+    });
+    expect(out.results).toHaveLength(1);
+    expect(out.results[0].status).toBe(500);
+    expect(JSON.stringify(out.results[0].data)).not.toMatch(/SQLITE|no such column|balances/);
+    expect(out.results[0].data).toEqual({ error: 'internal' });
+  });
 });

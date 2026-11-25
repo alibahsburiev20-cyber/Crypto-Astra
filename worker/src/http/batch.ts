@@ -162,8 +162,12 @@ export async function runBatch(input: RunBatchInput): Promise<RunBatchOutput> {
       const data = await res.json().catch(() => ({}));
       results.push({ op: op.op, status: res.status, data });
     } catch (e) {
-      // Одна упавшая операция не должна стирать уже выполненные.
-      results.push({ op: op.op, status: 500, data: { error: 'internal', detail: String(e) } });
+      // Одна упавшая операция не должна стирать уже выполненные. Текст ошибки
+      // наружу не отдаём: в него попадает то, что сказал Durable Object или D1, —
+      // имена таблиц и куски запросов. Клиенту достаточно кода и порядка
+      // операций, а настоящая причина остаётся в логе изолята.
+      console.error('batch op failed', op.op, e);
+      results.push({ op: op.op, status: 500, data: { error: 'internal' } });
     }
   }
 

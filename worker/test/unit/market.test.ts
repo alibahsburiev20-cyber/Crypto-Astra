@@ -4,7 +4,8 @@ import { RESOURCE_BASE_PRICES, marketTax } from '../../src/shared/gameData';
 import { applyDelta, getBalance } from '../../src/world/balances';
 import { verifyLedger } from '../../src/world/ledger';
 import { addResource, getResource } from '../../src/world/modules/maintenance';
-import { buyLot, cancelLot, createLot, marketView, priceBand } from '../../src/world/modules/market';
+import { buyLot, cancelLot, createLot, MARKET_BAND_MAX_SALES, marketView, priceBand } from '../../src/world/modules/market';
+import { MARKET_FLAG_MAX, MARKET_FLAG_TTL_MS, pruneMarketFlags, runIdemCleanup } from '../../src/world/modules/maintenance';
 import { createPlayer } from '../../src/world/modules/players';
 import { makeWorld } from '../helpers/sqlShim';
 
@@ -172,5 +173,85 @@ describe('рынок (срез 6 этапа 2)', () => {
     const flags = sql.exec('SELECT kind FROM market_flags').toArray().map((r) => String(r.kind));
     expect(flags).toContain('repeat_pair');
     expect(verifyLedger(sql).ok).toBe(true);
+  });
+});
+
+describe('потолок чтения коридора цены', () => {
+  // `market_sales` — append-only таблица, которая растёт вместе с оборотом рынка.
+  // Без потолка «медиана за 7 дней» читается полностью на каждом открытом экране
+  // рынка (по разу на ресурс), и раздуть её можно двумя счётчиками.
+  const bulk = (sql: SqlStorage, price: number, at: number, from: number, to: number) => sql.exec(
+    `INSERT INTO market_sales (id, lot_id, seller_id, buyer_id, resource, amount, unit_price, gross, tax, at)
+     WITH RECURSIVE n(x) AS (SELECT ?1 UNION ALL SELECT x + 1 FROM n WHERE x < ?2)
+     SELECT 'S' || x, 'L' || x, 'p1', 'p2', 'iron_ore', 1, ?3, ?3, 0, ?4 FROM n`,
+    from, to, price, at,
+  );
+
+  it('медиана считается по последним сделкам, а не по всем недели', () => {
+    const w = world();
+    const { sql, tx } = w;
+    tx(() => {
+      // Две тысячи старых «дёшево», затем свежие «дорого» — окна разного размера
+      // дают разный ответ, и видно, какое именно окно прочитал код.
+      bulk(sql, 1, T0 - 2 * DAY_MS, 1, 2000);
+      bulk(sql, 900, T0 - DAY_MS, 2001, 4000);
+    });
+    const band = priceBand(sql, 'iron_ore', T0);
+    expect(band.sales).toBe(MARKET_BAND_MAX_SALES);
+    // В окне из 2 000 последних строк — только дорогие: дёшевые отрезаны потолком.
+    expect(band.median).toBe(900);
+    // Без потолка медиана сидела бы между 1 и 900.
+    const all = Number(sql.exec('SELECT COUNT(*) AS c FROM market_sales').toArray()[0].c);
+    expect(all).toBe(4000);
+  });
+
+  it('окно ограничено, поэтому стоимость запроса не зависит от оборота', () => {
+    const w = world();
+    const { sql, tx } = w;
+    tx(() => { bulk(sql, 7, T0 - 2 * DAY_MS, 1, 6000); });
+    expect(priceBand(sql, 'iron_ore', T0).sales).toBe(MARKET_BAND_MAX_SALES);
+    expect(priceBand(sql, 'iron_ore', T0).median).toBe(7);
+  });
+});
+
+describe('флаги рынка чистятся', () => {
+  it('старые и лишние строки уходят, свежие остаются', () => {
+    const w = world();
+    const { sql, tx } = w;
+    tx(() => {
+      // Много свежих — сверх потолка, плюс древние, которые давно протухли.
+      sql.exec(
+        `INSERT INTO market_flags (id, kind, seller_id, buyer_id, resource, gross, at)
+         WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM n WHERE x < ?)
+         SELECT 'F' || x, 'large_trade', 'p1', 'p2', 'iron_ore', 99999, ? + x FROM n`,
+        MARKET_FLAG_MAX + 40, T0,
+      );
+      sql.exec(
+        `INSERT INTO market_flags (id, kind, seller_id, buyer_id, resource, gross, at)
+         WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM n WHERE x < 20)
+         SELECT 'OLD' || x, 'repeat_pair', 'p1', 'p2', 'iron_ore', 500, ? - ? FROM n`,
+        T0, MARKET_FLAG_TTL_MS + DAY_MS,
+      );
+    });
+    expect(Number(sql.exec('SELECT COUNT(*) AS c FROM market_flags').toArray()[0].c))
+      .toBe(MARKET_FLAG_MAX + 60);
+    const left = tx(() => pruneMarketFlags(sql, T0));
+    expect(left).toBe(MARKET_FLAG_MAX);
+    // Ушли именно древние: «старше TTL» и «сверх потолка» — два разных правила.
+    expect(sql.exec(`SELECT COUNT(*) AS c FROM market_flags WHERE id LIKE 'OLD%'`).toArray()[0].c).toBe(0);
+    expect(tx(() => pruneMarketFlags(sql, T0 + 1000))).toBe(MARKET_FLAG_MAX);
+  });
+
+  it('регулярная чистка мира трогает и флаги', () => {
+    const w = world();
+    const { sql, tx } = w;
+    tx(() => {
+      sql.exec(
+        `INSERT INTO market_flags (id, kind, seller_id, buyer_id, resource, gross, at) VALUES ('X1', 'large_trade', 'p1', 'p2', 'iron_ore', 1, ?)`,
+        T0 - MARKET_FLAG_TTL_MS - DAY_MS,
+      );
+    });
+    tx(() => runIdemCleanup(sql, T0));
+    expect(Number(sql.exec('SELECT COUNT(*) AS c FROM market_flags').toArray()[0].c)).toBe(0);
   });
 });

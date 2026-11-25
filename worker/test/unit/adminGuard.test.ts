@@ -4,7 +4,7 @@
 // где перед админкой нет ничего, кроме нашей проверки. Значит она обязана
 // выдерживать перебор и при этом не запирать владельца навсегда.
 import { describe, expect, it } from 'vitest';
-import { requireAdmin, ADMIN_IP_MAX } from '../../src/http/admin';
+import { requireAdmin, ADMIN_IP_MAX, ADMIN_TOKEN_MIN } from '../../src/http/admin';
 import type { Env } from '../../src/env';
 
 interface Row { key: string; attempts: number; window_start: number; blocked_until: number }
@@ -71,6 +71,18 @@ describe('охрана админки', () => {
   it('без секрета отвечает 503, без токена — 401', async () => {
     expect(await status(() => requireAdmin(request('x'), env(fakeDb().db, { ADMIN_TOKEN: '' })))).toBe(503);
     expect(await status(() => requireAdmin(request(null), env(fakeDb().db)))).toBe(401);
+  });
+
+  it('короткий ADMIN_TOKEN — 503, а не «тихий» подбор', async () => {
+    // Десять символов из `a-z0-9` перебираются с одного IP за вечер, а лимит
+    // попыток считает только ошибки: владельцу проще выставить нормальный секрет,
+    // чем объяснять, почему админка «внезапно работает».
+    const weak = 'a'.repeat(ADMIN_TOKEN_MIN - 1);
+    expect(weak.length).toBeLessThan(ADMIN_TOKEN_MIN);
+    const { db } = fakeDb();
+    expect(await status(() => requireAdmin(request(weak), env(db, { ADMIN_TOKEN: weak })))).toBe(503);
+    // Ровно на планке — уже работает.
+    expect(await status(() => requireAdmin(request('a'.repeat(ADMIN_TOKEN_MIN)), env(db, { ADMIN_TOKEN: 'a'.repeat(ADMIN_TOKEN_MIN) })))).toBe(200);
   });
 
   it('верный токен пропускает и сбрасывает счётчик', async () => {

@@ -1,6 +1,6 @@
 import { applyDelta } from '../balances';
 import { ApiError } from '../errors';
-import { verifyLedger } from '../ledger';
+import { verifyNow } from '../ledger';
 import { isFrozen, verifyStatus } from './maintenance';
 import { playerExists } from './players';
 import { publicIdentity } from './identity';
@@ -67,7 +67,10 @@ export function adminSummary(sql: SqlStorage, limit = 50, now = Date.now()): Adm
     const row = sql.exec(`SELECT COUNT(*) AS n FROM ${table}`).toArray()[0];
     return row ? Number(row.n) : 0;
   };
-  const report = verifyLedger(sql);
+  // Быстрая форма: суммы по всему журналу (в SQLite) и хеш-цепочка хвоста.
+  // Полную перепроверку от генезиса делает cron раз в неделю — экран оператора
+  // не должен стоить мира тем дороже, чем дольше живёт сезон.
+  const report = verifyNow(sql);
 
   return {
     frozen: isFrozen(sql),

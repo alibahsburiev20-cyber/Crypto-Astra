@@ -84,9 +84,23 @@ async function failAttempt(env: Env, key: string, now: number, error: ApiError):
   throw error;
 }
 
+/**
+ * Минимальная длина секрета админки.
+ *
+ * `docs/ADMIN.md` просит 32+ случайных символа; планка ниже (24) стоит ровно
+ * затем, чтобы «a1b2c3» из чата не оказался ключом к деньгам: подбор токена
+ * лимитирован десятью ошибками на IP за 15 минут, но лимит по IP — это защита
+ * от одного адреса, а не от распределённого перебора коротких значений.
+ *
+ * Ответ — 503, а не «токен не подошёл»: владелец должен увидеть, что дело в
+ * конфигурации, а не в его опечатке.
+ */
+export const ADMIN_TOKEN_MIN = 24;
+
 export async function requireAdmin(request: Request, env: Env): Promise<void> {
   const expected = String(env.ADMIN_TOKEN ?? '');
   if (!expected) throw new ApiError(503, 'admin_disabled');
+  if (expected.length < ADMIN_TOKEN_MIN) throw new ApiError(503, 'admin_weak_token');
 
   const key = adminKey(request);
   const now = Date.now();

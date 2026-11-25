@@ -24,7 +24,7 @@ if (!BASE) {
 
   const url = (p: string): string => `${BASE}${p}`;
   // Токен админки пула: в CI он приходит из .dev.vars, локально — из окружения.
-  const ADMIN = process.env.ADMIN_TOKEN ?? 'ci-admin-token';
+  const ADMIN = process.env.ADMIN_TOKEN ?? 'ci-admin-token-for-local-e2e-32c';
 
   async function api(
     path: string,

@@ -26,13 +26,31 @@ export interface PriceBand {
   sales: number;
 }
 
+/**
+ * Сколько последних сделок читает коридор цены.
+ *
+ * Потолок — не косметика: запрос идёт на каждом открытом экране рынка (по разу
+ * на каждый ресурс), а `market_sales` — таблица append-only и растёт вместе с
+ * оборотом. Без потолка «медиана за 7 дней» превращается в «прочесть все сделки
+ * недели и отсортировать их», и ровно это можно было раздуть двумя счётчиками до
+ * сотен тысяч строк на один запрос. 2 000 последних сделок — это медиана того же
+ * смысла и работа за конечное время.
+ */
+export const MARKET_BAND_MAX_SALES = 2000;
+
 /** Коридор цены: медиана сделок за 7 дней (или база) ±50 %. */
 export function priceBand(sql: SqlStorage, resource: string, now: number): PriceBand {
   const base = RESOURCE_BASE_PRICES[resource];
   if (!base) throw new ApiError(400, 'bad_resource');
+  // Сначала «последние N» (индекс `(resource, at)`), уже среди них — сортировка
+  // по цене для медианы. Наоборот (ORDER BY unit_price LIMIT N) получили бы
+  // «медиана самых дешёвых», и коридор уехал бы вниз.
   const prices = sql.exec(
-    'SELECT unit_price FROM market_sales WHERE resource = ? AND at >= ? ORDER BY unit_price',
-    resource, now - MARKET_WINDOW_MS,
+    `SELECT unit_price FROM (
+        SELECT unit_price FROM market_sales WHERE resource = ? AND at >= ?
+         ORDER BY at DESC LIMIT ?
+     ) ORDER BY unit_price`,
+    resource, now - MARKET_WINDOW_MS, MARKET_BAND_MAX_SALES,
   ).toArray().map((r) => Number(r.unit_price));
   let median = base;
   if (prices.length) {

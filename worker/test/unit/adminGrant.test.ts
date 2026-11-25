@@ -11,7 +11,8 @@ import { ApiError } from '../../src/world/errors';
 import { makeD1 } from '../helpers/d1';
 import type { Env } from '../../src/env';
 
-const ADMIN_TOKEN = 'test-admin-token';
+// Длиннее планки ADMIN_TOKEN_MIN (24): короткий токен админка считать не будет.
+const ADMIN_TOKEN = 'test-admin-token-for-unit-32ch';
 const ADMIN_EMAIL = 'owner@example.com';
 
 function envWithUsers(users: { id: string; email: string | null; world_id: string | null }[]) {

@@ -89,6 +89,13 @@ export async function route(request: Request, env: Env): Promise<Response> {
     if (p === '/pay/account.json' || p === '/pay/purchase' || p === '/pay/withdrawals'
       || p === '/pay/withdraw' || p === '/pay/address.json' || p === '/pay/qr') {
       const auth = await requireAuth(request, env);
+      // Денежные маршруты игрока идут под тем же частотным лимитом, что и игра.
+      // Раньше они были единственным «привязанным к человеку» исключением: `/pay/*`
+      // помечен критичным (его не отключает деградация бюджета), и по нему было
+      // бесплатно ходить циклом — `/pay/qr` на каждый запрос рисует PNG и гоняет
+      // его через deflate, то есть жжёт CPU изолята. Личный потолок (90 чтений и
+      // 30 записей в минуту) снимает именно цикл, живому человеку он не виден.
+      await enforceUserLimit(env, auth.userId, m !== 'GET');
       if (m === 'GET' && p === '/pay/account.json') return await payAccount(env, auth);
       if (m === 'POST' && p === '/pay/purchase') return await payPurchase(request, env, auth);
       if (m === 'GET' && p === '/pay/withdrawals') return await payWithdrawals(env, auth);

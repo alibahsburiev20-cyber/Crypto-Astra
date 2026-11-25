@@ -14,6 +14,7 @@ import { reconcileDaily } from './pay/reconcile';
 import { usdtContracts } from './pay/tron/contracts';
 import { cleanupSessions } from './auth/sessions';
 import type { Env } from './env';
+import { floodCheck } from './http/floodGuard';
 import { route } from './http/router';
 import { staticResponse } from './http/static';
 import { withBudget } from './ops/guard';
@@ -49,6 +50,11 @@ async function worldIds(env: Env): Promise<string[]> {
 export default {
   fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+    // Ливень-затвор раньше всего остального — до статики и до бюджета. Смысл в
+    // том, чтобы мусор с одного адреса не стоил ни одной записи в D1: и кэш
+    // страниц, и счётчик запросов стоят дешевле, чем выжженная база.
+    const flooded = floodCheck(request, env, url.pathname);
+    if (flooded) return Promise.resolve(flooded);
     if (request.method === 'GET' || request.method === 'HEAD') {
       const file = staticResponse(url.pathname, request.method);
       if (file) return Promise.resolve(file);
