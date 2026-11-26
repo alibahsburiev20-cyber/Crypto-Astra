@@ -18,8 +18,7 @@
 //                проверен по-настоящему:
 //                - доступ к PAY_EVM_RPC из той машины, где запущен скрипт;
 //                - тестовый USDT-контракт, задеплоленный под `PAY_EVM_CONTRACT`
-//                  (в тестнете общего USDT нет — его делают сами);
-//                - тестовые USDT на адресе игрока (иначе нечего зачислять);
+//              //                - тестовые USDT на адресе игрока (иначе нечего зачислять);
 //                - тестовый BNB на «горячем» кошельке, если просите настоящую
 //                  отправку (`--send`).
 //                Боевые флаги (`PAYOUTS_ENABLED`/`SWEEP_ENABLED`) скрипт не
@@ -111,6 +110,8 @@ interface Args {
   hotKey: string | null;
   seed: string;
   playerIndex: number;
+  /** Какую EVM-сеть прогоняем: `bsc` | `polygon`. Флаг перебивает `PAY_CHAIN`. */
+  chain: string;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -132,6 +133,10 @@ function parseArgs(argv: string[]): Args {
     hotKey: get('hot-key'),
     seed: get('seed') ?? '11'.repeat(32),
     playerIndex: Number(get('player-index') ?? '1'),
+    // Флаг, а не только переменная окружения: прогон обеих сетей обязан
+    // запускаться с одной и той же командой, иначе вторая сеть «проверяется»
+    // только тем, кто помнит экзотический синтаксис env-префикса.
+    chain: String(get('chain') ?? process.env.PAY_CHAIN ?? 'bsc').trim().toLowerCase(),
   };
 }
 
@@ -139,20 +144,33 @@ function parseArgs(argv: string[]): Args {
 function buildEnv(args: Args): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(process.env)) if (typeof v === 'string') env[k] = v;
-  env.PAY_CHAIN = env.PAY_CHAIN || 'bsc';
+  env.PAY_CHAIN = args.chain || 'bsc';
   env.PAY_NETWORK = env.PAY_NETWORK || 'testnet';
-  if (args.contract) env.PAY_EVM_CONTRACT = args.contract;
+  // Список сканируемых сетей подгоняем под проверяемую: без этого `PAY_CHAIN=polygon`
+  // означало бы «адреса выдаём в Polygon, а `evmChainSpecs` по умолчанию смотрит
+  // BNB» — и прогон проверял бы не ту сеть, которую назван проверять.
+  if (!env.PAY_EVM_CHAINS) env.PAY_EVM_CHAINS = env.PAY_CHAIN === 'polygon' || env.PAY_CHAIN === 'pol' || env.PAY_CHAIN === 'matic' ? 'polygon' : 'bnb';
+  // Имя переменной — по сети. Прогон Polygon обязан настраиваться `PAY_EVM_*_POL`
+  // (как и воркер): писать polygon-контракт в общий `PAY_EVM_CONTRACT` — это
+  // «токен BNB в слоте Polygon», и прогон проверял бы не ту конфигурацию.
+  const suffix = env.PAY_CHAIN === 'polygon' || env.PAY_CHAIN === 'pol' || env.PAY_CHAIN === 'matic' ? 'POL' : 'BNB';
+  const contractKey = `PAY_EVM_CONTRACT${suffix === 'POL' ? '_POL' : ''}`;
+  const rpcKey = `PAY_EVM_RPC${suffix === 'POL' ? '_POL' : ''}`;
+  const confKey = `PAY_EVM_CONFIRMATIONS${suffix === 'POL' ? '_POL' : ''}`;
+  if (args.contract) env[contractKey] = args.contract;
   // В loopback контракт — игрушечный токен прогона: иначе проверка конфигурации
   // выключает приём, и зациклить её на подставной ноде нельзя.
-  if (args.loopback && !env.PAY_EVM_CONTRACT) env.PAY_EVM_CONTRACT = '0x' + 'c0'.repeat(20);
+  if (args.loopback && !env[contractKey]) env[contractKey] = '0x' + 'c0'.repeat(20);
   // Подтверждения: те же дефолты, что в `pay/evm/config.ts` — иначе «нет
   // значения» выглядит как ошибка конфигурации, а не как «оператор не спорил».
-  if (!env.PAY_EVM_CONFIRMATIONS) env.PAY_EVM_CONFIRMATIONS = env.PAY_NETWORK === 'mainnet' ? '15' : '3';
+  if (!env[confKey] && !env.PAY_EVM_CONFIRMATIONS) {
+    env[confKey] = env.PAY_NETWORK === 'mainnet' ? (suffix === 'POL' ? '64' : '15') : (suffix === 'POL' ? '12' : '3');
+  }
   if (args.hotKey) env.SIGNER_PRIVATE_KEY = args.hotKey;
-  if (!env.PAY_EVM_RPC) {
-    env.PAY_EVM_RPC = env.PAY_NETWORK === 'mainnet'
-      ? 'https://bsc-dataseed.bnbchain.org'
-      : 'https://bsc-testnet-rpc.publicnode.com';
+  if (!env[rpcKey] && !env.PAY_EVM_RPC) {
+    env[rpcKey] = env.PAY_NETWORK === 'mainnet'
+      ? (suffix === 'POL' ? 'https://polygon-rpc.com' : 'https://bsc-dataseed.bnbchain.org')
+      : (suffix === 'POL' ? 'https://rpc-amoy.polygon.technology' : 'https://bsc-testnet-rpc.publicnode.com');
   }
   return env;
 }
@@ -177,6 +195,8 @@ function reportChecks(prefix: string, checks: { step: string; status: string; re
 class LoopbackNode implements NodeLike {
   head = 100;
   chainIdValue = 97;
+  /** Знаки токена: подставка обязана врать про них так же, как проверяющая сеть. */
+  decimalsValue = 18;
   private logRows: Record<string, unknown>[] = [];
   private txCount = new Map<string, number>();
   private receipts = new Map<string, Receipt>();
@@ -223,7 +243,7 @@ class LoopbackNode implements NodeLike {
   async call(to: string, data: string): Promise<string> {
     if (String(to).toLowerCase() !== this.contract.toLowerCase()) return '0x';
     // `decimals()` — есть ли токен в сети; `balanceOf(address)` — сколько на адресе.
-    if (data.toLowerCase().startsWith('0x95d89b41')) return `0x${(18).toString(16).padStart(64, '0')}`;
+    if (data.toLowerCase().startsWith('0x95d89b41')) return `0x${(this.decimalsValue).toString(16).padStart(64, '0')}`;
     if (data.toLowerCase().startsWith('0x70a08231')) {
       const address = `0x${data.slice(10 + 24, 10 + 64)}`.toLowerCase();
       return `0x${(this.usdt.get(address) ?? 0n).toString(16).padStart(64, '0')}`;
@@ -315,20 +335,31 @@ async function main(): Promise<number> {
   // `chainSpec` читает только нужные поля — отдаём им ровно их.
   const asEnv = env as unknown as Parameters<typeof chainSpec>[0];
 
-  console.log('Сквозная проверка BSC-рельса (USDT BEP-20 в тестнете)');
+  console.log(`Сквозная проверка EVM-рельса USDT в сети «${env.PAY_CHAIN}» (флаг --chain, иначе PAY_CHAIN)`);
   console.log(`режим: ${args.loopback ? 'loopback — локальная подставная нода' : 'сеть — реальная нода'}; отправка: ${args.send ? 'разрешена флагом --send' : 'нет (dry-run)'}`);
   console.log('');
 
   // 1. Конфигурация: всё, что решается без сети.
   const cfg = checkChainEnv(env);
   reportChecks('конфигурация', cfg.checks);
-  if (cfg.fatal && !args.loopback) return finish();
+  if (cfg.fatal && !args.loopback) return finish(cfg.gasSymbol);
 
-  // Тип `PayNetwork` исторически назван по TRON-тестнету (`nile`); для BSC это
-  // «не mainnet» = тестнет. Значение берём из PAY_NETWORK, как это делает флаг-модуль.
+  // Тип `PayNetwork` исторически назван по TRON-тестнету (`nile`); для EVM-сетей
+  // это «не mainnet» = тестнет. Значение берём из PAY_NETWORK, как это делает
+  // флаг-модуль, а сеть прогон берёт из `cfg.chain`: одна и та же сборка скрипта
+  // обязана проходить и BNB, и Polygon, иначе «мы прогнали рельс» будет значить
+  // «прогнали одну сеть из двух».
   const network: PayNetwork = env.PAY_NETWORK === 'mainnet' ? 'mainnet' : 'nile';
-  const spec = chainSpec(asEnv, { network, chain: 'bsc' });
-  const contract = String(env.PAY_EVM_CONTRACT ?? '').toLowerCase() || '0x' + 'c0'.repeat(20);
+  const spec = chainSpec(asEnv, { network, chain: cfg.chain });
+  const contract = spec.contract || '0x' + 'c0'.repeat(20);
+  // Знаки сети — они же «шкала прогона»: `loopback`, суммы raw и сверка каллдейта
+  // обязаны считать в 18 или в 6 знаках в зависимости от того, какая сеть
+  // прогоняется. Локальная переменная `decimals` ниже — это ответ `decimals()` от
+  // ноды, не путать.
+  const chainDecimals = spec.decimals;
+  // `expectedId` ниже читается уже из спеки; петле он нужен раньше, чем нода
+  // ответила, поэтому берём то же число из конфигурации.
+  const expectedIdForLoop = spec.chainId ?? cfg.expectedChainId;
   const missing = [
     spec.ready.addresses ? null : 'выдача адресов',
     spec.ready.deposits ? null : 'мониторинг депозитов',
@@ -353,31 +384,36 @@ async function main(): Promise<number> {
   const hot = evmAddressFromPrivateKey(hotKey);
   await db.prepare(
     `INSERT INTO pay_addresses (id, user_id, chain, address, hex, derivation_index, active, last_scanned_ts, created_at)
-     VALUES ('ad_player', 'u_player', 'bsc', ?, ?, ?, 1, 0, ?)`,
-  ).bind(player.address.toLowerCase(), player.address.slice(2).toLowerCase(), player.index, T0).run();
+     VALUES ('ad_player', 'u_player', ?, ?, ?, ?, 1, 0, ?)`,
+  ).bind(spec.chain, player.address.toLowerCase(), player.address.slice(2).toLowerCase(), player.index, T0).run();
   await db.prepare(
     `INSERT INTO pay_addresses (id, user_id, chain, address, hex, derivation_index, active, last_scanned_ts, created_at)
-     VALUES ('ad_other', 'u_other', 'bsc', ?, ?, 99, 1, 0, ?)`,
-  ).bind(OTHER, OTHER.slice(2), T0).run();
+     VALUES ('ad_other', 'u_other', ?, ?, ?, 99, 1, 0, ?)`,
+  ).bind(spec.chain, OTHER, OTHER.slice(2), T0).run();
   report('адрес игрока', /^0x[0-9a-fA-F]{40}$/.test(player.address) ? 'ok' : 'fail',
-    `${toChecksumAddress(player.address)} — путь ${player.path}; монитор ищет его по колонке chain='bsc'`);
+    `${toChecksumAddress(player.address)} — путь ${player.path}; монитор ищет его по колонке chain='${spec.chain}'`);
   report('адрес ↔ сеть', hot.startsWith('0x') ? 'ok' : 'fail',
-    `PAY_HOT_ADDRESS=${hot} — форма 0x обязательна: T… в BSC остаётся валидным адресом, но это не наш кошелёк`);
+    `PAY_HOT_ADDRESS=${hot} — форма 0x обязательна: T… в ${spec.label} остаётся валидным адресом, но это не наш кошелёк`);
 
   // 4. В loopback прогон сам играет «игрок отправил USDT»: событие в блоке,
   // газ на кошельке и балансы, которые читает план сбора.
   const loop = args.loopback ? new LoopbackNode(contract, hot) : null;
   if (loop) {
-    loop.fund(player.address, microToRaw(args.amountMicro, 18));
+    // Подставка обязана выглядеть как та сеть, которую прогоняем: и `chainId`, и
+    // `decimals()`. Иначе «loopback зелёный» проверяет BNB, а решение принимается
+    // про Polygon.
+    loop.chainIdValue = expectedIdForLoop;
+    loop.decimalsValue = chainDecimals;
+    loop.fund(player.address, microToRaw(args.amountMicro, chainDecimals));
     loop.setBalances({
       // 1.5 USDT на «чужом» адресе: ровно столько, чтобы план сбора обязан был
-      // признать его собираемым (минимум вывода на BSC — 1 USDT).
-      [OTHER]: { usdt: microToRaw(1_500_000, 18), bnb: 1n * 10n ** 17n },
+      // признать его собираемым (минимум вывода в EVM — 1 USDT).
+      [OTHER]: { usdt: microToRaw(1_500_000, chainDecimals), bnb: 1n * 10n ** 17n },
       [player.address]: { usdt: 0n, bnb: 0n },
     });
-    // Тестовый BNB «на руках» — ровно столько, чтобы --send-путь был проходим.
+    // Тестовая нативка «на руках» — ровно столько, чтобы --send-путь был проходим.
     loop.bnb.set(hot.toLowerCase(), 5n * 10n ** 17n);
-    loop.usdt.set(hot.toLowerCase(), 2n * 10n ** 18n);
+    loop.usdt.set(hot.toLowerCase(), 2n * 10n ** BigInt(chainDecimals));
     // Событие обязано «состариться» до `head − confirmations`, иначе сканер
     // правомерно его не видит. Майним подтверждений + 1 блок.
     loop.mine(spec.confirmations + 1);
@@ -398,16 +434,17 @@ async function main(): Promise<number> {
     report('нода', args.loopback ? 'fail' : 'skip',
       `${e instanceof Error ? e.message : String(e)} — ${spec.apiBase} из этой среды недоступна; прогон против сети требует запуска с машины, у которой есть выход в интернет`);
   }
-  const expectedId = env.PAY_NETWORK === 'mainnet' ? 56 : 97;
+  const expectedId = cfg.expectedChainId;
   if (nodeOk) {
-    report('нода', nodeId === expectedId ? 'ok' : 'fail', `chainId=${nodeId} (ожидали ${expectedId}), последний блок ${head}`);
+    report('нода', nodeId === expectedId ? 'ok' : 'fail',
+      `chainId=${nodeId} (ожидали ${expectedId} для ${spec.label}), последний блок ${head}`);
     report('контракт USDT', BigInt(decimals || '0x0') > 0n ? 'ok' : 'fail',
       BigInt(decimals || '0x0') > 0n
         ? `decimals() = ${Number(BigInt(decimals))} по ${contract}`
         : `по ${contract} кода нет: токена в этой сети не существует (в тестнете USDT задеплойте сами и передайте --contract)`);
     const hotBnb = await node.balance(hot).catch(() => 0n);
-    report('BNB на кошельке', hotBnb > 0n ? 'ok' : 'skip',
-      `${hotBnb} wei на ${hot}${hotBnb > 0n ? '' : ' — без тестового BNB настоящая отправка невозможна'}`);
+    report(`${cfg.gasSymbol} на кошельке`, hotBnb > 0n ? 'ok' : 'skip',
+      `${hotBnb} wei на ${hot}${hotBnb > 0n ? '' : ` — без тестового ${cfg.gasSymbol} настоящая отправка невозможна`}`);
   }
 
   // 6. Скан → зачисление.
@@ -415,10 +452,10 @@ async function main(): Promise<number> {
   if (!args.loopback) {
     const from = Math.max(0, head - args.blocks);
     await db.prepare(
-      `INSERT INTO pay_chain_cursor (chain, contract, height, updated_at) VALUES ('bsc', ?, ?, ?)
+      `INSERT INTO pay_chain_cursor (chain, contract, height, updated_at) VALUES (?, ?, ?, ?)
        ON CONFLICT (chain, contract) DO UPDATE SET height = excluded.height, updated_at = excluded.updated_at`,
-    ).bind(contract, from, T0).run();
-    report('курсор', 'ok', `старт с блока ${await readCursor(db, 'bsc', contract)} — окно ${args.blocks} блоков до head−${spec.confirmations}`);
+    ).bind(spec.chain, contract, from, T0).run();
+    report('курсор', 'ok', `старт с блока ${await readCursor(db, spec.chain, contract)} — окно ${args.blocks} блоков до head−${spec.confirmations}`);
   }
   const deadline = Date.now() + args.waitSec * 1000;
   let credited = 0;
@@ -433,12 +470,12 @@ async function main(): Promise<number> {
     const scan = await scanEvmBlocks(db, {
       rpc: node,
       contract,
-      chain: 'bsc',
+      chain: spec.chain,
       confirmations: spec.confirmations,
       addresses: scanAddresses,
       blocksPerPass: args.blocks,
     }, Date.now());
-    const applied = await applyEvmDeposits(db, contract, Date.now());
+    const applied = await applyEvmDeposits(db, contract, Date.now(), 100, spec.chain);
     credited += applied.credited;
     processed += applied.processed;
     orphan += applied.orphan;
@@ -468,7 +505,7 @@ async function main(): Promise<number> {
     : `отброшено нодой/фильтром: ${rejected}, сирот (деньги без владельца): ${orphan}${orphan ? ' — это адрес без активной записи в pay_addresses: игроку нужен возврат' : ''}`);
 
   // 7. Идемпотентность: второй проход ничего не добавляет.
-  const second = await applyEvmDeposits(db, contract, Date.now());
+  const second = await applyEvmDeposits(db, contract, Date.now(), 100, spec.chain);
   const balanceSecond = await payBalanceMicro(db, 'u_player');
   const idem = idempotencyVerdict({
     secondCredited: second.credited,
@@ -497,11 +534,11 @@ async function main(): Promise<number> {
   // 9. Границы подписи — то, что в бою отмеряет Signer.
   const balanceBeforePayout = await payBalanceMicro(db, 'u_player');
   const chainId = nodeId || expectedId;
-  const minMicro = minWithdrawMicro('bsc');
+  const minMicro = minWithdrawMicro(spec.chain);
   // Сумма выплаты округляется вниз до кванта вывода: заявка мельче минимума не
   // создаётся, а «остаток на балансе» — ровно то, что останется игроку.
   const payoutMicro = Math.floor(balanceBeforePayout * args.payoutRatio / minMicro) * minMicro;
-  const guards = signerGuardsCheck({ env, contract, chainId, amountMicro: payoutMicro });
+  const guards = signerGuardsCheck({ env, contract, chainId, amountMicro: payoutMicro, key: cfg.key });
   reportChecks('границы подписи', guards.checks);
 
   // 10. Заявка на выплату и тело транзакции. И там, и там — боевой код:
@@ -517,11 +554,11 @@ async function main(): Promise<number> {
     report('транзакция выплаты', 'skip', 'нет заявки — собирать нечего');
   } else {
     const requested = await requestWithdrawal(db, {
-      userId: 'u_player', chain: 'bsc', address: player.address, amountMicro: payoutMicro, idemKey: 'rehearsal-wd-1',
+      userId: 'u_player', chain: spec.chain, address: player.address, amountMicro: payoutMicro, idemKey: 'rehearsal-wd-1',
     }, Date.now());
     withdrawalId = requested.withdrawal.id;
     const secondRequest = await requestWithdrawal(db, {
-      userId: 'u_player', chain: 'bsc', address: player.address, amountMicro: payoutMicro, idemKey: 'rehearsal-wd-1',
+      userId: 'u_player', chain: spec.chain, address: player.address, amountMicro: payoutMicro, idemKey: 'rehearsal-wd-1',
     }, Date.now() + 1);
     const count = await db.prepare("SELECT COUNT(*) AS n FROM pay_withdrawals WHERE user_id = 'u_player'").first<number>('n');
     report('заявка на выплату', Number(count ?? 0) === 1 && secondRequest.duplicated ? 'ok' : 'fail',
@@ -541,6 +578,9 @@ async function main(): Promise<number> {
       contract,
       recipient: player.address,
       amountMicro: payoutMicro,
+      // Знаки сети, в которую платим: прогон обязан собрать ровно то тело, что
+      // соберёт боевой код, — иначе «сумма в каллдейте» проверялась бы не та.
+      chain: spec.chain,
       maxFeePerGas: 1_500_000_000n,
       maxPriorityFeePerGas: 1_000_000_000n,
     });
@@ -548,7 +588,7 @@ async function main(): Promise<number> {
     const decoded = decodeSignedTx(raw);
     reportChecks('транзакция выплаты', payoutTxCheck({
       got: decoded as unknown as Record<string, unknown>,
-      want: { contract, chainId, nonce, gasLimit: PAYOUT_GAS_LIMIT, recipient: player.address, amountMicro: payoutMicro, decimals: 18 },
+      want: { contract, chainId, nonce, gasLimit: PAYOUT_GAS_LIMIT, recipient: player.address, amountMicro: payoutMicro, decimals: chainDecimals, gasSymbol: cfg.gasSymbol },
     }).checks);
     // Тот же расчёт, что делает узел и что сверяет `sendUsdtEvm`: keccak256 от
     // байт подписанной транзакции. Разошлось — значит в сеть уходит не то тело.
@@ -592,7 +632,8 @@ async function main(): Promise<number> {
         report('газ', 'ok', `maxFeePerGas=${gas.maxFeePerGas} wei, maxPriority=${gas.maxPriorityFeePerGas} wei, nonce от ноды ${gas.nonce}`);
       }
       const result = await sendUsdtEvm(node as never, signer, {
-        owner: hot, recipient: player.address, amountMicro: payoutMicro, contract, chainId, nonce: nonceLock?.nonce,
+        owner: hot, recipient: player.address, amountMicro: payoutMicro, contract, chainId,
+        chain: spec.chain, nonce: nonceLock?.nonce,
       });
       sentTxid = result.txid;
       // `reserved → broadcasting` + попытка в `pay_payouts` — боевой путь. Форма
@@ -622,7 +663,7 @@ async function main(): Promise<number> {
     const rv = receiptVerdict({ receipt, head: headNow, confirmations: spec.confirmations });
     report('квитанция', rv.status, rv.reason);
     const one = await verifyPayout({ db, rpc: node as never, confirmations: spec.confirmations, withdrawalId, now: Date.now() });
-    const queue = await applyEvmPayoutConfirmations(db, node as never, spec.confirmations, Date.now());
+    const queue = await applyEvmPayoutConfirmations(db, node as never, spec.confirmations, Date.now(), spec.chain);
     const statusRow = await db.prepare('SELECT status FROM pay_withdrawals WHERE id = ?').bind(withdrawalId).first<string>('status');
     const okConfirm = statusRow === 'confirmed';
     report('подтверждение заявки', okConfirm ? 'ok' : (one === 'pending' ? 'skip' : 'fail'),
@@ -635,13 +676,14 @@ async function main(): Promise<number> {
     rpc: node as never,
     contract,
     network,
+    chain: spec.chain,
     destination: hot,
     sweepEnabled: true,
     maxFeePerGas: 1_500_000_000n,
   });
   const noGas = plan.rows.filter((r) => r.blocker === 'bnb_missing').length;
   report('план сбора', plan.reason ? 'fail' : plan.totals.sweepableMicro > 0 || noGas > 0 ? 'ok' : 'skip',
-    `адресов ${plan.addresses}${plan.truncated ? ' (список обрезан лимитом)' : ''}: к сбору ${formatUsdt(plan.totals.sweepableMicro)} USDT, ниже минимума ${formatUsdt(plan.totals.belowMinMicro)} USDT, без газа ${noGas}, нужно занести ${plan.totals.gasNeededWei} wei BNB, один перевод ${plan.totals.feePerSweepWei} wei${plan.reason ? `, блокер ${plan.reason}` : ''}`);
+    `адресов ${plan.addresses}${plan.truncated ? ' (список обрезан лимитом)' : ''}: к сбору ${formatUsdt(plan.totals.sweepableMicro)} USDT, ниже минимума ${formatUsdt(plan.totals.belowMinMicro)} USDT, без газа ${noGas}, нужно занести ${plan.totals.gasNeededWei} wei ${cfg.gasSymbol}, один перевод ${plan.totals.feePerSweepWei} wei${plan.reason ? `, блокер ${plan.reason}` : ''}`);
 
   // 15. Учёт: остаток = зачислено − потрачено, цепочка хешей цела.
   const balanceEnd = await payBalanceMicro(db, 'u_player');
@@ -659,10 +701,10 @@ async function main(): Promise<number> {
   }).checks);
   report('реестр', ledger.brokenAt ? 'fail' : 'ok', `записей ${ledger.rows}, разрывов ${ledger.brokenAt ?? 'нет'}, сверок баланса с журналом: расхождений ${ledger.mismatches.length}`);
 
-  return finish();
+  return finish(cfg.gasSymbol);
 }
 
-function finish(): number {
+function finish(gasSymbol = 'BNB'): number {
   const summary = summarize(results);
   const notOk = results.filter((r) => r.status !== 'ok');
   if (notOk.length) {
@@ -672,11 +714,12 @@ function finish(): number {
   }
   console.log('');
   console.log(summary.headline);
+  console.log(`Газ — монета своей сети (${gasSymbol}); USDT — токен сети, а не нативка.`);
   console.log('Путь целиком: адрес игрока → перевод USDT в сети → eth_getLogs → pay_chain_events → зачисление в pay_ledger → покупка → заявка → подпись → eth_sendRawTransaction → квитанция → confirmed.');
   const sent = results.find((r) => r.step === 'отправка в сеть');
   console.log(`Отправка в сеть: ${sent?.status === 'ok' ? 'была' : 'не была'}. Этот прогон не включает PAYOUTS_ENABLED/SWEEP_ENABLED и не платит реальные деньги: решение о флагах остаётся за владельцем.`);
   if (summary.skipped > 0) {
-    console.log('Непроверенное ногами (сеть/контракт/газ) не становится «OK» от того, что скрипт зелёный. Полный ответ — только в тестнете с задеплоенным токеном, тестовыми USDT у игрока и тестовым BNB у кошелька.');
+    console.log('Непроверенное ногами (сеть/контракт/газ) не становится «OK» от того, что скрипт зелёный. Полный ответ — только в тестнете с задеплоенным токеном, тестовыми USDT у игрока и тестовой нативкой (BNB или POL) у кошелька.');
   }
   return summary.exitCode;
 }

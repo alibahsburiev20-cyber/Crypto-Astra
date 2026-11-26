@@ -2,13 +2,13 @@ import type { AuthContext } from '../auth/guards';
 import type { Env } from '../env';
 import { json, readJsonSoft } from '../http/response';
 import { addressMatchesChain, displayAddress, ensureAddress, findAddress, signerDeriver } from '../pay/addresses';
-import { chainSpec, type ChainSpec } from '../pay/chain';
+import { chainSpec, chainSpecFor, enabledChains, evmChainSpecs, type ChainSpec } from '../pay/chain';
 import { payFlags, publicFlags, walletState } from '../pay/flags';
 import { depositTxidFromRef, payBalanceMicro, payHistory } from '../pay/ledger';
 import { qrPng } from '../pay/qr';
 import { prizeSharePercent, usdtPoolBlock } from '../pay/pool';
 import { SWEEP_FEE_SUN, accountBalances, sweepChainDeps, sweepPlan } from '../pay/sweep';
-import { BSC_MAINNET, BSC_TESTNET } from '../pay/evm/config';
+import { evmChainId } from '../pay/evm/config';
 import { BroadcastError as EvmBroadcastError, DEFAULT_MAX_GAS_PRICE_WEI, evmRpcFor, evmSignerClient, payoutGas, sendUsdtEvm } from '../pay/evm/broadcast';
 import { evmAccountBalances, evmHotWalletState, formatBnb, gasCostWei } from '../pay/evm/balances';
 import { releaseNonce, reserveNonce } from '../pay/evm/payouts';
@@ -23,6 +23,7 @@ import { ensurePaySchema, PAY_SCHEMA_VERSION, PAY_TABLES } from '../pay/schema';
 import { ShopError, catalogForClient, entitlements, premiumStatus, purchase } from '../pay/shop';
 import { formatMicroUsdt, isMicroAmount, parseUsdtToMicro } from '../pay/tron/amount';
 import { usdtContract } from '../pay/tron/contracts';
+import { parsePayChain, type PayChain } from '../pay/units';
 import { readCursor } from '../pay/evm/deposits';
 import { requireAdmin } from '../http/admin';
 import {
@@ -70,6 +71,11 @@ export async function payStatus(env: Env): Promise<Response> {
     // «код умеет» — разные вещи, и игрок должен видеть вторую.
     rail: spec.ready,
     confirmations: spec.confirmations,
+    // Все сети, которые игрок может выбрать: витрина рисует переключатель по
+    // этому списку, а не по своему предположению. `chainConfigError` при этом
+    // означает «список пуст, потому что в names опечатка» — и говорит причину.
+    networks: payNetworks(env, flags),
+    railError: flags.chainConfigError ? flags.chainConfigDetail : '',
     flags: publicFlags(flags),
     // off — деньги выключены; signer_required — включены, но кошельки ещё не
     // выдаются (не настроен Signer); ready — можно покупать и принимать USDT.
@@ -82,6 +88,31 @@ export async function payStatus(env: Env): Promise<Response> {
 }
 
 /** Каталог. Цены — серверные; выключенные товары не показываются. */
+/**
+ * Сети, доступные игроку, в том виде, как их рисует витрина.
+ *
+ * Отдельная функция потому, что список нужен и в `/pay/status.json`, и в
+ * `/pay/products`: расхождение в нём = «магазин предлагает сеть, которой нет».
+ * Активная цепь идёт первой — её клиент выбирает по умолчанию.
+ */
+export function payNetworks(env: Env, flags = payFlags(env)): Array<Record<string, unknown>> {
+  const specs = enabledChains(env).chains.map((chain) => chainSpecFor(env, chain, flags));
+  return specs.map((spec) => ({
+    chain: spec.chain,
+    label: spec.label,
+    asset: 'USDT',
+    decimals: spec.decimals,
+    confirmations: spec.confirmations,
+    contract: spec.contract,
+    // Готовность именно этой сети: «BNB работает, Polygon ещё нет» — нормальное
+    // состояние на время раскатки, и витрина обязана показать её неактивной, а не
+    // прятать или, хуже того, давать адрес, по которому никто не смотрит.
+    ready: spec.ready.deposits && Boolean(spec.contract),
+    rail: spec.ready,
+    explorer: { name: spec.explorerName, url: spec.explorer },
+  }));
+}
+
 export async function payProducts(env: Env): Promise<Response> {
   const flags = payFlags(env);
   // Выключенный контур не должен выглядеть как «магазин с пустыми полками»:
@@ -99,6 +130,7 @@ export async function payProducts(env: Env): Promise<Response> {
     asset: 'USDT',
     chain: chainSpec(env, flags).chain,
     networkLabel: chainSpec(env, flags).label,
+    networks: payNetworks(env, flags),
     products: catalogForClient(),
     now: Date.now(),
   }, 200, { 'Cache-Control': 'public, max-age=300' });
@@ -116,16 +148,29 @@ export async function payProducts(env: Env): Promise<Response> {
  * `/pay/qr`. Разделять проверки нельзя: картинка, показанная там, где адрес
  * ещё не готов, отправляет деньги в никуда точно так же, как нажатая «Купить».
  */
-async function depositAddress(env: Env, auth: AuthContext): Promise<{ address: string; spec: ChainSpec }> {
+async function depositAddress(
+  env: Env, auth: AuthContext, requestedChain = '',
+): Promise<{ address: string; spec: ChainSpec }> {
   const flags = payFlags(env);
   if (!flags.deposits) throw new ApiError(503, 'deposits_disabled');
   // Сеть «похожа на неизвестную» — это не «возьмём первую»: игрок может увидеть
   // адрес одной сети, а монитор будет смотреть другую. Молчать дороже.
   if (flags.chainConfigError) throw new ApiError(503, 'pay_chain_unknown');
+  // Какую сеть показать, спрашиваем у витрины (`?chain=`), но только в пределах
+  // настроенного: `?chain=ethereum` обязан дать 409, а не «выдали адрес, который
+  // никто не сканирует». Индекс деривации при этом общий — адрес в другой сети
+  // это тот же ключ, и второй семени у нас нет.
+  const allowed = enabledChains(env).chains;
+  let chain: PayChain | null = flags.chain;
+  if (requestedChain) {
+    chain = parsePayChain(requestedChain);
+    if (!chain) throw new ApiError(400, 'bad_chain');
+    if (!allowed.includes(chain)) throw new ApiError(409, 'chain_not_enabled');
+  }
   // Адрес выдаём только когда рельс этой цепи дописан от конца до конца:
   // выдать адрес в сети, где монитор ещё не умеет искать переводы, — это
   // означает «игрок прислал деньги, а мы их не нашли».
-  const spec = chainSpec(env, flags);
+  const spec = chainSpecFor(env, chain ?? flags.chain, flags);
   if (!spec.ready.addresses) throw new ApiError(503, spec.ready.reason || 'rail_not_ready');
   if (!spec.contract) throw new ApiError(503, 'usdt_contract_missing');
   if (!(await ensurePaySchema(env.DB))) throw new ApiError(503, 'pay_unavailable');
@@ -157,9 +202,9 @@ async function depositAddress(env: Env, auth: AuthContext): Promise<{ address: s
   }
 }
 
-export async function payAddress(env: Env, auth: AuthContext): Promise<Response> {
+export async function payAddress(env: Env, auth: AuthContext, request?: Request): Promise<Response> {
   const flags = payFlags(env);
-  const found = await depositAddress(env, auth);
+  const found = await depositAddress(env, auth, request ? new URL(request.url).searchParams.get('chain') ?? '' : '');
   const spec = found.spec;
   const created = 'isNew' in found ? found.isNew : false;
   return json({
@@ -185,7 +230,7 @@ export async function payAddress(env: Env, auth: AuthContext): Promise<Response>
  * своей сессией, и в картинке не может оказаться ничего, кроме его адреса.
  */
 export async function payQr(env: Env, auth: AuthContext, request: Request): Promise<Response> {
-  const found = await depositAddress(env, auth);
+  const found = await depositAddress(env, auth, new URL(request.url).searchParams.get('chain') ?? '');
   const url = new URL(request.url);
   const scale = Number.parseInt(url.searchParams.get('scale') ?? '6', 10);
   const png = await qrPng(found.address, { scale: Number.isFinite(scale) ? scale : undefined });
@@ -331,20 +376,33 @@ export async function payWithdraw(request: Request, env: Env, auth: AuthContext)
 
   const body = await readJsonObject(request);
   const idemKey = request.headers.get('Idempotency-Key') ?? String(body.idemKey ?? '');
+  // Сеть заявки выбирает игрок (там, где их несколько), и она же записывается в
+  // строку: платить потом надо по ней, а не по `PAY_CHAIN` момента отправки.
+  // Иначе «мы включили Polygon» меняет сеть у уже созданной заявки.
+  const { chains, error: chainsError } = enabledChains(env);
+  if (chainsError) throw new ApiError(503, 'pay_chain_unknown');
+  const requested = String(body.chain ?? '').trim();
+  const chain = requested ? parsePayChain(requested) : chains[0] ?? null;
+  if (!chain) throw new ApiError(400, requested ? 'bad_chain' : 'pay_chain_unknown');
+  if (!chains.includes(chain)) throw new ApiError(409, 'chain_not_enabled');
   try {
     const result = await requestWithdrawal(env.DB, {
       userId: auth.userId,
       address: String(body.address ?? ''),
       amountMicro: Number(body.amountMicro ?? 0),
       idemKey,
-      // Формат адреса — по активной цепи: TRON и BSC проверяются по-разному, и
+      // Формат адреса — по цепи заявки: TRON и EVM проверяются по-разному, и
       // «примем любой» означает «зарезервируем деньги на несуществующий адрес».
-      chain: chainSpec(env, flags).chain,
+      chain,
     }, Date.now());
     return json({
       ok: true,
       withdrawal: result.withdrawal,
       amount: formatMicroUsdt(result.withdrawal.amount_micro),
+      chain,
+      // Минимум и потолок называем вслух: игрок выбирает сеть, и «в этой сети
+      // можно от 1 USDT» он должен увидеть, а не вычислять по отказу 422.
+      minAmount: formatMicroUsdt(minWithdrawMicro(chain)),
       duplicated: result.duplicated,
     }, result.duplicated ? 200 : 201);
   } catch (e) {
@@ -379,10 +437,13 @@ export async function adminPay(request: Request, env: Env): Promise<Response> {
     // Считается по колонке `chain`, а не по маске адреса: «T%»/«0x%» — эвристика
     // формата, `chain` — утверждение, сделанное при выдаче.
     env.DB.prepare(
+      // Разбивка по всем трём цепям: с двумя EVM-сетями «остальное = tron»
+      // перестало быть истиной, и polygon-адреса исчезли бы из отчёта.
       `SELECT SUM(CASE WHEN chain = 'bsc' THEN 1 ELSE 0 END) AS bsc,
+              SUM(CASE WHEN chain = 'polygon' THEN 1 ELSE 0 END) AS polygon,
               SUM(CASE WHEN chain = 'tron' THEN 1 ELSE 0 END) AS tron
          FROM pay_addresses WHERE active = 1`,
-    ).first<{ bsc: number | null; tron: number | null }>(),
+    ).first<{ bsc: number | null; polygon: number | null; tron: number | null }>(),
   ]);
   return json({
     ok: true,
@@ -392,8 +453,11 @@ export async function adminPay(request: Request, env: Env): Promise<Response> {
       decimals: spec.decimals, contract: spec.contract, confirmations: spec.confirmations,
       cursor, ready: spec.ready,
       addresses: {
-        active: spec.chain === 'bsc' ? Number(addrSplit?.bsc ?? 0) : Number(addrSplit?.tron ?? 0),
-        otherChain: spec.chain === 'bsc' ? Number(addrSplit?.tron ?? 0) : Number(addrSplit?.bsc ?? 0),
+        active: Number(addrSplit?.[spec.chain] ?? 0),
+        // «Другая цепь» — сумма по остальным: их может быть две (старый TRON плюс
+        // вторая EVM), и админ обязан увидеть, что адреса живы, а не «потеряны».
+        otherChain: Number(addrSplit?.tron ?? 0) + Number(addrSplit?.bsc ?? 0)
+          + Number(addrSplit?.polygon ?? 0) - Number(addrSplit?.[spec.chain] ?? 0),
       },
     },
     reconcile: report,
@@ -464,15 +528,22 @@ export async function adminPaySend(request: Request, env: Env): Promise<Response
   if (!id) throw new ApiError(400, 'bad_id');
 
   const row = await env.DB.prepare(
-    'SELECT id, user_id, address, amount_micro, status, txid FROM pay_withdrawals WHERE id = ?',
-  ).bind(id).first<{ id: string; user_id: string; address: string; amount_micro: number; status: string; txid: string | null }>();
+    'SELECT id, user_id, address, chain, amount_micro, status, txid FROM pay_withdrawals WHERE id = ?',
+  ).bind(id).first<{
+    id: string; user_id: string; address: string; chain: string | null;
+    amount_micro: number; status: string; txid: string | null;
+  }>();
   if (!row) throw new ApiError(404, 'not_found');
   if (row.status !== 'reserved') throw new ApiError(409, 'not_reserved');
 
   const flags = payFlags(env);
-  // Сборщик транзакций умеет пока только TRON. Отдавать команду «отправить» на
-  // другой цепи нельзя даже по ошибке: транзакция-то ушла бы в TRON.
-  const sendSpec = chainSpec(env, flags);
+  // Сеть берём из строки заявки, а не из `PAY_CHAIN`: активная цепь может
+  // смениться между «игрок подал заявку» и «админ нажал отправить», а деньги
+  // обязаны уйти туда, куда их просили. Для старых строк без колонки — активная.
+  const sendChain = parsePayChain(row.chain ?? '') ?? flags.chain;
+  const { chains: sendChains } = enabledChains(env);
+  if (!sendChains.includes(sendChain)) throw new ApiError(503, 'chain_not_enabled');
+  const sendSpec = chainSpecFor(env, sendChain, flags);
   const owner = String(env.PAY_HOT_ADDRESS ?? '');
   // Сначала то, что чинится одной строчкой в секретах, потом «рельс не готов»:
   // среди причин 503 самая полезная та, по которой оператор может что-то сделать.
@@ -481,7 +552,7 @@ export async function adminPaySend(request: Request, env: Env): Promise<Response
   if (!sendSpec.ready.payouts) throw new ApiError(503, sendSpec.ready.reason || 'payouts_unavailable');
   // В EVM адрес получателя обязан пройти формат активной цепи: заявка
   // могла быть создана, когда сеть была другая.
-  if (sendSpec.chain === 'bsc' && !sendSpec.isAddress(String(row.address ?? '').trim())) {
+  if (sendSpec.chain !== 'tron' && !sendSpec.isAddress(String(row.address ?? '').trim())) {
     throw new ApiError(409, 'address_chain_mismatch');
   }
 
@@ -489,7 +560,7 @@ export async function adminPaySend(request: Request, env: Env): Promise<Response
     .bind(id).first<number>('c');
   const attempt = Number(attemptRow ?? 0) + 1;
 
-  if (sendSpec.chain === 'bsc') {
+  if (sendSpec.chain !== 'tron') {
     return await sendEvmPayout(env, sendSpec, row.id, row.address, Number(row.amount_micro), attempt);
   }
 
@@ -552,8 +623,14 @@ async function sendEvmPayout(
   const recipient = spec.normalizeAddress(String(address ?? ''));
   if (!spec.isAddress(recipient)) throw new ApiError(422, 'bad_destination_chain');
 
-  const rpc = evmRpcFor(env);
-  const chainId = isTestnetNetwork(flags.network) ? BSC_TESTNET.chainId : BSC_MAINNET.chainId;
+  // Ноду берём СПЕКУ заявки, а не активную цепь: `PAY_CHAIN` может измениться
+  // между «игрок подал заявку на Polygon» и «админ нажал отправить», и тогда
+  // через BNB-RPC мы искали бы квитанцию polygon-перевода — «заявка висит в
+  // sent» при деньгах, которые уже ушли.
+  const rpc = evmRpcFor(env, fetch, spec);
+  // `chainId` берём из спеки активной сети (BNB 56/97, Polygon 137/80002):
+  // харкод «BSC_MAINNET» здесь означал бы подпись для 56, отправленную в Polygon.
+  const chainId = spec.chainId ?? evmChainId(spec.chain === 'polygon' ? 'polygon' : 'bnb', isTestnetNetwork(flags.network));
 
   let gas: { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint };
   try {
@@ -564,7 +641,7 @@ async function sendEvmPayout(
   }
 
   // «Нечем платить» говорим сразу и ничего не подписываем.
-  const wallet = await evmHotWalletState(rpc, spec.contract, owner, amountMicro, gasCostWei(gas.maxFeePerGas));
+  const wallet = await evmHotWalletState(rpc, spec.contract, owner, amountMicro, gasCostWei(gas.maxFeePerGas), spec.chain);
   if (wallet.blocker) {
     return json({
       ok: false,
@@ -584,7 +661,7 @@ async function sendEvmPayout(
   try {
     reservation = await reserveNonce(env.DB, rpc, chainId, owner, Date.now());
     const sent = await sendUsdtEvm(rpc, evmSignerClient(env), {
-      owner, recipient, amountMicro, contract: spec.contract, chainId,
+      owner, recipient, amountMicro, contract: spec.contract, chainId, chain: spec.chain,
       nonce: reservation.nonce, maxGasPriceWei: gasPriceCap(env),
     });
     broadcastStarted = true;
@@ -612,7 +689,7 @@ async function sendEvmPayout(
  */
 async function evmPrizeBalances(env: Env, owner: string): Promise<{ usdtMicro: number; trxSun: number }> {
   const spec = chainSpec(env, payFlags(env));
-  const balances = await evmAccountBalances(evmRpcFor(env), spec.contract, owner);
+  const balances = await evmAccountBalances(evmRpcFor(env), spec.contract, owner, spec.chain);
   return { usdtMicro: balances.usdtMicro, trxSun: Number(balances.gasWei / 10n ** 10n) };
 }
 
@@ -637,12 +714,13 @@ export async function adminPaySweepPlan(request: Request, env: Env): Promise<Res
   const spec = chainSpec(env, flags);
   const destination = String(env.PAY_HOT_ADDRESS ?? '').trim();
 
-  if (spec.chain === 'bsc') {
+  if (spec.chain !== 'tron') {
     const plan = await evmSweepPlan({
       db: env.DB,
       rpc: evmRpcFor(env),
       contract: spec.contract,
       network: flags.network,
+      chain: spec.chain,
       destination,
       sweepEnabled: flags.sweep,
       // Оценка «хватит ли BNB» на худшем случае. Ставку берём минимально
@@ -700,7 +778,7 @@ export async function adminPayPrize(request: Request, env: Env): Promise<Respons
   let wallet: { address: string; usdtMicro: number; usdt: string; trxSun: number; error: string | null } | null = null;
   if (owner) {
     try {
-      const balances = chainSpec(env, flags).chain === 'bsc'
+      const balances = chainSpec(env, flags).chain !== 'tron'
         ? await evmPrizeBalances(env, owner)
         : await accountBalances(
           sweepChainDeps(trongridFetcher(env.TRONGRID_API_KEY), flags.network, env), owner,
@@ -807,14 +885,14 @@ export async function adminPaySolvency(request: Request, env: Env): Promise<Resp
   // В EVM активы читаются тем же планом сбора, но баланс кошелька — через
   // `eth_call`: у TronGrid и RPC разные ответы на «контракт не найден», и сводить
   // их в одну функцию значит получить «ноль» там, где на самом деле «не прочитали».
-  if (spec.chain === 'bsc') {
-    const rpc = evmRpcFor(env);
+  if (spec.chain !== 'tron') {
+    const rpc = evmRpcFor(env, fetch, spec);
     const plan = await evmSweepPlan({
-      db: env.DB, rpc, contract: spec.contract, network: flags.network,
+      db: env.DB, rpc, contract: spec.contract, network: flags.network, chain: spec.chain,
       destination: owner, sweepEnabled: flags.sweep, maxFeePerGas: 1_000_000_000n,
     });
     const chainErrors = plan.rows.filter((row) => row.blocker === 'chain_error').length;
-    const hot = owner ? await evmHotWalletState(rpc, spec.contract, owner, 0, 0n) : null;
+    const hot = owner ? await evmHotWalletState(rpc, spec.contract, owner, 0, 0n, spec.chain) : null;
     const sheet = await solvencySheet(env.DB, {
       // Неполный набор адресов = «мы не знаем», а не «столько и есть»: иначе
       // отчёт показал бы «покрыто» по половине баланса.
@@ -826,7 +904,7 @@ export async function adminPaySolvency(request: Request, env: Env): Promise<Resp
     return json({
       ok: true, sheet,
       plan: {
-        chain: 'bsc', addresses: plan.addresses, truncated: plan.truncated, chainErrors,
+        chain: plan.chain, addresses: plan.addresses, truncated: plan.truncated, chainErrors,
         // BigInt в JSON не живёт: наружу отдаём десятичные строки.
         totals: {
           usdtMicro: plan.totals.usdtMicro,

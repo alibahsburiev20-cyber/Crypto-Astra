@@ -99,7 +99,7 @@ export async function route(request: Request, env: Env): Promise<Response> {
       if (m === 'GET' && p === '/pay/account.json') return await payAccount(env, auth);
       if (m === 'POST' && p === '/pay/purchase') return await payPurchase(request, env, auth);
       if (m === 'GET' && p === '/pay/withdrawals') return await payWithdrawals(env, auth);
-      if (m === 'GET' && p === '/pay/address.json') return await payAddress(env, auth);
+      if (m === 'GET' && p === '/pay/address.json') return await payAddress(env, auth, request);
       // QR — только со своей сессией и только про свой адрес: отдельного параметра
       // «какой адрес нарисовать» у маршрута нет намеренно.
       if (m === 'GET' && p === '/pay/qr') return await payQr(env, auth, request);

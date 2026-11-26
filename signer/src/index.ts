@@ -21,7 +21,8 @@ import { deriveEvmKey } from '../../worker/src/pay/evm/derivation';
 import { evmAddressFromPrivateKey, toChecksumAddress } from '../../worker/src/pay/evm/address';
 import { TRANSFER_SELECTOR, parseTransferCalldata, signingHash, signingPayload } from '../../worker/src/pay/evm/tx';
 import { TxError } from '../../worker/src/pay/evm/tx';
-import { chainValueToMicro, microToChainValue } from '../../worker/src/pay/units';
+import { chainValueToMicro, microToChainValue, type PayChain } from '../../worker/src/pay/units';
+import { evmKeyByChainId } from '../../worker/src/pay/evm/config';
 
 export interface SignerEnv {
   /** Токен доступа. Обязателен: без него Worker отвечает 503. */
@@ -36,9 +37,21 @@ export interface SignerEnv {
    * Контракт USDT в EVM-сети. Единственный `to`, которому мы подписываем
    * транзакцию: вызов любого другого контракта — это произвольный код от имени
    * кошелька, а не перевод.
+   *
+   * Легаси-имя = BNB Chain. Для двух сетей — `SIGNER_EVM_CONTRACT_BNB` и
+   * `SIGNER_EVM_CONTRACT_POL`: «одна разрешённая переменная на две цепи» физически
+   * не описывает пару «сеть + контракт», а подписать polygon-перевод с контрактом
+   * BNB в теле — значит отправить деньги на несуществующий токен.
    */
   SIGNER_EVM_CONTRACT?: string;
-  /** Какие chainId принимаем: «56», «97» или «56,97». По умолчанию 56 (mainnet). */
+  SIGNER_EVM_CONTRACT_BNB?: string;
+  SIGNER_EVM_CONTRACT_POL?: string;
+  /**
+   * Какие chainId принимаем: «56», «56,137», «97,80002». По умолчанию 56 (mainnet).
+   *
+   * Polygon (137) не включён намеренно: вторая сеть включается одной строкой в
+   * секретах, и без неё подписи в Polygon не будет, даже если Worker попросит.
+   */
   SIGNER_EVM_CHAIN_IDS?: string;
   /** Потолок газа на транзакцию, wei. Выше — отказ: сеть дороже перевода. */
   SIGNER_EVM_MAX_GAS_WEI?: string;
@@ -119,10 +132,12 @@ export async function handleAddress(request: Request, env: SignerEnv): Promise<R
   const index = Number(body.index);
   if (!Number.isInteger(index) || index < 0 || index >= MAX_INDEX) return fail('bad_index', 400);
   const chain = body.chain === undefined || body.chain === null ? 'tron' : String(body.chain);
-  if (chain !== 'tron' && chain !== 'bsc') return fail('bad_chain', 400);
+  // `bsc` и `polygon` — одна и та же EVM-деривация (m/44'/60'/0'/0/i), разные
+  // имена нужны только чтобы Worker положил в базу верную колонку `chain`.
+  if (chain !== 'tron' && chain !== 'bsc' && chain !== 'polygon') return fail('bad_chain', 400);
 
   try {
-    const derived = chain === 'bsc'
+    const derived = chain !== 'tron'
       ? await deriveEvmKey(env.SIGNER_SEED, index)
       : await deriveKey(env.SIGNER_SEED, index);
     // Наружу — адрес в той форме, в которой его видит игрок: для EVM это
@@ -130,7 +145,7 @@ export async function handleAddress(request: Request, env: SignerEnv): Promise<R
     // регистр (см. `pay/chain.ts`).
     return json({
       ok: true, index, chain,
-      address: chain === 'bsc' ? toChecksumAddress(derived.address) : derived.address,
+      address: chain === 'tron' ? derived.address : toChecksumAddress(derived.address),
     });
   } catch (e) {
     return fail(`derive_failed:${e instanceof Error ? e.message : 'unknown'}`, 500);
@@ -150,8 +165,19 @@ function chainIdAllowed(env: SignerEnv, chainId: bigint): boolean {
   return list.includes(chainId.toString());
 }
 
-function contractOf(env: SignerEnv): string {
-  const raw = String(env.SIGNER_EVM_CONTRACT ?? '').trim().toLowerCase();
+/**
+ * Разрешённый контракт USDT для сети.
+ *
+ * Сеть здесь не параметр запроса, а `chainId` самой транзакции: то есть «для
+ * какой цепи подписывают» решает тело транзакции, а контракт ему отвечают свой.
+ * Именно в таком порядке это невозможно подделать: попросить подписать вызов
+ * чужого контракта, назвавшись другой сетью, не выйдет — пара проверяется сразу
+ * по обоим значениям (`contract_mismatch`).
+ */
+function contractOf(env: SignerEnv, key: 'bnb' | 'polygon' = 'bnb'): string {
+  const perChain = String(env[`SIGNER_EVM_CONTRACT_${key === 'polygon' ? 'POL' : 'BNB'}`] ?? '').trim();
+  const legacy = String(env.SIGNER_EVM_CONTRACT ?? '').trim();
+  const raw = (perChain || (key === 'bnb' ? legacy : '')).toLowerCase();
   if (!/^0x[0-9a-f]{40}$/.test(raw)) throw new Error('contract_missing');
   return raw;
 }
@@ -200,17 +226,28 @@ export async function handleSignEvm(request: Request, env: SignerEnv): Promise<R
   const raw = body.tx as Record<string, unknown> | undefined;
   if (!raw || typeof raw !== 'object') return fail('bad_tx', 400);
 
-  let contract: string;
+  let tx;
+  let chainId = 0n;
+  let contract = '';
+  // Шкала USDT по сети: 18 знаков в BNB, 6 в Polygon. Без неё проверка суммы
+  // превращается в «сумма в теле не совпадает» на живой Polygon — то есть выплата
+  // встанет, а причина будет выглядеть как подделка.
+  let chain: PayChain = 'bsc';
   try {
-    contract = contractOf(env);
+    chainId = decimal(raw.chainId, 'chain_id');
+    if (!chainIdAllowed(env, chainId)) return fail('chain_not_allowed', 400);
+    const key = evmKeyByChainId(Number(chainId));
+    // Число сети вне списка известных — отказ: мы не знаем ни контракта, ни
+    // шкалы этой сети, а «попробуем наугад» для подписи ключом горячего кошелька
+    // не бывает.
+    if (!key) return fail('chain_unknown', 400);
+    chain = key === 'polygon' ? 'polygon' : 'bsc';
+    contract = contractOf(env, key);
   } catch {
     return fail('contract_misconfigured', 503);
   }
 
-  let tx;
   try {
-    const chainId = decimal(raw.chainId, 'chain_id');
-    if (!chainIdAllowed(env, chainId)) return fail('chain_not_allowed', 400);
     const nonce = decimal(raw.nonce, 'nonce');
     if (nonce > 0xffffffffn) return fail('bad_nonce', 400);
     const maxPriorityFeePerGas = decimal(raw.maxPriorityFeePerGas, 'priority_fee');
@@ -281,11 +318,11 @@ export async function handleSignEvm(request: Request, env: SignerEnv): Promise<R
 
   const amountMicro = Number(body.amountMicro);
   if (!Number.isSafeInteger(amountMicro) || amountMicro <= 0) return fail('bad_amount', 400);
-  const expectedRaw = microToChainValue(amountMicro, 'bsc');
+  const expectedRaw = microToChainValue(amountMicro, chain);
   if (parsed.amountRaw !== expectedRaw) return fail('amount_mismatch', 400);
   // На 18 знаках в хвосте легко потерять пыль: сумма внутри `data` обязана быть
   // ровно этим micro, а не «округлённо близко к ним».
-  if (chainValueToMicro(parsed.amountRaw.toString(), 'bsc') !== amountMicro) return fail('amount_not_exact', 400);
+  if (chainValueToMicro(parsed.amountRaw.toString(), chain) !== amountMicro) return fail('amount_not_exact', 400);
 
   // 6. Лимит на одну транзакцию — в micro, общая шкала для обеих сетей.
   const maxMicro = Number(env.SIGNER_MAX_TX_MICRO ?? 100_000_000);

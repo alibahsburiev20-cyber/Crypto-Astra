@@ -21,7 +21,10 @@ import { creditDeposit } from '../ledger';
 import { TRANSFER_TOPIC0, type EvmLog, type LogFilter, transferFromLog, addressToTopic } from './rpc';
 import type { PayChain } from '../units';
 
-/** Строка курсора: одна на цепь и контракт. */
+/**
+ * Курсор хранится по паре (цепь, контракт) — см. `pay_chain_cursor`. Значение по
+ * умолчанию оставлено историческим: до появления Polygon цепь была одна.
+ */
 const CURSOR_KEY = 'bsc';
 
 /** Сколько адресов в одной OR-теме. Больше — часть нод начинает отвечать ошибкой. */
@@ -100,7 +103,7 @@ export async function scanEvmBlocks(
   }
 
   const safeHead = head - Math.max(0, deps.confirmations);
-  const start = await readCursor(db, CURSOR_KEY, deps.contract);
+  const start = await readCursor(db, deps.chain || CURSOR_KEY, deps.contract);
   if (safeHead <= start) return { ...empty, head, fromBlock: start, toBlock: start };
 
   const from = start + 1;
@@ -164,7 +167,7 @@ export async function scanEvmBlocks(
     return { ...report, error: `logs:${e instanceof Error ? e.message : String(e)}` };
   }
 
-  await writeCursor(db, CURSOR_KEY, deps.contract, to, now);
+  await writeCursor(db, deps.chain || CURSOR_KEY, deps.contract, to, now);
   return report;
 }
 
@@ -180,10 +183,14 @@ export async function scanEvmBlocks(
  * Отдаём в нижнем регистре: `transferFromLog` возвращает адрес получателя именно
  * так, и сравнение должно быть посимвольным.
  */
-export async function bscActiveAddresses(db: D1Database, limit = MAX_ADDRESSES_PER_PASS): Promise<string[]> {
+export async function bscActiveAddresses(
+  db: D1Database,
+  limit = MAX_ADDRESSES_PER_PASS,
+  chain: PayChain = CURSOR_KEY,
+): Promise<string[]> {
   const { results } = await db.prepare(
-    "SELECT address FROM pay_addresses WHERE active = 1 AND chain = 'bsc' ORDER BY last_scanned_ts, created_at LIMIT ?",
-  ).bind(Math.max(1, Math.min(MAX_ADDRESSES_PER_PASS, limit))).all<{ address: string }>();
+    'SELECT address FROM pay_addresses WHERE active = 1 AND chain = ? ORDER BY last_scanned_ts, created_at LIMIT ?',
+  ).bind(chain, Math.max(1, Math.min(MAX_ADDRESSES_PER_PASS, limit))).all<{ address: string }>();
   return (results ?? [])
     .map((row) => String(row.address).toLowerCase())
     .filter((address) => /^0x[0-9a-f]{40}$/.test(address));
@@ -200,7 +207,19 @@ export interface EvmApplyResult {
  * Зачислить найденное. Тот же `creditDeposit`, что и в TRON: ключ
  * `dep:<txid>:<event_index>` делает повторные проходы безопасными.
  */
-export async function applyEvmDeposits(db: D1Database, contract: string, now: number, limit = 100): Promise<EvmApplyResult> {
+/**
+ * Зачислить найденное. `chain` обязана быть той же цепью, чей контракт сканировали:
+ * адрес игрока в EVM выглядит одинаково в любой сети, и без фильтра по колонке
+ * `chain` перевод в BNB мог бы зачислиться владельцу polygon-адреса (или наоборот) —
+ * «сирота» в таком случае выглядит как «всё хорошо», а игрок получает ноль.
+ */
+export async function applyEvmDeposits(
+  db: D1Database,
+  contract: string,
+  now: number,
+  limit = 100,
+  chain: PayChain = CURSOR_KEY,
+): Promise<EvmApplyResult> {
   const { results } = await db.prepare(
     `SELECT e.txid, e.event_index, e.to_addr, e.amount_micro
        FROM pay_chain_events e
@@ -216,8 +235,9 @@ export async function applyEvmDeposits(db: D1Database, contract: string, now: nu
   const out: EvmApplyResult = { credited: 0, duplicated: 0, orphan: 0, processed: 0 };
   for (const event of results ?? []) {
     out.processed += 1;
-    const owner = await db.prepare('SELECT user_id FROM pay_addresses WHERE address = ? AND active = 1')
-      .bind(String(event.to_addr)).first<string>('user_id');
+    const owner = await db.prepare(
+      'SELECT user_id FROM pay_addresses WHERE address = ? AND active = 1 AND chain = ?',
+    ).bind(String(event.to_addr), chain).first<string>('user_id');
     if (!owner) {
       await db.prepare("UPDATE pay_chain_events SET status = 'orphan' WHERE txid = ? AND event_index = ?")
         .bind(String(event.txid), Number(event.event_index)).run();

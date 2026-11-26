@@ -10,7 +10,7 @@
 // Ошибка сети здесь не превращается в «ноль»: баланс `null` означает «мы не
 // знаем», и отчёт обязан сказать именно это, а не «покрыто».
 
-import { chainValueToMicro } from '../units';
+import { chainValueToMicro, type PayChain } from '../units';
 import { formatMicroUsdt } from '../tron/amount';
 import { toChecksumAddress } from './address';
 import { PAYOUT_GAS_LIMIT } from './broadcast';
@@ -59,12 +59,16 @@ export async function evmAccountBalances(
   rpc: Pick<EvmRpc, 'call' | 'balance'>,
   contract: string,
   address: string,
+  chain: PayChain = 'bsc',
 ): Promise<EvmBalances> {
   const [token, native] = await Promise.all([
     rpc.call(contract, balanceOfCalldata(address)),
     rpc.balance(address),
   ]);
-  return { usdtMicro: chainValueToMicro(parseBalanceWord(token).toString(), 'bsc'), gasWei: native };
+  // Шкала берётся СЕТЬЮ, а не контрактом: `balanceOf` на 6-значном USDT0 в
+  // Polygon, прочитанный как 18-значный BSC-USD, — «на кошельке 0.000000000005
+  // USDT», то есть «платить нечем» там, где деньги есть.
+  return { usdtMicro: chainValueToMicro(parseBalanceWord(token).toString(), chain), gasWei: native };
 }
 
 export function formatBnb(wei: bigint): string {
@@ -93,9 +97,14 @@ export function evmPayoutBlocker(
 }
 
 /** Сколько USDT лежит на адресе — для сверки «что мы должны» с «что есть». */
-export async function usdtBalanceMicro(rpc: Pick<EvmRpc, 'call'>, contract: string, address: string): Promise<number> {
+export async function usdtBalanceMicro(
+  rpc: Pick<EvmRpc, 'call'>,
+  contract: string,
+  address: string,
+  chain: PayChain = 'bsc',
+): Promise<number> {
   const word = await rpc.call(contract, balanceOfCalldata(address));
-  return chainValueToMicro(parseBalanceWord(word).toString(), 'bsc');
+  return chainValueToMicro(parseBalanceWord(word).toString(), chain);
 }
 
 export interface EvmHotWalletState {
@@ -122,6 +131,7 @@ export async function evmHotWalletState(
   address: string,
   needMicro: number,
   costWei: bigint,
+  chain: PayChain = 'bsc',
 ): Promise<EvmHotWalletState> {
   const empty: EvmHotWalletState = {
     address, usdtMicro: 0, usdt: '0.00', gasWei: 0n, bnb: '0',
@@ -132,7 +142,7 @@ export async function evmHotWalletState(
 
   let balances: EvmBalances;
   try {
-    balances = await evmAccountBalances(rpc, contract, address);
+    balances = await evmAccountBalances(rpc, contract, address, chain);
   } catch {
     return empty;
   }

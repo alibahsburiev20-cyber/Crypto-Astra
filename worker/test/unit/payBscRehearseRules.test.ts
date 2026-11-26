@@ -60,6 +60,49 @@ describe('прогон: конфигурация', () => {
     expect(v.checks.every((c) => c.status !== 'fail')).toBe(true);
   });
 
+  it('Polygon — тот же прогон, другие числа: 6 знаков, 80002, POL-переменные', () => {
+    const v = checkChainEnv({
+      PAY_CHAIN: 'polygon',
+      PAY_NETWORK: 'testnet',
+      PAY_EVM_CHAINS: 'polygon',
+      PAY_EVM_CONTRACT_POL: CONTRACT,
+      PAY_EVM_RPC_POL: 'https://amoy.example/rpc',
+      PAY_EVM_CONFIRMATIONS_POL: '12',
+      PAY_HOT_ADDRESS: '0x' + '33'.repeat(20),
+    });
+    expect(v.fatal).toBe(false);
+    expect(v.chain).toBe('polygon');
+    expect(v.decimals).toBe(6);
+    expect(v.expectedChainId).toBe(80002);
+    expect(v.gasSymbol).toBe('POL');
+  });
+
+  it('Polygon без `PAY_EVM_CHAINS` — fatal: адреса выдаём, а сканер смотрит BNB', () => {
+    // Ровно та тишина, из-за которой теряют пополнения на второй сети: воркер по
+    // умолчанию сканирует только BNB, и «прогон зелёный» ничего не проверяет.
+    const v = checkChainEnv({
+      PAY_CHAIN: 'polygon',
+      PAY_NETWORK: 'testnet',
+      PAY_EVM_CONTRACT_POL: CONTRACT,
+      PAY_EVM_RPC_POL: 'https://amoy.example/rpc',
+      PAY_HOT_ADDRESS: '0x' + '33'.repeat(20),
+    });
+    expect(v.fatal).toBe(true);
+    expect(v.checks.some((c) => c.step === 'список сетей' && /PAY_EVM_CHAINS=bnb,polygon/.test(c.reason))).toBe(true);
+  });
+
+  it('Polygon, у которого контракт задан общей переменной — fatal, а не «подставили BNB»', () => {
+    const v = checkChainEnv({
+      PAY_CHAIN: 'polygon',
+      PAY_NETWORK: 'testnet',
+      PAY_EVM_CHAINS: 'polygon',
+      PAY_EVM_CONTRACT: CONTRACT,
+      PAY_EVM_RPC_POL: 'https://amoy.example/rpc',
+      PAY_HOT_ADDRESS: '0x' + '33'.repeat(20),
+    });
+    expect(v.checks.some((c) => c.step === 'контракт' && /PAY_EVM_CONTRACT_POL/.test(c.reason))).toBe(true);
+  });
+
   it('1 подтверждение на тестнете — не fatal, но и на проде мало', () => {
     const base = {
       PAY_CHAIN: 'bsc',

@@ -10,10 +10,15 @@ import {
 } from '../../src/pay/units';
 
 describe('шкала сети', () => {
-  it('TRON — 6 знаков, BSC — 18', () => {
-    expect(USDT_ONCHAIN_DECIMALS).toEqual({ tron: 6, bsc: 18 });
+  it('TRON — 6 знаков, BSC — 18, Polygon — 6', () => {
+    // Полная таблица, а не «две сети»: новая цепь обязана появиться здесь вместе
+    // с пересчётом, иначе `scalePerMicro` для неё возьмёт 1 по умолчанию и
+    // зачислит в миллион раз больше или меньше.
+    expect(USDT_ONCHAIN_DECIMALS).toEqual({ tron: 6, bsc: 18, polygon: 6 });
     expect(usdtDecimals('bsc')).toBe(18);
+    expect(usdtDecimals('polygon')).toBe(6);
     expect(scalePerMicro('tron')).toBe(1n);
+    expect(scalePerMicro('polygon')).toBe(1n);
     expect(scalePerMicro('bsc')).toBe(1_000_000_000_000n);
   });
 

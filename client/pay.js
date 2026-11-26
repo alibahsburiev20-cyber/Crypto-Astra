@@ -48,6 +48,24 @@ async function api(path, options = {}) {
   return { status: res.status, ok: res.ok, data };
 }
 
+/**
+ * Сеть пополнения. `''` — «та, что настроена на сервере»; выбор игрока живёт в
+ * памяти страницы и НЕ пишется в localStorage: адрес одной сети выдаётся навсегда,
+ * и «вчера нажал Polygon» не должно тихо менять цифры на экране сегодня.
+ *
+ * Зачем вообще переключатель: `0x…`-адрес выглядит одинаково в BNB Chain и в
+ * Polygon, поэтому «адрес на все сети» был бы обещанием, которое мы не можем
+ * выполнить, — игрок отправил бы USDT не в ту сеть и мы бы его не нашли.
+ */
+let payChain = '';
+let payActiveChain = '';
+let payNetworks = [];
+
+/** Запрос адреса и QR: сеть дописывается только когда её явно выбрали. */
+function chainQuery() {
+  return payChain ? `?chain=${encodeURIComponent(payChain)}` : '';
+}
+
 /** Обновление сессии: если cookie жива — получим токен, иначе предложим войти. */
 async function bootSession() {
   const res = await api('/auth/refresh', { method: 'POST' });
@@ -236,6 +254,9 @@ const DEPOSIT_ERRORS = {
   // значит «деньги уйдут в никуда», поэтому формулировка обязана быть человеческой.
   bsc_rail_not_wired: 'Выплаты в этой сети ещё настраиваются: адрес пока не выдаётся.',
   bsc_contract_missing: 'Для этой сети не задан контракт USDT — приём выключен намеренно.',
+  polygon_contract_missing: 'Для Polygon не задан контракт USDT — приём в этой сети выключен намеренно.',
+  chain_not_enabled: 'Эта сеть ещё не включена на сервере — выберите другую.',
+  bad_chain: 'Сеть не распознана — обновите страницу и выберите её заново.',
   usdt_contract_missing: 'Сервер не знает, какой контракт считать USDT — приём выключен.',
   pay_chain_unknown: 'В настройках указана неизвестная сеть, поэтому деньги не принимаются.',
   // Сеть в базе и формат адреса разошлись — такое возможно только после ручной
@@ -269,7 +290,7 @@ async function loadQr() {
   try {
     // Расширения у пути намеренно нет: по политике ассетов векторные файлы —
     // только для иконок из client/, а это генерируемый сервером ответ (PNG).
-    const res = await fetch('/pay/qr', {
+    const res = await fetch(`/pay/qr${chainQuery()}`, {
       credentials: 'include',
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
@@ -326,7 +347,11 @@ async function loadDeposit() {
     });
     return;
   }
-  const res = await api('/pay/address.json');
+  // Сеть в запросе — ЕДИНСТВЕННЫЙ источник для адреса и для QR: `payChain` это
+  // то, что нажал игрок (или ничего). Подставлять сюда сеть из ответа было бы
+  // ловушкой: при следующей загрузке QR спросил бы «ту же сеть», а сервер к тому
+  // времени уже мог вернуть другую — картинка ушла бы не на тот адрес.
+  const res = await api(`/pay/address.json${chainQuery()}`);
   if (res.ok) {
     addressBlock({
       address: res.data.address,
@@ -367,6 +392,49 @@ function wireDeposit() {
   });
 }
 
+/**
+ * Кнопки сетей над адресом. Одна сеть — блока нет вовсе: «выбор из одного
+ * пункта» только путает и создаёт видимость, что USDT можно отправить «куда-то
+ * ещё». Неактивная сеть показана, но не нажимается: прятать её хуже — игрок
+ * должен видеть, что приём в этой сети ещё не готов, а не думать, что мы о ней
+ * забыли.
+ */
+function renderChains() {
+  const box = $('[data-pay="chains"]');
+  if (!box) return;
+  box.textContent = '';
+  if (payNetworks.length < 2) {
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+  const current = payChain || payActiveChain;
+  for (const net of payNetworks) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'ghost pay-chain';
+    btn.dataset.chain = String(net.chain);
+    const selected = net.chain === current;
+    btn.setAttribute('aria-pressed', selected ? 'true' : 'false');
+    btn.disabled = !net.ready;
+    const suffix = !net.ready
+      ? (lang === 'en' ? ' — not ready yet' : ' — ещё не готова')
+      : selected ? (lang === 'en' ? ' — selected' : ' — выбрана') : '';
+    btn.textContent = `${net.label || net.chain}${suffix}`;
+    btn.title = lang === 'en'
+      ? 'Send USDT on this network only: the same address on another network is not found by us.'
+      : 'Отправляйте USDT только в этой сети: тот же адрес в другой сети мы не найдём.';
+    btn.addEventListener('click', () => {
+      if (payChain === net.chain) return;
+      payChain = String(net.chain);
+      setText('[data-pay="network"]', `Сеть: ${net.label || net.chain}`);
+      renderChains();
+      loadDeposit();
+    });
+    box.appendChild(btn);
+  }
+}
+
 /** Строка под адресом: сеть, контракт и предупреждение про дробную часть. */
 function networkNote(data, lang) {
   const label = data.networkLabel || data.network || '—';
@@ -387,7 +455,12 @@ async function boot() {
   const [catalog, session] = await Promise.all([api('/pay/products.json'), bootSession()]);
 
   if (catalog.ok) {
+    // Список сетей приходит с сервера, а не зашивается: «что включено» решает
+    // конфигурация, и витрина обязана обещать ровно столько, сколько есть.
+    payNetworks = Array.isArray(catalog.data.networks) ? catalog.data.networks : [];
+    payActiveChain = String(catalog.data.chain || '');
     setText('[data-pay="network"]', `Сеть: ${catalog.data.networkLabel || 'по данным сервера'}`);
+    renderChains();
     const walletsReady = catalog.data.wallets === 'ready';
     setText(
       '[data-pay="purchases"]',

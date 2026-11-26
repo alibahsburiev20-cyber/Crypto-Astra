@@ -119,6 +119,90 @@ describe('pay.html в браузерном DOM', () => {
     expect(calls.some((u) => u.endsWith('/pay/qr'))).toBe(true);
   });
 
+  it('две сети: кнопки на экране, выбор второй спрашивает сеть у сервера', async () => {
+    const BNB_ADDR = '0x' + 'b'.repeat(39) + '2';
+    const POL_ADDR = '0x' + 'a'.repeat(39) + '1';
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
+    const networks = [
+      { chain: 'bsc', label: 'BNB Smart Chain (BEP-20)', ready: true },
+      { chain: 'polygon', label: 'Polygon PoS (USDT0)', ready: true },
+    ];
+    const { window, calls } = boot((url) => {
+      if (url.endsWith('/auth/refresh')) return { status: 200, body: { access_token: 'tok' } };
+      if (url.endsWith('/pay/products.json')) {
+        return { status: 200, body: { ok: true, purchasesEnabled: true, wallets: 'ready', products: [], chain: 'bsc', networkLabel: networks[0].label, networks } };
+      }
+      if (url.includes('/pay/address.json')) {
+        const chain = url.includes('chain=polygon') ? 'polygon' : 'bsc';
+        return {
+          status: 200,
+          body: {
+            ok: true, index: 1, created: false, network: 'mainnet', chain, decimals: chain === 'polygon' ? 6 : 18,
+            networkLabel: networks.find((n) => n.chain === chain)!.label,
+            address: chain === 'polygon' ? POL_ADDR : BNB_ADDR,
+          },
+        };
+      }
+      if (url.includes('/pay/qr')) return { status: 200, body: null, bytes: png };
+      if (url.endsWith('/pay/account.json')) return { status: 200, body: { ok: true, balanceMicro: 0, history: [], entitlements: [] } };
+      return { status: 404, body: { error: 'not_found' } };
+    }, 'ru');
+    await tick();
+    const buttons = [...window.document.querySelectorAll('[data-pay="chains"] button')];
+    expect(buttons.map((b) => b.dataset.chain)).toEqual(['bsc', 'polygon']);
+    // Адрес без выбора игрока — активной сетью сервера, и это BNB.
+    expect(window.document.querySelector('[data-pay="address"]')?.textContent).toBe(BNB_ADDR);
+    const polygon = buttons.find((b) => b.dataset.chain === 'polygon')!;
+    polygon.dispatchEvent(new window.Event('click'));
+    await tick();
+    expect(calls.some((u) => u.includes('/pay/address.json?chain=polygon'))).toBe(true);
+    // QR обязан спросить ТО ЖЕ: картинка с адресом другой сети — это платёж вникуда.
+    expect(calls.some((u) => u.includes('/pay/qr?chain=polygon'))).toBe(true);
+    expect(window.document.querySelector('[data-pay="address"]')?.textContent).toBe(POL_ADDR);
+    // Предупреждение про сеть: игрок обязан видеть, что это именно Polygon и что
+    // дробь там не зачислится (6 знаков — целые доли цента).
+    expect(window.document.querySelector('[data-pay="deposit-note"]')?.textContent).toContain('Polygon');
+  });
+
+  it('неготовая сеть показана, но не нажимается', async () => {
+    const networks = [
+      { chain: 'bsc', label: 'BNB Smart Chain (BEP-20)', ready: true },
+      { chain: 'polygon', label: 'Polygon PoS (USDT0)', ready: false },
+    ];
+    const { window } = boot((url) => {
+      if (url.endsWith('/auth/refresh')) return { status: 200, body: { access_token: 'tok' } };
+      if (url.endsWith('/pay/products.json')) {
+        return { status: 200, body: { ok: true, purchasesEnabled: false, wallets: 'off', products: [], chain: 'bsc', networkLabel: networks[0].label, networks } };
+      }
+      if (url.endsWith('/pay/address.json')) return { status: 503, body: { error: 'signer_not_configured' } };
+      if (url.endsWith('/pay/account.json')) return { status: 200, body: { ok: true, balanceMicro: 0, history: [], entitlements: [] } };
+      return { status: 404, body: { error: 'not_found' } };
+    }, 'ru');
+    await tick();
+    const buttons = [...window.document.querySelectorAll('[data-pay="chains"] button')];
+    expect(buttons).toHaveLength(2);
+    const polygon = buttons.find((b) => b.dataset.chain === 'polygon')!;
+    expect(polygon.disabled).toBe(true);
+    expect(polygon.textContent).toContain('ещё не готова');
+    // Спрятать неготовую сеть — значит соврать, что её не существует; их две.
+    expect(window.document.querySelector('[data-pay="chains"]')?.hasAttribute('hidden')).toBe(false);
+  });
+
+  it('одна сеть — переключателя нет (выбор из одного пункта путает)', async () => {
+    const { window } = boot((url) => {
+      if (url.endsWith('/auth/refresh')) return { status: 200, body: { access_token: 'tok' } };
+      if (url.endsWith('/pay/products.json')) {
+        return { status: 200, body: { ok: true, purchasesEnabled: false, wallets: 'off', products: [], chain: 'bsc', networkLabel: 'BNB Smart Chain (BEP-20)', networks: [{ chain: 'bsc', label: 'BNB Smart Chain (BEP-20)', ready: true }] } };
+      }
+      if (url.endsWith('/pay/address.json')) return { status: 503, body: { error: 'signer_not_configured' } };
+      if (url.endsWith('/pay/account.json')) return { status: 200, body: { ok: true, balanceMicro: 0, history: [], entitlements: [] } };
+      return { status: 404, body: { error: 'not_found' } };
+    }, 'ru');
+    await tick();
+    expect(window.document.querySelectorAll('[data-pay="chains"] button')).toHaveLength(0);
+    expect(window.document.querySelector('[data-pay="chains"]')?.hasAttribute('hidden')).toBe(true);
+  });
+
   it('QR не открылся — адрес на экране, блока с картинкой нет', async () => {
     const { window } = boot((url) => {
       if (url.endsWith('/auth/refresh')) return { status: 200, body: { access_token: 'tok' } };

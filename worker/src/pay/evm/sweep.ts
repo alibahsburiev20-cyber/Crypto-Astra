@@ -15,6 +15,7 @@ import { formatMicroUsdt } from '../tron/amount';
 import { GAS_TOPUP_WEI, SWEEP_MIN_MICRO, evmAccountBalances, formatBnb, gasCostWei } from './balances';
 import type { EvmRpc } from './rpc';
 import type { PayNetwork } from '../flags';
+import type { PayChain } from '../units';
 
 /**
  * Сколько адресов читаем за проход. Для списка в админке хватило бы и 20, но
@@ -36,7 +37,12 @@ export interface EvmSweepRow {
 }
 
 export interface EvmSweepPlan {
-  chain: 'bsc';
+  /**
+   * План строится ПО ОДНОЙ сети: контракт и RPC у неё свои. Смешать в одном
+   * списке адреса BNB и Polygon можно, а вот прочитать их балансы одним
+   * `eth_call` — нельзя: для чужой цепи это «ноль на адресе», а не «адрес пуст».
+   */
+  chain: PayChain;
   network: PayNetwork;
   destination: string;
   addresses: number;
@@ -67,6 +73,12 @@ export interface EvmSweepInput {
   rpc: Pick<EvmRpc, 'call' | 'balance'>;
   contract: string;
   network: PayNetwork;
+  /**
+   * Сеть, по которой строится план: адреса выбираются по колонке `chain`, а
+   * балансы читаются контрактом ЭТОЙ сети. Без поля план смешал бы две EVM-цепи
+   // в одну цифру — «ноль на polygon-адресе» выглядел бы как «игрок беден».
+   */
+  chain?: PayChain;
   destination: string;
   sweepEnabled: boolean;
   /** Ставка газа, из которой считается «хватит ли BNB». */
@@ -89,21 +101,21 @@ export interface ActiveAddressSet {
 }
 
 /**
- * Активные адреса EVM-цепи — те, у которых `chain = 'bsc'`. Сортировка по сети,
- * а не по маске адреса: формат говорит «похоже на EVM», колонка — «мы выдали
- * его под EVM и сами его сканируем». План без этого фильтра выглядел бы как
- * «балансов нет», а не «не та сеть».
+ * Активные адреса одной EVM-цепи (`chain = 'bsc'` или `'polygon'`). Сортировка по
+ * сети, а не по маске адреса: формат говорит «похоже на EVM», колонка — «мы
+ * выдали его под EVM и сами его сканируем». План без этого фильтра выглядел бы
+ * как «балансов нет», а не «не та сеть».
  */
-export async function evmActiveAddresses(db: D1Database, limit: number): Promise<ActiveAddressSet> {
+export async function evmActiveAddresses(db: D1Database, limit: number, chain: PayChain = 'bsc'): Promise<ActiveAddressSet> {
   const [rows, count] = await Promise.all([
     db.prepare(
       `SELECT address, user_id FROM pay_addresses
-        WHERE active = 1 AND chain = 'bsc'
+        WHERE active = 1 AND chain = ?
         ORDER BY created_at DESC LIMIT ?`,
-    ).bind(limit).all<{ address: string; user_id: string | null }>(),
+    ).bind(chain, limit).all<{ address: string; user_id: string | null }>(),
     db.prepare(
-      `SELECT COUNT(*) AS n FROM pay_addresses WHERE active = 1 AND chain = 'bsc'`,
-    ).first<number>('n'),
+      `SELECT COUNT(*) AS n FROM pay_addresses WHERE active = 1 AND chain = ?`,
+    ).bind(chain).first<number>('n'),
   ]);
   const raw = Number(count ?? 0);
   if (!Number.isFinite(raw) || raw < 0) throw new Error('bad_address_count');
@@ -120,12 +132,15 @@ export async function evmSweepPlan(input: EvmSweepInput): Promise<EvmSweepPlan> 
   const limit = input.limit ?? SWEEP_PLAN_LIMIT;
   const fee = gasCostWei(input.maxFeePerGas);
 
-  const found = await evmActiveAddresses(input.db, limit);
+  const found = await evmActiveAddresses(input.db, limit, input.chain ?? 'bsc');
   const rows: EvmSweepRow[] = [];
 
   for (const row of found.rows) {
     try {
-      const balances = await evmAccountBalances(input.rpc, input.contract, row.address);
+      // `chain` здесь не для красоты: баланс USDT читается шкалой сети, и
+      // polygon-адрес, прочитанный «как BNB», дал бы 1e12-ю долю остатка — план
+      // сбора показал бы «мелочь, собиравать нечего» там, где лежат деньги.
+      const balances = await evmAccountBalances(input.rpc, input.contract, row.address, input.chain ?? 'bsc');
       const enoughGas = balances.gasWei >= fee;
       const blocker: EvmSweepRow['blocker'] = balances.usdtMicro <= 0
         ? 'no_usdt'
@@ -171,7 +186,7 @@ export async function evmSweepPlan(input: EvmSweepInput): Promise<EvmSweepPlan> 
     : !input.sweepEnabled ? 'sweep_disabled' : null;
 
   return {
-    chain: 'bsc',
+    chain: input.chain ?? 'bsc',
     network: input.network,
     destination: input.destination,
     addresses: rows.length,

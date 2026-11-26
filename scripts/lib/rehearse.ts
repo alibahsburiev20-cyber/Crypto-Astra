@@ -13,6 +13,16 @@
 // расхождении «зелёный скрипт / пустой кошелёк» ловят не тесты, а неделю
 // поддержки.
 
+import { parsePayChain, usdtDecimals } from '../../worker/src/pay/units';
+import {
+  evmActiveKeys, evmActiveKeysError, evmChainId, evmConfirmations, evmMeta, evmNetwork, evmRpcUrl, evmUsdtContract,
+} from '../../worker/src/pay/evm/config';
+
+/** `'testnet' | 'mainnet'` — то, что понимает прогон; всё, кроме mainnet, тест. */
+function testnetOf(network: string): 'testnet' | 'mainnet' {
+  return String(network).trim().toLowerCase() === 'mainnet' ? 'mainnet' : 'testnet';
+}
+
 /** Статус шага прогона. */
 export type VerdictStatus = 'ok' | 'skip' | 'fail';
 
@@ -53,57 +63,126 @@ export function microToRaw(micro: number, decimals = 18): bigint {
  * Порядок проверок — от «деньги вообще выключены» к «включены, но не туда»:
  * незнакомая сеть и пустой контракт выключают приём сами (см. `pay/chain.ts`),
  * и прогон в такой конфигурации не проверяет ничего.
+ *
+ * Сети проверяются ОДНИМ кодом: `bsc` и `polygon` отличаются только числами из
+ * `pay/evm/config.ts` (контракт, RPC, подтверждения, `chainId`, шкала знаков), и
+ * прогон обязан читать именно их. Если бы Polygon проверялся «похожей функцией»,
+ * расхождение конфигурации и проверки стало бы находкой само по себе.
  */
-export function checkChainEnv(env: RehearseEnv): { fatal: boolean; checks: RehearseCheck[]; chain: string; network: string; contract: string } {
-  const chain = String(env.PAY_CHAIN ?? 'tron').trim().toLowerCase();
+export interface RehearseChainConfig {
+  fatal: boolean;
+  checks: RehearseCheck[];
+  /** Внутренняя цепь: `bsc` / `polygon`. */
+  chain: 'bsc' | 'polygon';
+  /** Ключ конфигурации: `bnb` / `polygon`. */
+  key: 'bnb' | 'polygon';
+  network: 'testnet' | 'mainnet';
+  contract: string;
+  /** Знаки USDT в этой сети: 18 в BNB, 6 в Polygon. */
+  decimals: number;
+  /** Подтверждений ждём столько же, сколько боевой код. */
+  confirmations: number;
+  /** Какое `chainId` обязана отдать нода. */
+  expectedChainId: number;
+  /** Как называть нативную монету для газа: BNB или POL. */
+  gasSymbol: string;
+}
+
+export function checkChainEnv(env: RehearseEnv): RehearseChainConfig {
+  const rawChain = String(env.PAY_CHAIN ?? 'tron').trim().toLowerCase();
   const network = String(env.PAY_NETWORK ?? 'mainnet').trim().toLowerCase();
   const out: RehearseCheck[] = [];
+  const chain = parsePayChain(rawChain);
   const push = (step: string, status: VerdictStatus, reason: string, extra: Partial<RehearseCheck> = {}): void => {
     out.push({ step, status, reason, ...extra });
   };
-  const result = (fatal: boolean): { fatal: boolean; checks: RehearseCheck[]; chain: string; network: string; contract: string } => ({
+  const result = (fatal: boolean, resolved?: { contract: string; confirmations: number }): RehearseChainConfig => ({
     fatal,
     checks: out,
-    chain,
-    network,
-    contract: String(env.PAY_EVM_CONTRACT ?? '').trim().toLowerCase(),
+    chain: (chain ?? 'bsc') as 'bsc' | 'polygon',
+    key: (chain === 'polygon' ? 'polygon' : 'bnb') as 'bnb' | 'polygon',
+    network: testnetOf(network),
+    contract: String(resolved?.contract ?? env.PAY_EVM_CONTRACT ?? '').trim().toLowerCase(),
+    decimals: chain ? usdtDecimals(chain) : 18,
+    confirmations: Number(resolved?.confirmations ?? Number(env.PAY_EVM_CONFIRMATIONS ?? 0) ?? 0),
+    expectedChainId: chain ? evmChainId(chain === 'polygon' ? 'polygon' : 'bnb', testnetOf(network) !== 'mainnet') : 56,
+    gasSymbol: chain === 'polygon' ? 'POL' : 'BNB',
   });
 
-  if (chain !== 'bsc') {
-    push('сеть', 'fail', `PAY_CHAIN="${chain}" — рельс USDT BEP-20 не активен, прогонять нечего`, { fatal: true });
+  // TRON в этом прогоне быть не должно: рельс заморожен, и «проверили TRON» в
+  // отчёте выглядело бы как «проверили USDT-рельс», чего он не подтверждает.
+  if (chain !== 'bsc' && chain !== 'polygon') {
+    push('сеть', 'fail', `PAY_CHAIN="${rawChain}" — прогон проверяет EVM-рельс USDT (\`bsc\` или \`polygon\`), прогонять нечего`, { fatal: true });
     return result(true);
   }
-  push('сеть', 'ok', 'PAY_CHAIN="bsc" — активен рельс USDT BEP-20');
+  const key: 'bnb' | 'polygon' = chain === 'polygon' ? 'polygon' : 'bnb';
+  const testnet = network !== 'mainnet';
+  push('сеть', 'ok', `PAY_CHAIN="${chain}" — ${evmMeta(key).label}${testnet ? ' (тестнет)' : ''}`);
 
   if (network !== 'testnet' && network !== 'mainnet') {
     push('среды', 'fail', `PAY_NETWORK="${network}" — неизвестное значение, деньги выключены`, { fatal: true });
     return result(true);
   }
-  push('среды', 'ok', network === 'testnet'
-    ? 'PAY_NETWORK="testnet" — сеть 97, боевые настройки на неё не действуют'
-    : 'PAY_NETWORK="mainnet" — прогон не отправит ни одной транзакции (см. --send)');
+  push('среды', 'ok', testnet
+    ? `PAY_NETWORK="${network}" — сеть ${evmChainId(key, true)}, боевые настройки на неё не действуют`
+    : `PAY_NETWORK="mainnet" — сеть ${evmChainId(key, false)}, прогон не отправит ни одной транзакции (см. --send)`);
 
-  const contract = String(env.PAY_EVM_CONTRACT ?? '').trim();
+  // Контракт, RPC, подтверждения и `chainId` берём из боевого резолвера, а не
+  // читаем переменные руками: прогон обязан проверять ровно ту конфигурацию,
+  // с которой воркер выйдет в сеть, включая приоритет `*_POL` над общей.
+  const contract = evmUsdtContract(key, testnet, env);
   if (!/^0x[0-9a-fA-F]{40}$/.test(contract)) {
     push('контракт', 'fail', contract
-      ? `PAY_EVM_CONTRACT="${contract}" — не адрес`
-      : 'PAY_EVM_CONTRACT пуст: приём сам выключается (bsc_contract_missing)', { fatal: true });
+      ? `контракт USDT (${chain === 'polygon' ? 'PAY_EVM_CONTRACT_POL' : 'PAY_EVM_CONTRACT'})="${contract}" — не адрес`
+      : `контракт USDT не задан (${chain === 'polygon' ? 'PAY_EVM_CONTRACT_POL' : 'PAY_EVM_CONTRACT'}): приём сам выключается (${chain}_contract_missing)`, { fatal: true });
     return result(true);
   }
   push('контракт', 'ok', `контракт USDT задан: ${contract}`);
 
-  const rpc = String(env.PAY_EVM_RPC ?? '').trim();
+  const rpc = evmRpcUrl(key, testnet, env);
   if (!rpc) {
-    push('нода', 'fail', 'PAY_EVM_RPC пуст — читать сеть нечем', { fatal: true });
+    push('нода', 'fail', 'RPC пуст — читать сеть нечем', { fatal: true });
     return result(true);
   }
-  push('нода', 'ok', `PAY_EVM_RPC=${rpc}`);
+  push('нода', 'ok', `RPC=${rpc}, chainId ${evmChainId(key, testnet)}, знаков ${usdtDecimals(chain)}`);
 
-  const confirmations = Number(env.PAY_EVM_CONFIRMATIONS ?? '');
-  if (!Number.isInteger(confirmations) || confirmations < 1) {
-    push('подтверждения', 'fail', `PAY_EVM_CONFIRMATIONS="${env.PAY_EVM_CONFIRMATIONS}" — нужно целое число не меньше 1`, { fatal: true });
-  } else if (network === 'mainnet' && confirmations < 12) {
-    push('подтверждения', 'fail', `${confirmations} подтверждений на проде мало: нужно 12–15`, { fatal: true });
+  // Список сетей сканера: если активной цепи в нём нет, `pay/chain.ts` не отдаст
+  // ни одной спеки, и «прогон зелёный» означал бы «мы ничего не смотрели».
+  //
+  // Проверка обязательна и когда переменной нет вовсе: `PAY_CHAIN=polygon` без
+  // `PAY_EVM_CHAINS` — это «адреса выдаём в Polygon, а сканер по умолчанию
+  // смотрит BNB». Молча зелёный прогон тут хуже падения: ровно так теряют
+  // пополнения на второй сети.
+  const listError = evmActiveKeysError(env);
+  const active = evmActiveKeys(env);
+  if (listError) {
+    push('список сетей', 'fail', `PAY_EVM_CHAINS="${env.PAY_EVM_CHAINS}" — ${listError}: деньги стоят`, { fatal: true });
+  } else if (!active.includes(key)) {
+    push('список сетей', 'fail', `${String(env.PAY_EVM_CHAINS ?? '').trim() ? `PAY_EVM_CHAINS="${env.PAY_EVM_CHAINS}"` : 'PAY_EVM_CHAINS не задан (по умолчанию только bnb)'} — сети ${key} нет: адреса выдаём, а сканер их не смотрит. Задайте PAY_EVM_CHAINS=${active.concat(key).join(',')}`, { fatal: true });
+  } else {
+    push('список сетей', 'ok', `${String(env.PAY_EVM_CHAINS ?? '').trim() ? `PAY_EVM_CHAINS=${active.join(',')}` : 'PAY_EVM_CHAINS не задан — по умолчанию одна сеть, bnb'}; ${key} включена`);
+  }
+
+  // Читаем СЫРОЕ значение переменной, а не только то, что вернул
+  // `evmConfirmations`: боевой код округляет «0» и «-5» до единицы (деньги тогда
+  // всё же ждут один блок), и прогон, сверяющий только итог, назвал бы такую
+  // конфигурацию нормальной. Опечатка в лимите подтверждений — это находка.
+  const rawConfirmations = String(
+    env[key === 'polygon' ? 'PAY_EVM_CONFIRMATIONS_POL' : 'PAY_EVM_CONFIRMATIONS_BNB']
+      ?? env.PAY_EVM_CONFIRMATIONS ?? '',
+  ).trim();
+  const confirmations = evmConfirmations(key, testnet, env);
+  // Нижняя граница на проде зависит от сети: в Polygon реорги дороже, поэтому
+  // там боевое значение 64, а «12» из конфига BNB было бы дырой.
+  const minMainnet = chain === 'polygon' ? 24 : 12;
+  if (rawConfirmations && (!/^(0|[1-9]\d*)$/.test(rawConfirmations) || Number(rawConfirmations) < 1)) {
+    push('подтверждения', 'fail',
+      `значение «${rawConfirmations}» не годится: нужно целое не меньше 1 (боевой код округлит его до ${confirmations}, и деньги будут ждать один блок — это не то, что вы просили)`,
+      { fatal: true });
+  } else if (!Number.isInteger(confirmations) || confirmations < 1) {
+    push('подтверждения', 'fail', `подтверждений ${confirmations} — нужно целое число не меньше 1`, { fatal: true });
+  } else if (!testnet && confirmations < minMainnet) {
+    push('подтверждения', 'fail', `${confirmations} подтверждений на проде мало для ${evmMeta(key).label}: нужно не меньше ${minMainnet} (боевое значение по умолчанию ${evmNetwork(key, false).confirmations})`, { fatal: true });
   } else {
     push('подтверждения', 'ok', `${confirmations} подтверждений`);
   }
@@ -209,6 +288,8 @@ export interface PayoutTxWant {
   amountMicro: number;
   decimals?: number;
   maxCostWei?: bigint;
+  /** Как называть нативную монету для газа: `BNB` или `POL`. */
+  gasSymbol?: string;
 }
 
 /**
@@ -260,13 +341,17 @@ export function payoutTxCheck(input: {
 
   const maxCost = BigInt(got.gasLimit ?? 0) * BigInt(got.maxFeePerGas ?? 0);
   const cap = want.maxCostWei ?? 0n;
+  // Газ оплачивается монетой СВОЕЙ сети: BNB в BNB Chain, POL в Polygon. Цифры
+  // от этого не меняются (18 знаков там и там), а вот вывод «не хватает BNB»
+  // про Polygon отправил бы оператора не туда.
+  const gas = want.gasSymbol ?? 'BNB';
   out.push({
     step: 'потолок газа',
     // На тестнете потолок не выставляют: там газ бесплатный и любые числа ок.
     status: cap === 0n ? 'ok' : (maxCost <= cap ? 'ok' : 'fail'),
     reason: cap === 0n
-      ? `стоимость газа ${formatEther(maxCost)} BNB (потолок не задан)`
-      : `стоимость газа ${formatEther(maxCost)} BNB, потолок ${formatEther(cap)} BNB`,
+      ? `стоимость газа ${formatEther(maxCost)} ${gas} (потолок не задан)`
+      : `стоимость газа ${formatEther(maxCost)} ${gas}, потолок ${formatEther(cap)} ${gas}`,
   });
   return { status: out.some((c) => c.status === 'fail') ? 'fail' : 'ok', checks: out };
 }
@@ -343,10 +428,15 @@ export function signerGuardsCheck(input: {
   contract: string;
   chainId: number;
   amountMicro: number;
+  /** Для какой EVM-сети сверяем allowlist: у Signer он свой, по сетям. */
+  key?: 'bnb' | 'polygon';
 }): { status: VerdictStatus; checks: RehearseCheck[] } {
   const env = input.env;
+  const key = input.key ?? 'bnb';
   const out: RehearseCheck[] = [];
-  const push = (step: string, status: VerdictStatus, reason: string): void => { out.push({ step, status, reason }); };
+  const push = (step: string, status: VerdictStatus, reason: string, extra: Partial<RehearseCheck> = {}): void => {
+    out.push({ step, status, reason, ...extra });
+  };
 
   if (!String(env.SIGNER_PRIVATE_KEY ?? '').trim()) {
     push('ключ', 'skip', 'SIGNER_PRIVATE_KEY нет — подпись поднимается локальным тестовым ключом, боковой контур не задействован');
@@ -354,11 +444,24 @@ export function signerGuardsCheck(input: {
     push('ключ', 'ok', 'ключ подписи есть (в прогоне используется только локально, в сеть не передаётся)');
   }
 
-  const allowContract = String(env.SIGNER_EVM_CONTRACT ?? '').trim().toLowerCase();
+  // Имена переменных Signer — те же, что у него в коде: `SIGNER_EVM_CONTRACT`
+  // исторически описывает BNB, Polygon настраивается только `..._POL`. Сверять
+  // polygon-выплату с общим контрактом — значит «allowlist совпал», хотя Signer
+  // отказал бы на `contract_mismatch`.
+  const varName = key === 'polygon' ? 'SIGNER_EVM_CONTRACT_POL' : 'SIGNER_EVM_CONTRACT';
+  const allowContract = String(
+    env[varName] ?? (key === 'polygon' ? '' : env.SIGNER_EVM_CONTRACT ?? ''),
+  ).trim().toLowerCase();
   if (allowContract && allowContract !== String(input.contract).toLowerCase()) {
-    push('allowlist контракта', 'fail', `SIGNER_EVM_CONTRACT=${allowContract}, а прогон шлёт на ${input.contract} — Signer бы отказал (contract_not_allowed)`);
+    push('allowlist контракта', 'fail', `${varName}=${allowContract}, а прогон шлёт на ${input.contract} — Signer бы отказал (contract_mismatch)`);
+  } else if (!allowContract) {
+    // Прогон подписывает локально, поэтому это НЕ провал: проверить нечего.
+    // Но и «ok» врало бы: в бою пустой allowlist = `contract_misconfigured`,
+    // то есть ни одна выплата не уйдёт. Поэтому skip с внятной причиной.
+    push('allowlist контракта', 'skip',
+      `${varName} не задан: в бою Signer не подпишет ни одну выплату этой сети (contract_misconfigured), в прогоне подпись локальная`);
   } else {
-    push('allowlist контракта', 'ok', allowContract ? 'allowlist совпадает с PAY_EVM_CONTRACT' : 'SIGNER_EVM_CONTRACT не задан — сверять не с чем, прогон использует свой контракт');
+    push('allowlist контракта', 'ok', `${varName} совпадает с контрактом прогона`);
   }
 
   const allowChains = String(env.SIGNER_EVM_CHAIN_IDS ?? '').split(',').map((s) => Number(s.trim())).filter(Boolean);

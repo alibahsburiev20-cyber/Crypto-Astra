@@ -17,14 +17,14 @@
 
 import { keccak256 } from '../crypto/keccak';
 import { bytesToHex, hexToBytes } from '../crypto/hmac';
-import { chainValueToMicro, microToChainValue } from '../units';
+import { chainValueToMicro, microToChainValue, type PayChain } from '../units';
 import {
   TxError, applySignature, signingHash, transferCalldata, type EvmTxFields,
 } from './tx';
 import { createEvmRpc, type EvmRpc } from './rpc';
 import type { Env } from '../../env';
 import { payFlags } from '../flags';
-import { chainSpec } from '../chain';
+import { chainSpec, type ChainSpec } from '../chain';
 
 /** Лимит газа на `transfer(address,uint256)`. Реальный расход ~45–65k; берём с запасом. */
 export const PAYOUT_GAS_LIMIT = 80_000n;
@@ -72,12 +72,20 @@ export function buildPayoutTx(input: {
   maxFeePerGas: bigint;
   maxPriorityFeePerGas: bigint;
   gasLimit?: bigint;
+  /** Для какой EVM-сети собираем: шкала USDT в ней (18 в BNB, 6 в Polygon). */
+  chain?: PayChain;
 }): EvmTxFields {
   if (!Number.isSafeInteger(input.amountMicro) || input.amountMicro <= 0) throw new BroadcastError('bad_amount');
+  const chain: PayChain = input.chain ?? 'bsc';
   // Перевод на 18-значной сети обязан быть точным до micro: иначе «отдали 1 USDT»,
   // а в сети ушло 0.999999999999.
-  const raw = microToChainValue(input.amountMicro, 'bsc');
-  if (chainValueToMicro(raw.toString(), 'bsc') !== input.amountMicro) throw new BroadcastError('amount_not_exact');
+  //
+  // Шкала — network-зависимая, и это не деталь: собранное в 18 знаков число для
+  // Polygon (6 знаков) означает «в 1e12 раз больше», чем просил игрок. Транзакция
+  // тогда просто не пройдёт по балансу, но ровно так же она прошла бы с
+  // «округлением вверх» — поэтому сеть здесь передаётся, а не выводится из `to`.
+  const raw = microToChainValue(input.amountMicro, chain);
+  if (chainValueToMicro(raw.toString(), chain) !== input.amountMicro) throw new BroadcastError('amount_not_exact');
   return {
     chainId: input.chainId,
     nonce: input.nonce,
@@ -135,6 +143,12 @@ export interface SendInput {
    */
   nonce?: number;
   maxGasPriceWei?: bigint;
+  /**
+   * Сеть выплаты: `bsc` (18 знаков USDT) или `polygon` (6). По умолчанию BNB —
+   * ради вызовов, где сеть уже известна из конфигурации; выплаты в Polygon обязаны
+   * передавать её явно, иначе сумма в `data` вырастет в 1e12 раз.
+   */
+  chain?: PayChain;
 }
 
 export interface SendResult {
@@ -175,6 +189,7 @@ export async function sendUsdtEvm(rpc: EvmRpc, signer: EvmSignerClient, input: S
     contract: input.contract,
     recipient: input.recipient,
     amountMicro: input.amountMicro,
+    chain: input.chain ?? 'bsc',
     maxFeePerGas: gas.maxFeePerGas,
     maxPriorityFeePerGas: gas.maxPriorityFeePerGas,
   });
@@ -225,10 +240,19 @@ export async function sendUsdtEvm(rpc: EvmRpc, signer: EvmSignerClient, input: S
   };
 }
 
-/** JSON-RPC клиент активной BSC-сети. Ошибку даёт явную: без URL платить нельзя. */
-export function evmRpcFor(env: Env, fetchImpl: typeof fetch = fetch): EvmRpc {
-  const spec = chainSpec(env, payFlags(env));
-  if (spec.chain !== 'bsc') throw new BroadcastError('chain_not_evm');
+/**
+ * JSON-RPC клиент активной EVM-сети (BNB Chain или Polygon).
+ *
+ * Ошибку даёт явную: без URL платить нельзя, а `tron` сюда прийти не может — у
+ * TRON другой транспорт, и «послали TRON-адрес в EVM-RPC» выглядит как пустой
+ * ответ, а не как ошибка конфигурации.
+ */
+export function evmRpcFor(
+  env: Env,
+  fetchImpl: typeof fetch = fetch,
+  spec: ChainSpec = chainSpec(env, payFlags(env)),
+): EvmRpc {
+  if (spec.chain === 'tron') throw new BroadcastError('chain_not_evm');
   if (!spec.apiBase) throw new BroadcastError('rpc_missing');
   return createEvmRpc({ url: spec.apiBase, fetchImpl, timeoutMs: 10_000 });
 }
