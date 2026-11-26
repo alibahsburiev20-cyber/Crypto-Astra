@@ -24,6 +24,7 @@
     "build": "node scripts/embed-client.mjs",
     "ads-forecast": "tsx scripts/ads-forecast.ts",
     "pay:loadtest": "tsx scripts/pay-loadtest.ts",
+    "pay:rehearse": "tsx scripts/pay-bsc-rehearsal.ts",
     "health": "tsx scripts/health-check.ts",
     "smoke:arcade": "tsx scripts/arcade-smoke.ts",
     "restore:drill": "bash scripts/restore-drill.sh",
