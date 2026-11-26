@@ -22,6 +22,33 @@
   font-size: 0.85rem;
 }
 
+/* Кнопки сетей: выбор «куда слать USDT». Отличаются от .pay-flag тем, что
+   нажимаются, и тем, что неактивная сеть обязана быть видна, а не спрятана. */
+.pay-chains {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0 4px;
+}
+
+.pay-chain {
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.pay-chain[disabled] {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.pay-chain.is-active,
+.pay-chain[aria-pressed='true'] {
+  border-color: rgba(120, 170, 255, 0.6);
+  background: rgba(120, 170, 255, 0.16);
+}
+
 .pay-wallet {
   padding: 20px;
   border-radius: 18px;

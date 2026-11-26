@@ -20,7 +20,12 @@ import { d1From } from '../helpers/d1';
  */
 const MIGRATION_DIR = '../../migrations/d1/';
 const MIGRATION_0007 = MIGRATION_DIR + '0007_astra_pay.sql';
-const MIGRATIONS = [MIGRATION_0007, MIGRATION_DIR + '0008_pay_addresses_chain.sql'];
+const MIGRATIONS = [
+  MIGRATION_0007,
+  MIGRATION_DIR + '0008_pay_addresses_chain.sql',
+  MIGRATION_DIR + '0009_pay_addresses_polygon.sql',
+  MIGRATION_DIR + '0010_pay_withdrawals_chain.sql',
+];
 
 function migrationSql(name: string): string {
   return readFileSync(new URL(name, import.meta.url), 'utf8');
@@ -70,8 +75,9 @@ describe('схема pay_*', () => {
   it('миграция создаёт ровно 15 таблиц', () => {
     const db = fromMigration();
     expect(tables(db)).toEqual([...PAY_TABLES].sort());
-    // 2 — это «у адреса есть сеть» (`pay_addresses.chain`).
-    expect(PAY_SCHEMA_VERSION).toBe(2);
+    // 3 — это «у адреса есть сеть» (`pay_addresses.chain`), «эта сеть — Polygon»
+    // (0009) и «у заявки на выплату своя сеть» (0010).
+    expect(PAY_SCHEMA_VERSION).toBe(3);
   });
 
   it('код и миграция не расходятся по колонкам', () => {
@@ -327,11 +333,12 @@ describe('ensurePaySchema', () => {
     resetPaySchemaForTests();
     const { db, seen } = countingDb();
     expect(await ensurePaySchema(db)).toBe(true);
-    // +2: `pay_addresses` поднимается и проверяется до общего списка (иначе DDL
-    // с `chain` падает на старой базе), поэтому отдельный прогон DDL этой таблицы
-    // плюс проба «есть ли колонка chain» — два запроса сверх списка.
+    // +3: `pay_addresses` поднимается и проверяется до общего списка (иначе DDL
+    // с `chain` падает на старой базе), поэтому отдельный прогон DDL этой таблицы,
+    // проба «есть ли колонка chain» и проба «CHECK знает polygon» (текст таблицы
+    // из sqlite_master) — три запроса сверх списка.
     const total = PAY_STATEMENTS.length + PAY_PARTIAL_INDEXES.length
-      + PAY_CHAIN_INDEXES.length + PAY_TRIGGERS.length + 2;
+      + PAY_CHAIN_INDEXES.length + PAY_TRIGGERS.length + 3;
     expect(seen).toHaveLength(total);
     expect(seen.some((s) => s.includes('pay_ledger_no_update'))).toBe(true);
     // Индекс против ветвления журнала — отдельной группой: он создаётся с

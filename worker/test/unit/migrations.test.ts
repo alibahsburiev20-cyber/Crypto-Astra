@@ -23,7 +23,13 @@ const FILES = readdirSync(DIR).filter((f) => f.endsWith('.sql')).sort();
  * мог создать код, — значит и «все CREATE с IF NOT EXISTS», и «второй прогон
  * ничего не меняет» обязаны для неё выполняться на тех же правах.
  */
-const SELF_HEALED = ['0006_pool.sql', '0007_astra_pay.sql', '0008_pay_addresses_chain.sql'];
+const SELF_HEALED = [
+  '0006_pool.sql', '0007_astra_pay.sql', '0008_pay_addresses_chain.sql',
+  '0009_pay_addresses_polygon.sql', '0010_pay_withdrawals_chain.sql',
+  // Доступы админки: `ensureAdminSchema` создаёт те же таблицы в рантайме, значит
+  // и «CREATE с IF NOT EXISTS», и «второй прогон ничего не меняет» обязательны.
+  '0011_admin_accounts.sql',
+];
 
 function sqlOf(files: string[] = FILES): string {
   return files.map((f) => readFileSync(new URL(f, DIR), 'utf8')).join('\n');
@@ -101,11 +107,12 @@ describe('миграции D1 идемпотентны', () => {
     for (const s of PAY_STATEMENTS) runtimeFirst.exec(s);
     for (const s of PAY_PARTIAL_INDEXES) runtimeFirst.exec(s);
     for (const s of PAY_TRIGGERS) runtimeFirst.exec(s);
-    expect(() => runtimeFirst.exec(sqlOf(['0007_astra_pay.sql', '0008_pay_addresses_chain.sql']))).not.toThrow();
+    const chain = ['0007_astra_pay.sql', '0008_pay_addresses_chain.sql', '0009_pay_addresses_polygon.sql', '0010_pay_withdrawals_chain.sql'];
+    expect(() => runtimeFirst.exec(sqlOf(chain))).not.toThrow();
 
     // Эталон: только миграция.
     const migrationOnly = new DatabaseSync(':memory:');
-    migrationOnly.exec(sqlOf(['0007_astra_pay.sql', '0008_pay_addresses_chain.sql']));
+    migrationOnly.exec(sqlOf(chain));
 
     const payOnly = (db: DatabaseSync) => snapshot(db).filter((line) => line.includes('|pay_'));
     expect(payOnly(runtimeFirst)).toEqual(payOnly(migrationOnly));

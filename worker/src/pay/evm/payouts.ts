@@ -15,6 +15,7 @@
 // таблице состояний из `pay/payouts.ts`.
 
 import { failWithdrawal, confirmWithdrawal, markSent, type WithdrawalRow } from '../payouts';
+import type { PayChain } from '../units';
 import { PAYOUT_GAS_LIMIT } from './broadcast';
 import type { EvmRpc } from './rpc';
 
@@ -132,12 +133,15 @@ export async function applyEvmPayoutConfirmations(
   rpc: Pick<EvmRpc, 'transactionReceipt' | 'blockNumber'>,
   confirmations: number,
   now: number = Date.now(),
+  chain: PayChain = 'bsc',
 ): Promise<{ checked: number; confirmed: number; reverted: number; pending: number }> {
+  // Фильтр по сети обязателен: заявка в Polygon и проверка через RPC BNB — это
+  // «transakция не найдена» на каждый проход, то есть вечно висящий `sent`.
   const rows = await db.prepare(
     `SELECT id FROM pay_withdrawals
-      WHERE status IN ('broadcasting', 'sent') AND txid IS NOT NULL
+      WHERE status IN ('broadcasting', 'sent') AND txid IS NOT NULL AND chain = ?
       ORDER BY decided_at ASC LIMIT ?`,
-  ).bind(PAYOUT_VERIFY_LIMIT).all<{ id: string }>();
+  ).bind(chain, PAYOUT_VERIFY_LIMIT).all<{ id: string }>();
 
   const out = { checked: 0, confirmed: 0, reverted: 0, pending: 0 };
   for (const row of (rows.results ?? []) as Array<{ id: string }>) {

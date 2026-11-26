@@ -11,7 +11,8 @@
 // несколько сравнений строк.
 
 import type { Env } from '../env';
-import { isPayChain, type PayChain } from './units';
+import { evmActiveKeysError } from './evm/config';
+import { parsePayChain, type PayChain } from './units';
 
 /**
  * Среда: `nile` — тестовая, `mainnet` — боевая.
@@ -40,8 +41,14 @@ export interface PayFlags {
   network: PayNetwork;
   /** Какую цепь использовать. См. `pay/chain.ts`. */
   chain: PayChain;
-  /** `PAY_CHAIN` задан, но значение незнакомо: деньги обязаны стоять. */
+  /**
+   * Сеть названа так, что понимать её нельзя: `PAY_CHAIN` с опечаткой или
+   * неизвестное имя в `PAY_EVM_CHAINS`. Деньги обязаны стоять — и адреса тоже:
+   * выдать адрес сети, которую сканер не смотрит, дороже любого простоя.
+   */
   chainConfigError: boolean;
+  /** Что именно не настроено — словами, для `/pay/status.json` и логов. */
+  chainConfigDetail: string;
 }
 
 /** Единственное «включено» — строка `on`. Всё остальное выключено. */
@@ -76,7 +83,11 @@ export function isTestnetNetwork(network: PayNetwork): boolean {
 export function readChain(value: unknown): { chain: PayChain; unknown: boolean } {
   const text = String(value ?? '').trim().toLowerCase();
   if (!text) return { chain: 'tron', unknown: false };
-  return isPayChain(text) ? { chain: text, unknown: false } : { chain: 'tron', unknown: true };
+  // Алиасы — не «послабление», а способ не стрелять в колено оператору,
+  // написавшему `bnb` вместо `bsc` или `matic` вместо `polygon`. Незнакомое имя
+  // по-прежнему выключает деньги.
+  const chain = parsePayChain(text);
+  return chain ? { chain, unknown: false } : { chain: 'tron', unknown: true };
 }
 
 export function payFlags(env: Env): PayFlags {
@@ -85,6 +96,9 @@ export function payFlags(env: Env): PayFlags {
   // «включил депозиты и забыл общий тумблер» в обе стороны.
   const child = (value: unknown): boolean => payments && isOn(value);
   const chain = readChain(env.PAY_CHAIN);
+  // Список EVM-сетей проверяем здесь, а не «там, где он читается»: опечатка в
+  // `PAY_EVM_CHAINS` обязана остановить и выдачу адреса, и cron, и витрину.
+  const evmChains = evmActiveKeysError(env as unknown as Record<string, string | undefined>);
   return {
     payments,
     deposits: child(env.DEPOSITS_ENABLED),
@@ -95,7 +109,10 @@ export function payFlags(env: Env): PayFlags {
     schemaCheck: isOn(env.PAY_SCHEMA_CHECK),
     network: payNetwork(env),
     chain: chain.chain,
-    chainConfigError: chain.unknown,
+    chainConfigError: chain.unknown || Boolean(evmChains),
+    chainConfigDetail: chain.unknown
+      ? `PAY_CHAIN=${String(env.PAY_CHAIN ?? '')}`
+      : `PAY_EVM_CHAINS=${String((env as unknown as Record<string, string | undefined>).PAY_EVM_CHAINS ?? '')} — ${evmChains}`,
   };
 }
 

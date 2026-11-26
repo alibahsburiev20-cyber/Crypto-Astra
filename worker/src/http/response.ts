@@ -104,6 +104,33 @@ export const STATUS_BY_CODE: Record<string, number> = {
   admin_forbidden: 403,
   admin_disabled: 503,
   admin_weak_token: 503,
+  // Доступ младшего админа (`X-Admin-Key`): три разных отказа, потому что
+  // решаются они по-разному — новый ключ, отзыв, продление срока.
+  admin_key_unknown: 403,
+  admin_key_revoked: 403,
+  admin_key_expired: 403,
+  admin_store_unavailable: 503,
+  owner_only: 403,
+  grant_limit: 409,
+  bad_label: 400,
+  bad_email: 400,
+  bad_days: 400,
+  bad_grant_limit: 400,
+  bad_account: 400,
+  account_not_active: 409,
+  bad_action: 400,
+  confirm_required: 400,
+  not_blocked: 409,
+  player_already_closed: 409,
+  player_has_funds: 409,
+  pay_unavailable: 503,
+  // Общие коды: их бросают и игровые модули, и админка. Без статуса такой отказ
+  // при «не ApiError» пути превращался бы в 500 internal.
+  bad_request: 400,
+  bad_world: 400,
+  reason_required: 400,
+  ambiguous_player: 409,
+  too_many_attempts: 429,
   pool_unavailable: 503,
   season_not_found: 404,
   // Этап 5: боксы. У каждого кода обязан быть статус, иначе игрок увидит internal.

@@ -28,11 +28,13 @@ async function freshDb() {
 }
 
 /** Заявка в произвольном состоянии — вставляем напрямую, автомат проверяем отдельно. */
-async function insertWithdrawal(db: D1Database, id: string, status: string, txid: string | null = TXID) {
+async function insertWithdrawal(
+  db: D1Database, id: string, status: string, txid: string | null = TXID, chain = 'bsc',
+) {
   await db.prepare(
-    `INSERT INTO pay_withdrawals (id, user_id, address, amount_micro, fee_micro, status, idem_key, created_at, decided_at, txid)
-     VALUES (?, 'u1', ?, 5000000, 0, ?, ?, ?, ?, ?)`,
-  ).bind(id, OWNER, status, `wd:${id}`, T0, T0, txid).run();
+    `INSERT INTO pay_withdrawals (id, user_id, address, chain, amount_micro, fee_micro, status, idem_key, created_at, decided_at, txid)
+     VALUES (?, 'u1', ?, ?, 5000000, 0, ?, ?, ?, ?, ?)`,
+  ).bind(id, OWNER, chain, status, `wd:${id}`, T0, T0, txid).run();
 }
 
 function node(opts: {
@@ -179,6 +181,26 @@ describe('подтверждение выплаты по квитанции', ()
 
     const res = await applyEvmPayoutConfirmations(db, rpc, 11, T0);
     expect(res).toMatchObject({ checked: 2, confirmed: 1, pending: 1 });
+  });
+
+  it('polygon-заявка не проверяется через RPC другой сети', async () => {
+    // Именно из-за этого сверка фильтрует по `chain`: транзакция с тем же
+    // форматом хеша в чужой цепи либо не найдётся (и заявка вечна в `sent`),
+    // либо — хуже — найдётся чужая. Адреса-то в EVM выглядят одинаково.
+    const db = await freshDb();
+    await insertWithdrawal(db, 'wd_pol', 'sent', TXID, 'polygon');
+    const rpc = {
+      blockNumber: async () => 100,
+      transactionReceipt: async () => { throw new Error('в BNB такой транзакции нет'); },
+    } as never;
+    const res = await applyEvmPayoutConfirmations(db, rpc, 11, T0, 'bsc');
+    expect(res.checked).toBe(0);
+    // А своим транспортом — проверяется.
+    const mine = await applyEvmPayoutConfirmations(db, {
+      blockNumber: async () => 100,
+      transactionReceipt: async () => ({ status: true, blockNumber: 90, gasUsed: 60000 } as never),
+    } as never, 11, T0, 'polygon');
+    expect(mine).toMatchObject({ checked: 1, confirmed: 1 });
   });
 
   it('заявки в `confirmed`/`failed` в очередь не попадают', async () => {

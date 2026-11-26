@@ -506,15 +506,60 @@ Miner, Explorer, Cruiser, Flagship). Восьмая клетка при шест
 
 ## Админка мира
 
-Только для оператора: заголовок `X-Admin-Token` (секрет `ADMIN_TOKEN`),
-идентификатор мира — обязательный `?world=w1` (`[a-zA-Z0-9_-]`, до 32 символов;
-иначе `bad_world`).
+Два способа войти, и оба идут через одну проверку (`requireAdmin`):
+
+- `X-Admin-Token` — секрет `ADMIN_TOKEN` (владелец, 24+ символов);
+- `X-Admin-Key` — ключ младшего админа из `admin_accounts` (выдаётся ссылкой из
+  админки, см. `docs/ADMIN.md`);
+- `X-Admin-Email` — вторая щеколда: для владельца это секрет `ADMIN_EMAIL`, для
+  помощника — `email` его доступа, если он задан.
+
+Идентификатор мира — обязательный `?world=w1` (`[a-zA-Z0-9_-]`, до 32 символов;
+иначе `bad_world`) там, где запрос уходит в Durable Object (`/admin/world*`).
+Пул, деньги, доступы и карточка игрока читают D1 и мир не просят.
+
+Роль решает, что разрешено: `owner_only` (403) — попытка младшего админа тронуть
+деньги, доступы, заморозку мира или чужой аккаунт.
 
 | Метод | Путь | Тело | Ответ |
 | --- | --- | --- | --- |
+| GET | `/admin/session` | — | `role` (`owner`/`junior`), `label`, `grantLimit`, `expiresAt` |
 | GET | `/admin/world` | — | `world`, `frozen`, `totals`, `verify`, `players[]` |
-| POST | `/admin/world/freeze` | `{ frozen: boolean }` | `frozen` |
-| POST | `/admin/world/grant` | `{ player, astra, reason }` | `granted`, `astra`, `world`, `playerId`, `resolvedBy` |
+| POST | `/admin/world/freeze` | `{ frozen: boolean }` | `frozen` — только владельцу |
+| POST | `/admin/world/grant` | `{ player, astra, reason }` | `granted`, `astra`, `world`, `playerId`, `resolvedBy`, `actor` |
+| GET | `/admin/player` | `?player=` (id, начало id или email) | `player{}`, `world` (или `null`, если DO недоступен) |
+| POST | `/admin/player/block` | `{ player, action: 'block'\|'unblock', reason }` | `sessions`, `alreadyBlocked` — только владельцу |
+| POST | `/admin/player/close` | `{ player, reason, confirm: 'DELETE' }` | `closedAt`, `sessions`, `balanceMicro` — только владельцу |
+| GET | `/admin/accounts` | — | `accounts[]` (без ключей и хешей) — только владельцу |
+| POST | `/admin/accounts/invite` | `{ label, email?, days?, grantLimit?, note? }` | 201: `id`, `key`, `link`, `expiresAt` — только владельцу |
+| POST | `/admin/accounts/revoke` | `{ id }` | `revoked` — только владельцу |
+| GET | `/admin/audit` | `?limit=1…100` (по умолчанию 25) | `entries[]` — только владельцу |
+
+`grantLimit` — потолок одной выдачи/списания ASTRA для этого доступа (1…20000,
+по умолчанию 5000): сумма больше него отвечает `grant_limit` (409), по модулю —
+«минус» не лазейка. `days` — срок жизни ключа (1…90, по умолчанию 7).
+`link` — `/admin#k=…`: ключ во фрагменте, потому что строка запроса попадает в
+историю браузера, в `Referer` и в логи прокси; без косой черты после `admin`,
+чтобы не ловить 307 от Assets. Открытый ключ отдаётся ровно один
+раз в ответе 201: в базе лежит только SHA-256, поэтому «показать ещё раз» нечем —
+создайте новый доступ.
+
+Ответ `/admin/player`: `id`, `email`, `status`, `worldId`, `createdAt`, `telegram`
+(привязан ли телеграм — сам id не отдаётся), `sessions` (живые refresh-сессии),
+`payBalanceMicro` (`null`, если таблица денег не читается), `openWithdrawals`
+(заявки в `requested/approved/reserved/broadcasting/sent`), `addresses[]`.
+Закрытие аккаунта при `payBalanceMicro > 0` или `openWithdrawals > 0` отвечает
+`player_has_funds` (409), при нечитаемом балансе — `pay_unavailable` (503):
+сначала урегулируйте деньги, потом удаляйте.
+
+Ошибки: `admin_token_required` (401), `admin_forbidden` (403),
+`admin_key_unknown` / `admin_key_revoked` / `admin_key_expired` (403),
+`admin_disabled` / `admin_weak_token` / `admin_store_unavailable` (503),
+`owner_only` (403), `bad_world`, `bad_target`, `bad_amount`, `reason_required`,
+`bad_label` / `bad_email` / `bad_days` / `bad_grant_limit` / `bad_account` /
+`bad_action` / `confirm_required` (400), `ambiguous_player` / `grant_limit` /
+`account_not_active` / `not_blocked` / `player_already_closed` /
+`player_has_funds` (409), `player_not_found` (404).
 
 `verify` — сверка журнала: `{ ok, rows, brokenAtSeq?, mismatches? }`. `totals` —
 `players`, `astra`, `points`, `ships`, `adventures`. Начисление принимает

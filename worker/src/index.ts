@@ -2,7 +2,7 @@ import { syncArchive } from './archive';
 import { cleanupAuthLimits } from './auth/rateLimit';
 import { ensureArchiveSchema } from './db/bootstrap';
 import { payFlags } from './pay/flags';
-import { chainSpec } from './pay/chain';
+import { chainSpec, evmChainSpecs } from './pay/chain';
 import { applyEvmDeposits, bscActiveAddresses, scanEvmBlocks } from './pay/evm/deposits';
 import { createEvmRpc } from './pay/evm/rpc';
 import { applyEvmPayoutConfirmations } from './pay/evm/payouts';
@@ -105,27 +105,37 @@ export default {
         } catch (e) {
           console.error('pay monitor failed', e);
         }
-      } else if (spec.ready.deposits && spec.contract) {
-        try {
-          const addresses = await bscActiveAddresses(env.DB);
-          const scanned = await scanEvmBlocks(env.DB, {
-            rpc: createEvmRpc({ url: spec.apiBase, fetchImpl: fetch }),
-            contract: spec.contract,
-            chain: 'bsc',
-            confirmations: spec.confirmations,
-            addresses,
-          }, Date.now());
-          const applied = await applyEvmDeposits(env.DB, spec.contract, Date.now(), 100);
-          if (scanned.stored || scanned.error || applied.credited || applied.orphan) {
-            console.log('pay monitor bsc', scanned, applied);
-          }
-        } catch (e) {
-          console.error('pay monitor bsc failed', e);
-        }
       } else {
-        // Рельс выбран, но не дописан: молча молчать нельзя, иначе «депозиты не
-        // пришли» будет выглядеть как проблема игрока.
-        console.error('pay deposits paused', { chain: spec.chain, reason: spec.ready.reason });
+        // EVM-рельс: каждую включённую сеть сканируем своим проходом. «Одна
+        // сеть на воркер» было верно, пока сеть была одна; с двумя выборка
+        // `WHERE chain = 'bsc'` означала бы «polygon-адреса игрока никто не
+        // смотрит», и выглядело бы это как «игрок не прислал», а не как наша
+        // ошибка. Курсор при этом отдельный на пару (сеть, контракт) — высоты
+        // в разных цепях несопоставимы.
+        for (const rail of evmChainSpecs(env, pay)) {
+          if (!rail.ready.deposits || !rail.contract) {
+            // Рельс выбран, но не дописан: молча молчать нельзя, иначе «депозиты
+            // не пришли» будет выглядеть как проблема игрока.
+            console.error('pay deposits paused', { chain: rail.chain, reason: rail.ready.reason });
+            continue;
+          }
+          try {
+            const addresses = await bscActiveAddresses(env.DB, undefined, rail.chain);
+            const scanned = await scanEvmBlocks(env.DB, {
+              rpc: createEvmRpc({ url: rail.apiBase, fetchImpl: fetch }),
+              contract: rail.contract,
+              chain: rail.chain,
+              confirmations: rail.confirmations,
+              addresses,
+            }, Date.now());
+            const applied = await applyEvmDeposits(env.DB, rail.contract, Date.now(), 100, rail.chain);
+            if (scanned.stored || scanned.error || applied.credited || applied.orphan) {
+              console.log('pay monitor evm', { chain: rail.chain }, scanned, applied);
+            }
+          } catch (e) {
+            console.error('pay monitor evm failed', rail.chain, e);
+          }
+        }
       }
       // Отдельная страховка на случай переезда: активные адреса старой цепи,
       // которые новый сканер никогда не найдёт. Деньги на них не потеряны, но
@@ -146,14 +156,17 @@ export default {
     // `sent` до ручного нажатия «подтвердить»: деньги ушли, а баланс игрока
     // «в обработке» неделями. Работает только там, где рельс дописан.
     if (pay.payouts) {
-      const spec = chainSpec(env, pay);
-      if (spec.chain === 'bsc' && spec.ready.payouts && spec.contract) {
+      // По каждой EVM-сети, а не «по активной»: заявка живёт в `pay_withdrawals`
+      // со своей колонкой `chain`, и проверять polygon-перевод через BNB-RPC —
+      // значит «заявка висит в sent, пока кто-то не нажмёт кнопку руками».
+      for (const rail of evmChainSpecs(env, pay)) {
+        if (!rail.ready.payouts || !rail.contract) continue;
         try {
-          const rpc = createEvmRpc({ url: spec.apiBase, fetchImpl: fetch });
-          const res = await applyEvmPayoutConfirmations(env.DB, rpc, spec.confirmations, Date.now());
-          if (res.checked) console.log('pay payouts confirm', { chain: 'bsc', ...res });
+          const rpc = createEvmRpc({ url: rail.apiBase, fetchImpl: fetch });
+          const res = await applyEvmPayoutConfirmations(env.DB, rpc, rail.confirmations, Date.now(), rail.chain);
+          if (res.checked) console.log('pay payouts confirm', { chain: rail.chain, ...res });
         } catch (e) {
-          console.error('pay payouts confirm failed', e);
+          console.error('pay payouts confirm failed', rail.chain, e);
         }
       }
     }

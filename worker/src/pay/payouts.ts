@@ -32,6 +32,9 @@ export const MIN_WITHDRAW_MICRO = 5_000_000; // 5 USDT: ниже комисси�
 export const MIN_WITHDRAW_MICRO_BY_CHAIN: Record<PayChain, number> = {
   tron: 5_000_000,
   bsc: 1_000_000,
+  // Polygon: тот же порядок, что и в BNB — газ там копейки, а 5 USDT минимума
+  // означали бы «мелкий вывод запрещён» без причины.
+  polygon: 1_000_000,
 };
 
 export function minWithdrawMicro(chain: PayChain = 'tron'): number {
@@ -70,6 +73,8 @@ export interface WithdrawalRow {
   id: string;
   user_id: string;
   address: string;
+  /** Сеть выплаты: `tron` / `bsc` / `polygon`. От неё зависит и отправка, и сверка. */
+  chain?: PayChain;
   amount_micro: number;
   fee_micro: number;
   status: WithdrawalStatus;
@@ -88,7 +93,10 @@ export interface WithdrawalRow {
  */
 export function normalizeWithdrawAddress(chain: PayChain, raw: string): string {
   const text = String(raw ?? '').trim();
-  if (chain === 'bsc') {
+  // Всё, что не TRON, — EVM: формат один, `0x…`. Отдельная ветка на каждую сеть
+  // здесь только путает: при появлении третьей EVM-цепи `=== 'bsc'` значило бы
+  // «polygon-адрес пробуем нормализовать как TRON» и отказ `bad_address`.
+  if (chain !== 'tron') {
     if (!isEvmAddress(text)) throw new PayoutError('bad_address');
     return toChecksumAddress(text).toLowerCase();
   }
@@ -184,14 +192,14 @@ export async function requestWithdrawal(
 
   const id = `wd_${idemKey.slice(3)}`;
   const info = await db.prepare(
-    `INSERT INTO pay_withdrawals (id, user_id, address, amount_micro, fee_micro, status, idem_key, created_at)
-     SELECT ?, ?, ?, ?, 0, 'requested', ?, ?
+    `INSERT INTO pay_withdrawals (id, user_id, address, chain, amount_micro, fee_micro, status, idem_key, created_at)
+     SELECT ?, ?, ?, ?, ?, 0, 'requested', ?, ?
       WHERE (SELECT COALESCE(SUM(delta), 0) FROM pay_ledger WHERE user_id = ?) >= ?
         AND (SELECT COALESCE(SUM(amount_micro), 0) FROM pay_withdrawals
               WHERE user_id = ? AND created_at >= ? AND status NOT IN ('failed')) + ? <= ?
      ON CONFLICT (idem_key) DO NOTHING`,
   ).bind(
-    id, input.userId, address, amount, idemKey, now,
+    id, input.userId, address, input.chain ?? 'tron', amount, idemKey, now,
     input.userId, amount,
     input.userId, dayStart, amount, DAILY_LIMIT_MICRO,
   ).run();
@@ -353,12 +361,13 @@ export async function failWithdrawal(
 /** Заявки игрока для кабинета. */
 export async function listWithdrawals(db: D1Database, userId: string, limit = 20) {
   const { results } = await db.prepare(
-    `SELECT id, address, amount_micro, status, created_at, txid FROM pay_withdrawals
+    `SELECT id, address, chain, amount_micro, status, created_at, txid FROM pay_withdrawals
       WHERE user_id = ? ORDER BY created_at DESC LIMIT ?`,
   ).bind(userId, Math.max(1, Math.min(100, limit))).all<WithdrawalRow>();
   return (results ?? []).map((row) => ({
     id: String(row.id),
     address: String(row.address),
+    chain: String(row.chain ?? 'tron'),
     amount: formatMicroUsdt(Number(row.amount_micro)),
     amountMicro: Number(row.amount_micro),
     status: String(row.status),
@@ -370,7 +379,7 @@ export async function listWithdrawals(db: D1Database, userId: string, limit = 20
 /** Очередь для админа: всё, что требует рук. */
 export async function withdrawalQueue(db: D1Database, limit = 50) {
   const { results } = await db.prepare(
-    `SELECT id, user_id, address, amount_micro, status, created_at FROM pay_withdrawals
+    `SELECT id, user_id, address, chain, amount_micro, status, created_at FROM pay_withdrawals
       WHERE status IN ('requested', 'approved', 'reserved', 'broadcasting', 'manual')
       ORDER BY created_at LIMIT ?`,
   ).bind(Math.max(1, Math.min(200, limit))).all<WithdrawalRow>();
@@ -378,6 +387,7 @@ export async function withdrawalQueue(db: D1Database, limit = 50) {
     id: String(row.id),
     userId: String(row.user_id),
     address: String(row.address),
+    chain: String(row.chain ?? 'tron'),
     amount: formatMicroUsdt(Number(row.amount_micro)),
     amountMicro: Number(row.amount_micro),
     status: String(row.status),

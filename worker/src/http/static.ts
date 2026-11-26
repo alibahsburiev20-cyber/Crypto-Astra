@@ -12,8 +12,24 @@ import { SITE_FILES } from '../static/site';
  */
 export const NO_INDEX_PAGES = new Set(['/pay.html', '/admin.html']);
 
+/**
+ * Короткие адреса служебных страниц. На проде их отдаёт Assets (и сам же делает
+ * 307 с `/admin.html` на `/admin`), а эта таблица нужна для второго контура —
+ * `staticResponse`, который играет роль, когда Assets не подключён (локальный
+ * запуск без сборки, тесты). Без неё `/admin` из документации там превращался бы
+ * в 404 ровно на тот адрес, который человек пересылает помощнику.
+ *
+ * Список короткий и закрытый: никакого «попробуем добавить .html» тут нет, иначе
+ * следующий шаг — отдать `/../package.json`.
+ */
+export const PAGE_ALIASES: Record<string, string> = {
+  '/admin': '/admin.html',
+  '/pay': '/pay.html',
+};
+
 export function staticResponse(pathname: string, method: string): Response | null {
-  const path = pathname === '/' ? '/index.html' : pathname;
+  const requested = pathname === '/' ? '/index.html' : pathname;
+  const path = PAGE_ALIASES[requested] ?? requested;
   const file = SITE_FILES[path];
   // Отдача строго по точному ключу из `SITE_FILES`: путь не склеивается и не
   // нормализуется, поэтому `/../worker/src/env.ts`, `//etc/passwd` и `%2e%2e%2f`

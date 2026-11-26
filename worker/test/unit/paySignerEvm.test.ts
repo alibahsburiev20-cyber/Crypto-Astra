@@ -267,6 +267,108 @@ describe('подпись EVM-перевода', () => {
   });
 });
 
+describe('Polygon в контуре Signer', () => {
+  const POL = '0xc2132d05d31c914a87c6611c10748aeb04b58e8f';
+  const POL_ENV = { SIGNER_EVM_CHAIN_IDS: '56,137', SIGNER_EVM_CONTRACT_POL: POL };
+
+  /** Тело перевода в Polygon: та же `transfer`, но 6-значная шкала USDT0. */
+  function polBody(over: { amountMicro?: number; dataMicro?: number; chainId?: number; to?: string } = {}) {
+    const chainId = over.chainId ?? 137;
+    const to = over.to ?? POL;
+    const tx: TxWire = {
+      chainId,
+      nonce: 3,
+      maxPriorityFeePerGas: '1000000000',
+      maxFeePerGas: '3000000000',
+      gasLimit: '80000',
+      to,
+      value: '0',
+      data: transferCalldata(RECIPIENT, microToChainValue(over.dataMicro ?? over.amountMicro ?? AMOUNT, 'polygon')),
+    };
+    return { tx, signingHash: hashOrEmpty(tx), recipient: RECIPIENT, amountMicro: over.amountMicro ?? AMOUNT };
+  }
+
+  const signPol = async (over: Parameters<typeof polBody>[0] = {}, patch: Record<string, string> = {}) => {
+    const res = await handleSignEvm(post(polBody(over)), env({ ...POL_ENV, ...patch }));
+    return { status: res.status, body: await res.json() as Record<string, unknown> };
+  };
+
+  it('137 + контракт Polygon + шкала 6 знаков — подписывает', async () => {
+    const { status, body } = await signPol();
+    expect(status).toBe(200);
+    expect(String(body.signature)).toMatch(/^(0x)?[0-9a-f]{130}$/);
+  });
+
+  it('Polygon не подписывается, пока его сеть не названа явно', async () => {
+    // Значение по умолчанию — `56`. «Мы добавили Polygon в конфигурацию Worker»
+    // не имеет права само по себе разрешить подписи в новой цепи.
+    const res = await handleSignEvm(post(polBody()), env({ SIGNER_EVM_CONTRACT_POL: POL }));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: 'chain_not_allowed' });
+  });
+
+  it('контракт Polygon без `SIGNER_EVM_CONTRACT_POL` — 503, а не «подставим BNB»', async () => {
+    const res = await handleSignEvm(post(polBody()), env({ SIGNER_EVM_CHAIN_IDS: '56,137' }));
+    expect(res.status).toBe(503);
+    expect(await res.json()).toMatchObject({ error: 'contract_misconfigured' });
+  });
+
+  it('пара «сеть + контракт» проверяется как пара', async () => {
+    // Контракт BNB в транзакции Polygon и контракт Polygon в транзакции BNB —
+    // оба отказа: подписать такой перевод значит отправить деньги на токен,
+    // которого в этой сети нет.
+    expect((await signPol({ to: CONTRACT })).body).toMatchObject({ error: 'contract_mismatch' });
+    const bnbTx = await sign({ tx: { chainId: 56, to: POL } });
+    expect(bnbTx.body).toMatchObject({ error: 'contract_mismatch' });
+  });
+
+  it('сумка сверяется по шкале СВОЕЙ сети', async () => {
+    // 12.5 USDT в 18-значной шкале, отправленные как polygon-перевод, — это в
+    // миллион раз больше, чем просил игрок. Проверка обязана упасть, а не
+    // «подписать близкое значение».
+    const wrongScale = microToChainValue(AMOUNT, 'bsc');
+    const tx: TxWire = {
+      chainId: 137,
+      nonce: 3,
+      maxPriorityFeePerGas: '1000000000',
+      maxFeePerGas: '3000000000',
+      gasLimit: '80000',
+      to: POL,
+      value: '0',
+      data: transferCalldata(RECIPIENT, wrongScale),
+    };
+    const res = await handleSignEvm(post({ tx, signingHash: hashOrEmpty(tx), recipient: RECIPIENT, amountMicro: AMOUNT }), env(POL_ENV));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: 'amount_mismatch' });
+  });
+
+  it('число сети вне списка известных — отказ, а не «считаем, что это BNB»', async () => {
+    // Сначала allowlist: `chain_not_allowed` — это «такую сеть мы не подписываем
+    // вообще». `chain_unknown` — другой случай: оператор сеть назвал, а мы не
+    // знаем про неё ни контракта, ни шкалы; угадывать «похоже на EVM» нельзя.
+    expect((await signPol({ chainId: 1 })).body).toMatchObject({ error: 'chain_not_allowed' });
+    expect((await signPol({ chainId: 1 }, { SIGNER_EVM_CHAIN_IDS: '56,1' })).body)
+      .toMatchObject({ error: 'chain_unknown' });
+  });
+
+  it('адрес Polygon выводится из того же семени и индекса, что и BNB', async () => {
+    const request = (body: unknown) => new Request('https://signer/address', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` },
+      body: JSON.stringify(body),
+    });
+    const pol = await handleAddress(request({ index: 9, chain: 'polygon' }), env());
+    const bsc = await handleAddress(request({ index: 9, chain: 'bsc' }), env());
+    const polBody = await pol.json() as { address: string; chain: string };
+    const bscBody = await bsc.json() as { address: string; chain: string };
+    expect(polBody.chain).toBe('polygon');
+    // Та же цепочка ключей: EVM-адрес не зависит от сети, и это нормально —
+    // различает их именно `chain` в нашей базе, а не форма адреса.
+    expect(polBody.address).toBe(bscBody.address);
+    expect(toChecksumAddress(polBody.address)).toBe(polBody.address);
+  });
+});
+
 function pad(hex: string): string {
   return hex.replace(/^0x/, '').padStart(64, '0');
 }

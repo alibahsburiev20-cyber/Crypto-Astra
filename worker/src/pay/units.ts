@@ -23,17 +23,47 @@ export const MICRO = 1_000_000;
 /** Больше этого числа микро-единиц JS не различает точно — дальше только BigInt. */
 export const MAX_SAFE_MICRO = Number.MAX_SAFE_INTEGER;
 
-/** Сеть, по которой ходят деньги. Порядок ключей — порядок в `PAY_CHAIN`. */
-export type PayChain = 'tron' | 'bsc';
+/**
+ * Сеть, по которой ходят деньги. `bsc` — BNB Chain (внутреннее имя историческое,
+ * `PAY_CHAIN=bnb` — его синоним), `polygon` — Polygon PoS.
+ */
+export type PayChain = 'tron' | 'bsc' | 'polygon';
 
-/** Знаки USDT в сети. Единственный источник правды для всех пересчётов. */
+export const PAY_CHAINS: readonly PayChain[] = ['tron', 'bsc', 'polygon'];
+
+/**
+ * Знаки USDT в сети. Единственный источник правды для всех пересчётов.
+ *
+ * Polygon — 6 (USDT0 = обычный ERC-20 Tether-шкалы), BNB — 18 (Binance-Peg).
+ * Перепутать их — значит зачислить в миллион раз меньше или отвергнуть нормальную
+ * сумму, поэтому таблица полная: новой сети в ней нет, пока не дописан пересчёт.
+ */
 export const USDT_ONCHAIN_DECIMALS: Record<PayChain, number> = {
   tron: 6,
   bsc: 18,
+  polygon: 6,
 };
 
+/** Имена сети, которые принимает `PAY_CHAIN`. Одно и то же — `bsc` и `bnb`. */
+const PAY_CHAIN_ALIASES: Record<string, PayChain> = {
+  tron: 'tron',
+  bsc: 'bsc',
+  bnb: 'bsc',
+  bnbchain: 'bsc',
+  polygon: 'polygon',
+  pol: 'polygon',
+  matic: 'polygon',
+  polygonpos: 'polygon',
+};
+
+/** `PAY_CHAIN`/`PAY_EVM_CHAINS` → внутренняя цепь. Незнакомое имя — `null`. */
+export function parsePayChain(value: unknown): PayChain | null {
+  const text = String(value ?? '').trim().toLowerCase().replace(/[^a-z]/g, '');
+  return PAY_CHAIN_ALIASES[text] ?? null;
+}
+
 export function isPayChain(value: unknown): value is PayChain {
-  return value === 'tron' || value === 'bsc';
+  return value === 'tron' || value === 'bsc' || value === 'polygon';
 }
 
 export function usdtDecimals(chain: PayChain): number {

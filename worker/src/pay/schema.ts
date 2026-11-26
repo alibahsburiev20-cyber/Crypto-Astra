@@ -22,10 +22,13 @@
 //   * повтор операции не удваивает учёт: `idem_key` UNIQUE / `PRIMARY KEY (scope, idem_key)`.
 
 // 1 — схема «один адрес на игрока вообще»; 2 — адрес привязан к сети
-// (`pay_addresses.chain`): игроки могут иметь по одному адресу на цепь.
+// (`pay_addresses.chain`): игроки могут иметь по одному адресу на цепь;
+// 3 — сеть вторая (Polygon): `pay_addresses.chain` принимает `polygon` (миграция
+// 0009), и у заявки на выплату есть СВОЯ сеть (`pay_withdrawals.chain`, 0010) —
+// платить надо туда, куда просили, а не туда, что включено сейчас.
 // Версию видно в `/pay/status.json`: по ней оператор определяет, что переезд
 // схемы дошёл до базы, а не только в код.
-export const PAY_SCHEMA_VERSION = 2;
+export const PAY_SCHEMA_VERSION = 3;
 
 /** Имена таблиц. Используются в тестах, сверке и админке. */
 export const PAY_TABLES = [
@@ -51,7 +54,7 @@ function payAddressesDdl(table: string): string {
   return `CREATE TABLE IF NOT EXISTS ${table} (
      id TEXT PRIMARY KEY,
      user_id TEXT NOT NULL,
-     chain TEXT NOT NULL DEFAULT 'tron' CHECK (chain IN ('tron', 'bsc')),
+     chain TEXT NOT NULL DEFAULT 'tron' CHECK (chain IN ('tron', 'bsc', 'polygon')),
      address TEXT NOT NULL UNIQUE,
      hex TEXT NOT NULL UNIQUE,
      derivation_index INTEGER NOT NULL UNIQUE,
@@ -77,6 +80,10 @@ export const PAY_ADDRESSES_REBUILD: string[] = [
   // Копия идёт ДО удаления: если что-то пойдёт не так, `batch` откатит всё.
   // `INSERT` без `OR IGNORE` — при любом конфликте падает вся транзакция, а не
   // «тихо потеряла строку».
+  // Форму сети угадываем по префиксу адреса: `0x…` — EVM, `T…` — TRON. Какая
+  // именно EVM-сеть была активна, из старых строк не восстановить, и это не
+  // важно: `polygon` в CHECK появилась уже вместе с polygon-адресами, а строки
+  // из старого CHECK не бывают polygon по определению.
   `INSERT INTO pay_addresses_new (
        id, user_id, chain, address, hex, derivation_index, active, last_scanned_ts, created_at)
      SELECT id, user_id,
@@ -224,10 +231,18 @@ export const PAY_STATEMENTS: string[] = [
      closed_at INTEGER)`,
 
   // 10. Заявки на выплату. Переходы состояний — только по разрешённой таблице.
+  //
+  // Колонка `chain` — сеть, в которой игрок просит заплатить, и она же сеть,
+  // куда уходит транзакция. Выводить её из текущей конфигурации воркера нельзя:
+  // адрес 0x… выглядит одинаково в BNB Chain и в Polygon (семя и индекс те же),
+  // и «платим по PAY_CHAIN» означало бы «выплата уехала в другую сеть» — молча,
+  // потому что txid настоящий, а баланс списан. DEFAULT 'tron' закрывает строки,
+  // созданные до колонки (миграция 0010).
   `CREATE TABLE IF NOT EXISTS pay_withdrawals (
      id TEXT PRIMARY KEY,
      user_id TEXT NOT NULL,
      address TEXT NOT NULL,
+     chain TEXT NOT NULL DEFAULT 'tron' CHECK (chain IN ('tron', 'bsc', 'polygon')),
      amount_micro INTEGER NOT NULL CHECK (amount_micro > 0),
      fee_micro INTEGER NOT NULL DEFAULT 0 CHECK (fee_micro >= 0),
      status TEXT NOT NULL DEFAULT 'requested'
@@ -352,7 +367,16 @@ export async function upgradePayAddressChains(db: D1Database): Promise<void> {
   const d = db as unknown as D1Like;
   try {
     await d.prepare('SELECT chain FROM pay_addresses LIMIT 1').first('chain');
-    return; // колонка есть — схема актуальна
+    // Колонка есть. Осталось проверить её список значений: `CHECK` в SQLite
+    // нельзя ослабить на месте, а без `'polygon'` в нём первая же polygon-строка
+    // упала бы `CHECK constraint failed` — то есть игрок получил бы 502 ровно
+    // там, где всё «настроено». Читаем определение таблицы; база, где такого
+    // запроса нет (мок), отвечает пусто — тогда считаем форму актуальной.
+    const ddl = await d.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'pay_addresses'")
+      .first<string>('sql')
+      .catch(() => null);
+    if (typeof ddl !== 'string' || !ddl || /'polygon'/.test(ddl)) return;
+    console.error('pay_addresses: CHECK устарел (в списке нет polygon) — перестраиваем таблицу');
   } catch {
     /* нет таблицы или нет колонки — разбираемся ниже */
   }

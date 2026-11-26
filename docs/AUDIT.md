@@ -164,6 +164,7 @@ npm run dev              # http://127.0.0.1:8787
 # отдельно
 npm run typecheck:scripts
 E2E_BASE_URL=http://127.0.0.1:8787 npm run test:e2e
+npm run check:admin      # петлевая проверка админки: роли, ключи, журнал (нужен jq)
 npm run simulate -- --players 100 --days 30
 npm run seed -- --users 3
 npm run check-ledger -- --file snapshot.json

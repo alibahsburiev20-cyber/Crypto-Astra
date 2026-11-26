@@ -127,7 +127,7 @@ export function signerDeriver(env: Env, chain: PayChain = 'tron'): AddressDerive
       if (!res.ok) throw new Error(`signer_${res.status}`);
       const data = await res.json() as { index?: number; address?: string };
       if (typeof data.address !== 'string' || data.index !== index) throw new Error('signer_bad_response');
-      if (chain === 'bsc') {
+      if (chain !== 'tron') {
         // В базе — нижний регистр: событие из ноды приходит в нижнем регистре, и
         // сверка депозитов идёт сравнением строк. Красоту (EIP-55) включаем при
         // показе игроку, а не при хранении.
@@ -158,14 +158,23 @@ export function addressChain(address: string): PayChain | 'unknown' {
  * сети, а `user_id` уникален — второго адреса не будет. Показать такой адрес
  * значит отправить деньги в цепь, которую мы не сканируем: игрок заплатит, а
  * зачисления не будет. Поэтому «не совпало» — отказ, а не «покажем как есть».
+ *
+ * Сравнение идёт по ФОРМАТУ, а не по имени цепи, и вот почему: `0x…` одинаково
+ * выглядит в BNB Chain и в Polygon (семя и индекс те же), поэтому «адрес polygon»
+ * по строке адреса определить невозможно в принципе. Различает их только колонка
+ * `pay_addresses.chain`, которую мы сами записали при выдаче, — а здесь вопрос
+ * ровно «это EVM-адрес или TRON-адрес», и этого хватает, чтобы поймать ручную
+ * правку базы и переезд между рельсами.
  */
 export function addressMatchesChain(address: string, chain: PayChain): boolean {
-  return addressChain(address) === chain;
+  const format = addressChain(address);
+  if (format === 'unknown') return false;
+  return chain === 'tron' ? format === 'tron' : format === 'bsc';
 }
 
 /** Как адрес показывает игроку: в EVM — с контрольной суммой, иначе опечатку не отличить. */
 export function displayAddress(chain: PayChain, address: string): string {
-  if (chain !== 'bsc') return address;
+  if (chain === 'tron') return address;
   try {
     return toChecksumAddress(address);
   } catch {

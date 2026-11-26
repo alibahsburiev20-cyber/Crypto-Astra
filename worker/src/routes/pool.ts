@@ -4,7 +4,7 @@ import { json, readJson } from '../http/response';
 import {
   addPoolEntry, parsePoolEntry, poolAll, poolReport, poolTotals,
 } from '../pool/accounting';
-import { requireAdmin } from '../http/admin';
+import { requireAdmin, requireOwner } from '../http/admin';
 import { payFlags } from '../pay/flags';
 import { usdtPoolBlock } from '../pay/pool';
 import { ApiError } from '../world/errors';
@@ -40,7 +40,8 @@ export async function adminPool(request: Request, env: Env): Promise<Response> {
 }
 
 export async function adminPoolEntry(request: Request, env: Env): Promise<Response> {
-  await requireAdmin(request, env);
+  // Запись в денежный журнал пула: добавлять её может только владелец.
+  requireOwner(await requireAdmin(request, env));
   if (!(await ensurePoolSchema(env.DB))) throw new ApiError(503, 'pool_unavailable');
   const input = parsePoolEntry(await readJson(request));
   const now = Date.now();

@@ -79,6 +79,14 @@ export interface Env {
    * оно выключает контур с причиной в `/pay/status.json`.
    */
   PAY_CHAIN?: string;
+  /**
+   * Какие EVM-сети включены, списком: `bnb`, `polygon` или `bnb,polygon`.
+   *
+   * Пусто — только BNB. Неизвестное имя (даже одно) деньги останавливает:
+   * «опечатались в Polygon» не должно означать «молча сканируем одну сеть, а
+   * деньги игрока на второй никто не видит».
+   */
+  PAY_EVM_CHAINS?: string;
   /** JSON-RPC для BSC. Пусто — публичный эндпоинт из `pay/evm/config.ts`. */
   PAY_EVM_RPC?: string;
   /**
@@ -86,6 +94,20 @@ export interface Env {
    * в тестнете без него приём выключен (там каждый крутит свой токен).
    */
   PAY_EVM_CONTRACT?: string;
+  /**
+   * То же по-network: `PAY_EVM_CONTRACT_BNB` / `PAY_EVM_CONTRACT_POL`,
+   * `PAY_EVM_RPC_BNB` / `PAY_EVM_RPC_POL`,
+   * `PAY_EVM_CONFIRMATIONS_BNB` / `PAY_EVM_CONFIRMATIONS_POL`.
+   *
+   * Когда сетей две, общая переменная физически не может описать обе: она
+   * читается только как значение по умолчанию для BNB.
+   */
+  PAY_EVM_CONTRACT_BNB?: string;
+  PAY_EVM_CONTRACT_POL?: string;
+  PAY_EVM_RPC_BNB?: string;
+  PAY_EVM_RPC_POL?: string;
+  PAY_EVM_CONFIRMATIONS_BNB?: string;
+  PAY_EVM_CONFIRMATIONS_POL?: string;
   /**
    * Потолок ставки газа в wei на выплату. Пусто = 20 gwei. Нужен, чтобы совет
    * ноды (`eth_feeHistory`) не превратился в «сожгли BNB на дорогом транзите».
