@@ -148,6 +148,67 @@ else
   check "хеш пароля не утекает" false "$(jq -r 'tostring | contains("password_hash")' <"$BODY")"
 fi
 
+echo "9b) Списания USDT вручную: проводка adjust"
+if [ -z "$player" ]; then
+  skip_note "корректировка" "игрок не заведён"
+else
+  check "GET /admin/pay/adjust — лимиты владельца" 200 "$(code -H "X-Admin-Token: $TOKEN" "$BASE/admin/pay/adjust")"
+  check "потолок одной операции" "5000.00" "$(get .maxAdjust)"
+  check "слово подтверждения то же, что у сервера" ADJUST "$(get .confirm)"
+  check "помощнику и чтение запрещено" 403 "$(code -H "X-Admin-Key: $key" "$BASE/admin/pay/adjust?player=$player")"
+  check "код" owner_only "$(get .error)"
+  # «Списать USDT» отдельной кнопкой игрока — не маршрут: админка ничего такого
+  # не обещает, и появление такой ручки задним числом сломало бы append-only учёт.
+  check "маршрута /admin/player/debit нет" 404 "$(code -X POST -H "X-Admin-Token: $TOKEN" \
+    -H 'Content-Type: application/json' -d "{\"player\":\"$player\",\"usdt\":-5,\"reason\":\"проверка\"}" "$BASE/admin/player/debit")"
+  check "сумма с лишними знаками — 400" 400 "$(code -X POST -H "X-Admin-Token: $TOKEN" \
+    -H 'Content-Type: application/json' -d "{\"player\":\"$player\",\"amount\":\"1.1234567\",\"reason\":\"проверка\",\"idem\":\"adj-loop-1\"}" "$BASE/admin/pay/adjust")"
+  check "код" bad_amount "$(get .error)"
+  check "без причины — 400" 400 "$(code -X POST -H "X-Admin-Token: $TOKEN" \
+    -H 'Content-Type: application/json' -d "{\"player\":\"$player\",\"amount\":\"5\",\"idem\":\"adj-loop-1\"}" "$BASE/admin/pay/adjust")"
+  check "код" reason_required "$(get .error)"
+
+  pay_on=$(code -H "X-Admin-Token: $TOKEN" "$BASE/admin/pay" >/dev/null; get .flags.payments)
+  if [ "$pay_on" != "true" ]; then
+    check "выключенный денежный контур — 503" 503 "$(code -X POST -H "X-Admin-Token: $TOKEN" \
+      -H 'Content-Type: application/json' -d "{\"player\":\"$player\",\"amount\":\"1\",\"reason\":\"проверка\",\"idem\":\"adj-loop-1\"}" "$BASE/admin/pay/adjust")"
+    check "код" payments_disabled "$(get .error)"
+    skip_note "живое списание" "PAYMENTS_ENABLED=off: писать в денежный журнал нельзя"
+  else
+    # 1) превью: числа есть, журнала нет. 2) запись без слова подтверждения — 400.
+    # 3) запись; 4) повтор тем же ключом — та же проводка, а не вторая.
+    check "превью начисления" 200 "$(code -X POST -H "X-Admin-Token: $TOKEN" \
+      -H 'Content-Type: application/json' -d "{\"player\":\"$player\",\"amount\":\"5\",\"reason\":\"проверка скриптом\",\"idem\":\"adj-loop-2\"}" "$BASE/admin/pay/adjust")"
+    check "превью ничего не пишет" true "$(get .adjust.dryRun)"
+    check "баланс остался нулевым" 0 "$(code -H "X-Admin-Token: $TOKEN" "$BASE/admin/player?player=$player" >/dev/null; get .player.payBalanceMicro)"
+    check "без ADJUST — 400" 400 "$(code -X POST -H "X-Admin-Token: $TOKEN" -H 'Content-Type: application/json' \
+      -d "{\"player\":\"$player\",\"amount\":\"5\",\"reason\":\"проверка скриптом\",\"idem\":\"adj-loop-2\",\"dryRun\":false}" "$BASE/admin/pay/adjust")"
+    check "код" confirm_required "$(get .error)"
+    check "с подтверждением — 201" 201 "$(code -X POST -H "X-Admin-Token: $TOKEN" -H 'Content-Type: application/json' \
+      -d "{\"player\":\"$player\",\"amount\":\"5\",\"reason\":\"проверка скриптом\",\"idem\":\"adj-loop-2\",\"dryRun\":false,\"confirm\":\"ADJUST\"}" "$BASE/admin/pay/adjust")"
+    check "итог посчитан сервером" 5000000 "$(get .adjust.balanceAfterMicro)"
+    check "проводка в журнале" yes "$(code -H "X-Admin-Token: $TOKEN" "$BASE/admin/player?player=$player" >/dev/null; \
+      [ "$(get .player.payBalanceMicro)" = "5000000" ] && echo yes || echo no)"
+    adj_applied=yes
+    check "повтор того же ключа — не второе списание" 200 "$(code -X POST -H "X-Admin-Token: $TOKEN" -H 'Content-Type: application/json' \
+      -d "{\"player\":\"$player\",\"amount\":\"5\",\"reason\":\"проверка скриптом\",\"idem\":\"adj-loop-2\",\"dryRun\":false,\"confirm\":\"ADJUST\"}" "$BASE/admin/pay/adjust")"
+    check "duplicated" true "$(get .adjust.duplicated)"
+    check "баланс не удвоился" 5000000 "$(code -H "X-Admin-Token: $TOKEN" "$BASE/admin/player?player=$player" >/dev/null; get .player.payBalanceMicro)"
+    check "другая сумма под тем же ключом — 409" 409 "$(code -X POST -H "X-Admin-Token: $TOKEN" -H 'Content-Type: application/json' \
+      -d "{\"player\":\"$player\",\"amount\":\"6\",\"reason\":\"исправляем\",\"idem\":\"adj-loop-2\",\"dryRun\":false,\"confirm\":\"ADJUST\"}" "$BASE/admin/pay/adjust")"
+    check "код" idem_conflict "$(get .error)"
+    check "списание больше баланса — 409" 409 "$(code -X POST -H "X-Admin-Token: $TOKEN" -H 'Content-Type: application/json' \
+      -d "{\"player\":\"$player\",\"amount\":\"-6\",\"reason\":\"вся жизнь\",\"idem\":\"adj-loop-3\",\"dryRun\":false,\"confirm\":\"ADJUST\"}" "$BASE/admin/pay/adjust")"
+    check "код" balance_below_zero "$(get .error)"
+    check "ровно в ноль — можно" 201 "$(code -X POST -H "X-Admin-Token: $TOKEN" -H 'Content-Type: application/json' \
+      -d "{\"player\":\"$player\",\"amount\":\"-5\",\"reason\":\"возврат проверки\",\"idem\":\"adj-loop-4\",\"dryRun\":false,\"confirm\":\"ADJUST\"}" "$BASE/admin/pay/adjust")"
+    check "баланс снова 0" 0 "$(code -H "X-Admin-Token: $TOKEN" "$BASE/admin/player?player=$player" >/dev/null; get .player.payBalanceMicro)"
+    # Сверка — то, из-за чего «ручные» проводки обычно и запрещают: если бы
+    # adjust ломал хеш-цепь, cron остановил бы выплаты после первой же компенсации.
+    check "сверка после двух проводок — цепь цела" true "$(code -H "X-Admin-Token: $TOKEN" "$BASE/admin/pay" >/dev/null; get .reconcile.ledger.ok)"
+  fi
+fi
+
 echo "10) Блокировка входа"
 if [ -z "$player" ]; then
   skip_note "блокировка" "игрок не заведён"
@@ -192,6 +253,15 @@ check "GET /admin/audit владельцу" 200 "$(code -H "X-Admin-Token: $TOKE
 check "записи есть" yes "$(jq -r 'if (.entries|length) > 0 then "yes" else "no" end' <"$BODY")"
 check "видно закрытие аккаунта" yes "$(jq -r 'if any(.entries[]; .action == "player_close") then "yes" else "no" end' <"$BODY")"
 check "видно создание доступа" yes "$(jq -r 'if any(.entries[]; .action == "invite_create") then "yes" else "no" end' <"$BODY")"
+# Ручные проводки обязаны оставить след в журнале админ-действий — иначе
+# «баланс изменился сам» неотличимо от сбоя. Проверяем только если запись вообще была.
+if [ "${adj_applied:-no}" = "yes" ]; then
+  check "видно начисление USDT" yes "$(jq -r 'if any(.entries[]; .action == "balance_credit") then "yes" else "no" end' <"$BODY")"
+  check "видно списание USDT" yes "$(jq -r 'if any(.entries[]; .action == "balance_debit") then "yes" else "no" end' <"$BODY")"
+  check "в записи есть баланс до и после" yes "$(jq -r 'if any(.entries[]; .action == "balance_debit" and (.payload.balanceBefore != null) and (.payload.balanceAfter != null)) then "yes" else "no" end' <"$BODY")"
+else
+  skip_note "журнал корректировок" "проводок не было (контур выключен или игрока нет)"
+fi
 # Выдача помощника обязана быть видна как `junior`: «кто выдал» отличается от
 # «выдал owner», и это единственное, что остаётся после спора.
 # В ответе поле роли называется `role`: «кто выдал» должно быть видно именно

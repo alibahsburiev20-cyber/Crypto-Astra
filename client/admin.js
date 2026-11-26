@@ -65,7 +65,9 @@ function applyRole(data, reveal = true) {
       ? 'Вы вошли как владелец: доступно всё.'
       : `Вы вошли как младший админ${data.label ? ` (${data.label})` : ''}: деньги, доступы и удаление игроков владельцу не отдают.`);
   if (reveal && role === 'owner') {
-    for (const sel of ['#staff-block', '#audit-block']) {
+    // Раздел списания USDT помощнику не показываем вовсе: сервер отвергнет его
+    // `owner_only`, а висящая неактивная кнопка — это «сломано», а не «не для вас».
+    for (const sel of ['#staff-block', '#audit-block', '#usdt-block']) {
       const node = $(sel);
       if (node) node.hidden = false;
     }
@@ -121,6 +123,13 @@ const ERROR_TEXT = {
   player_has_funds: 'У игрока лежат USDT или висит незакрытая заявка на выплату: сначала урегулируйте деньги, потом удаляйте.',
   pay_unavailable: 'Баланс денег не прочитан — удаление невозможно, иначе можно потерять остаток игрока.',
   insufficient_funds: 'На балансе игрока меньше, чем вы списываете.',
+  confirm_required: 'Нужно слово подтверждения: DELETE — для удаления аккаунта, ADJUST — для записи в денежный журнал.',
+  bad_idem_key: 'Не поняли ключ операции — обновите страницу, он сгенерируется заново.',
+  amount_too_big: 'Одна корректировка — не больше 5 000 USDT: столько же, сколько можно вывести за заявку.',
+  balance_below_zero: 'Столько списать нельзя: баланс уйдёт в минус, а он означает «сколько мы должны игроку».',
+  below_pending_withdrawals: 'У игрока висит заявка на вывод: сначала откажите ей или отправьте, иначе списание съест обещанные деньги.',
+  idem_conflict: 'Под этим ключом уже записана другая сумма — нажмите «Показать итог» ещё раз, получите новый ключ.',
+  payments_disabled: 'Денежный контур выключен (PAY_PAYMENTS_ENABLED=off): читать балансы можно, писать нельзя.',
 };
 function errorText(data, status) {
   const code = data && data.error;
@@ -323,7 +332,12 @@ function renderSummary(data) {
       td.textContent = String(value);
       tr.append(td);
     }
-    tr.addEventListener('click', () => { $('#grant-player').value = p.id; });
+    tr.addEventListener('click', () => {
+      $('#grant-player').value = p.id;
+      $('#adj-player').value = p.id;
+      markAdjDirty();
+      adjBalance();
+    });
     return tr;
   });
   const head = document.createElement('thead');
@@ -370,6 +384,11 @@ function renderPlayer(data) {
   setText('#player-status', blocked
     ? 'Игрок заблокирован: вход закрыт, данные на месте.'
     : `Игрок ${p.id ? p.id.slice(0, 8) : ''} найден.`);
+  // Карточка и форма корректировки ищут игрока одинаково: держать два разных
+  // ввода, где один уже заполнен, — способ списать не тому.
+  $('#adj-player').value = p.id || '';
+  markAdjDirty();
+  adjBalance();
 }
 
 async function findPlayer() {
@@ -637,6 +656,148 @@ $('#grant-flip').addEventListener('click', () => {
   input.value = String(-Math.abs(Number(input.value) || 0));
   setText('#grant-status', Number(input.value) < 0 ? 'Режим списания: сумма уйдёт с баланса игрока.' : 'Режим начисления.');
 });
+
+// ── USDT: начислить или списать проводкой adjust ───────────────────────────
+//
+// Двухшаговость не для красоты. Первое: итог считает сервер (баланс «до», «станет»,
+// сколько уже обещано незакрытым заявкам) — угадывать эти числа в браузере нельзя,
+// потому что `payBalanceMicro` включает и резервы выплат. Второе: ключ
+// идемпотентности переживает повторный клик — «Применить» дважды возвращает ту же
+// запись вместо двойного списания, и именно поэтому повторный клик обязан идти с
+// ТЕМ ЖЕ ключом, а не со свежим.
+let adjKey = '';
+let adjKeyUsed = false;
+let adjReady = false;
+
+function adjMarkKey() {
+  if (!adjKey || adjKeyUsed) {
+    adjKey = `adj-${Date.now().toString(36)}-${(crypto.randomUUID ? crypto.randomUUID().slice(0, 8) : Math.random().toString(36).slice(2, 10))}`;
+    adjKeyUsed = false;
+  }
+  return adjKey;
+}
+
+/** Цифры поменялись — превью больше не описывает эту операцию. */
+function markAdjDirty() {
+  adjReady = false;
+  adjKeyUsed = true;
+  $('#adj-confirm-wrap').hidden = true;
+  $('#adj-confirm').value = '';
+  $('#adj-preview').hidden = true;
+}
+
+function adjInput() {
+  const player = $('#adj-player').value.trim();
+  const amount = $('#adj-amount').value.trim();
+  const reason = $('#adj-reason').value.trim();
+  if (!player) { setText('#adj-status', ERROR_TEXT.bad_target); return null; }
+  if (!/^-?\d{1,12}(\.\d{1,6})?$/.test(amount) || Number(amount) === 0) {
+    setText('#adj-status', 'Сумма — число до шести знаков после запятой (не ноль). Минус = списание.');
+    return null;
+  }
+  if (reason.length < 3) { setText('#adj-status', ERROR_TEXT.reason_required); return null; }
+  return { player, amount, reason };
+}
+
+/** «Баланс и заявка»: серверные лимиты, а не наши догадки. */
+async function adjBalance() {
+  const player = $('#adj-player').value.trim();
+  if (!player) { setText('#adj-balance', 'Введите игрока — покажем баланс, лимит и незакрытые заявки.'); return; }
+  setText('#adj-balance', 'Читаем баланс…');
+  try {
+    const { status, data } = await call(`/admin/pay/adjust?player=${encodeURIComponent(player)}`);
+    if (status !== 200) { setText('#adj-balance', errorText(data, status)); return; }
+    const p = data.player || {};
+    setText('#adj-balance', p.id
+      ? `Баланс ${p.balance} USDT, из них обещано заявкам на вывод ${p.pending} USDT — списать можно не больше ${p.canAdjustDown} USDT. Потолок одной операции: ${data.maxAdjust} USDT.`
+      : `Потолок одной операции: ${data.maxAdjust} USDT. Игрока ещё не нашли.`);
+  } catch (e) {
+    setText('#adj-balance', `Сеть недоступна: ${e.message}.`);
+  }
+}
+
+async function adjRun(dryRun) {
+  const v = adjInput();
+  if (!v) return;
+  if (dryRun) adjMarkKey();
+  else if (!adjKey) { setText('#adj-status', 'Сначала «Показать итог»: он считает числа, по которым вы решаете.'); return; }
+  else if (!adjReady) { setText('#adj-status', 'Сумма или игрок изменились — нажмите «Показать итог» заново.'); return; }
+  const btn = dryRun ? $('#adj-preview-btn') : $('#adj-apply');
+  btn.disabled = true;
+  setText('#adj-status', dryRun ? 'Считаем, что станет с балансом…' : 'Пишем проводку…');
+  try {
+    const { status, data } = await call('/admin/pay/adjust', {
+      method: 'POST',
+      body: JSON.stringify({ ...v, idem: adjKey, dryRun, confirm: $('#adj-confirm').value.trim() }),
+    });
+    if (status !== 200 && status !== 201) { setText('#adj-status', errorText(data, status)); return; }
+    const a = data.adjust;
+    totalsGrid($('#adj-preview'), [
+      ['Направление', a.direction === 'debit' ? 'списание' : 'начисление'],
+      ['Сумма', `${a.direction === 'debit' ? '−' : '+'}${a.delta} USDT`],
+      ['Баланс был', `${a.balanceBefore} USDT`],
+      ['Баланс станет', `${a.balanceAfter} USDT`],
+      ['Обещано заявкам', `${a.pending} USDT`],
+      ['Ключ операции', a.idemKey],
+    ]);
+    $('#adj-preview').hidden = false;
+    // Превью прошло — значит именно эти числа и можно применить; меняем флаг
+    // только здесь, а сбрасываем при любом изменении полей (markAdjDirty).
+    if (dryRun) adjReady = true;
+    if (dryRun) {
+      $('#adj-confirm-wrap').hidden = false;
+      setText('#adj-status', 'Это превью: в базе ничего не изменилось. Впишите ADJUST и нажмите «Применить».');
+      $('#adj-confirm').focus();
+    } else {
+      adjKeyUsed = true;
+      adjReady = false;
+      $('#adj-confirm').value = '';
+      $('#adj-confirm-wrap').hidden = true;
+      setText('#adj-status', a.duplicated
+        ? `Эта операция уже записана (ключ ${a.idemKey}) — ничего не удвоено. Баланс: ${a.balanceAfter} USDT.`
+        : `Записано ${a.direction === 'debit' ? 'списание' : 'начисление'} ${a.delta} USDT: баланс ${a.balanceBefore} → ${a.balanceAfter} USDT. Причина: ${a.reason}.`);
+      $('#adj-reason').value = '';
+      load();
+      findPlayer();
+      adjBalance();
+    }
+  } catch (e) {
+    setText('#adj-status', `Сеть недоступна: ${e.message}. ${dryRun ? '' : 'Повторите с тем же ключом — проводка либо есть, либо её нет.'}`);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+$('#adj-preview-btn').addEventListener('click', () => adjRun(true));
+$('#adj-apply').addEventListener('click', () => adjRun(false));
+$('#adj-load').addEventListener('click', adjBalance);
+$('#adj-flip').addEventListener('click', () => {
+  const input = $('#adj-amount');
+  input.value = String(-Math.abs(Number(input.value) || 0));
+  markAdjDirty();
+  setText('#adj-status', Number(input.value) < 0
+    ? 'Режим списания: уйдёт с баланса игрока проводкой adjust.'
+    : 'Режим начисления: придёт на баланс игрока.');
+});
+for (const sel of ['#adj-player', '#adj-amount', '#adj-reason']) {
+  $(sel).addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    // Enter — только посмотреть: деньги не должны записываться от случайного
+    // нажатия «ввод» в поле суммы.
+    adjRun(true);
+  });
+}
+// А вот в поле подтверждения Enter означает «применяю»: слово уже введено,
+// и требовать ещё один клик — просто плодить клики по деньгам.
+$('#adj-confirm').addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  adjRun(false);
+});
+for (const sel of ['#adj-player', '#adj-amount', '#adj-reason']) {
+  $(sel).addEventListener('input', markAdjDirty);
+}
 
 // Форму начисления показываем сразу: сервер всё равно проверит токен. Раньше она
 // открывалась только после успешного /admin/world, и при сбое её не было вовсе.

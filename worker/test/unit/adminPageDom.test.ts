@@ -95,6 +95,40 @@ describe('админка: разметка и скрипт про доступы
     expect(js).not.toContain("$('#invite-key').value");
   });
 
+  it('USDT: списание двухшаговое и превью, и слово подтверждения', () => {
+    for (const id of ['adj-player', 'adj-amount', 'adj-reason', 'adj-confirm', 'adj-confirm-wrap',
+      'adj-preview', 'adj-preview-btn', 'adj-apply', 'adj-balance', 'adj-load', 'adj-flip', 'adj-status']) {
+      expect(html, id).toContain(`id="${id}"`);
+      expect(js, id).toContain(`#${id}`);
+    }
+    expect(js).toContain('/admin/pay/adjust');
+    // Слово подтверждения видно человеку в разметке и совпадает с серверным.
+    expect(html).toContain('<code>ADJUST</code>');
+    // Enter в полях — только превью; запись — из поля подтверждения.
+    expect(js).toContain('adjRun(true)');
+    expect(js).toContain('adjRun(false)');
+    // Превью и запись различаются: `dryRun` обязано доезжать до сервера обоими значениями.
+    expect(js).toContain('body: JSON.stringify({ ...v, idem: adjKey, dryRun, confirm:');
+    // Ключ идемпотентности генерируется один на операцию: повторный клик обязан
+    // вернуть ту же запись, а не списать второй раз.
+    expect(js).toContain('let adjKeyUsed = false;');
+    expect(js).toContain('if (dryRun) adjReady = true;');
+  });
+
+  it('раздел списания USDT скрыт до входа владельца', () => {
+    expect(html).toContain('id="usdt-block" hidden');
+    expect(js).toContain("'#usdt-block'");
+    // Младший его не видит вовсе: сервер ответил бы `owner_only`.
+    expect(js).toMatch(/\['#staff-block', '#audit-block', '#usdt-block'\]/);
+  });
+
+  it('ключи словаря ошибок покрывают отказы списания', () => {
+    for (const code of ['balance_below_zero', 'below_pending_withdrawals', 'idem_conflict',
+      'amount_too_big', 'bad_idem_key', 'payments_disabled']) {
+      expect(js, code).toContain(`${code}:`);
+    }
+  });
+
   it('ничего денежного младшему не показывают, а не «показывают и режут на сервере»', () => {
     // Проверка на сервере обязательна и есть; здесь — что интерфейс о роли знает.
     expect(js).toContain("'#staff-block'");

@@ -124,6 +124,15 @@ export const STATUS_BY_CODE: Record<string, number> = {
   player_already_closed: 409,
   player_has_funds: 409,
   pay_unavailable: 503,
+  // Ручная корректировка USDT из админки (`POST /admin/pay/adjust`). Статусы
+  // совпадают с `pay/adjust.ts:adjustStatus`: карта и маршрут не имеют права
+  // расходиться, иначе «код → статус» приходится угадывать по логам.
+  bad_idem_key: 400,
+  amount_too_big: 422,
+  payments_disabled: 503,
+  balance_below_zero: 409,
+  below_pending_withdrawals: 409,
+  idem_conflict: 409,
   // Общие коды: их бросают и игровые модули, и админка. Без статуса такой отказ
   // при «не ApiError» пути превращался бы в 500 internal.
   bad_request: 400,

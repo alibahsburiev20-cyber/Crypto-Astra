@@ -20,6 +20,10 @@ import {
   MAX_PRIZE_AWARD_MICRO, PrizeError, awardPrize, listPrizes, prizeSummary,
 } from '../pay/prize';
 import { ensurePaySchema, PAY_SCHEMA_VERSION, PAY_TABLES } from '../pay/schema';
+import { ADJUST_CONFIRM, MAX_ADJUST_MICRO, AdjustError, adjustBalance, adjustStatus, parseAdjustInput, pendingWithdrawalMicro } from '../pay/adjust';
+import { writeAdminAudit } from '../admin/accounts';
+import { ensureAdminSchema } from '../admin/schema';
+import { findUserByRef } from './admin';
 import { ShopError, catalogForClient, entitlements, premiumStatus, purchase } from '../pay/shop';
 import { formatMicroUsdt, isMicroAmount, parseUsdtToMicro } from '../pay/tron/amount';
 import { usdtContract } from '../pay/tron/contracts';
@@ -815,6 +819,101 @@ export async function adminPayPrize(request: Request, env: Env): Promise<Respons
  * Начислить приз. `dryRun` (по умолчанию `true`) показывает, что произойдёт, и
  * ничего не пишет: первый вызов должен быть проверкой, а не списанием.
  */
+/**
+ * Что разрешено скорректировать вручную: лимит одной операции, слово
+ * подтверждения и текущий баланс игрока. Отдельная ручка нужна затем, чтобы
+ * превью в админке не угадывало числа: сервер сам говорит, сколько у игрока
+ * USDT и сколько из этого уже обещано незакрытым заявкам на вывод.
+ */
+export async function adminPayAdjustInfo(request: Request, env: Env): Promise<Response> {
+  const who = requireOwner(await requireAdmin(request, env));
+  if (!(await ensurePaySchema(env.DB))) throw new ApiError(503, 'pay_unavailable');
+  const url = new URL(request.url);
+  const flags = payFlags(env);
+  const ref = (url.searchParams.get('player') ?? '').trim();
+  let player: Record<string, unknown> | null = null;
+  let pendingMicro = 0;
+  if (ref) {
+    const found = await findUserByRef(env.DB, ref);
+    if (!found.ok) throw new ApiError(404, found.error);
+    const balance = await payBalanceMicro(env.DB, found.id);
+    pendingMicro = await pendingWithdrawalMicro(env.DB, found.id);
+    player = {
+      id: found.id,
+      balanceMicro: balance,
+      balance: formatMicroUsdt(balance),
+      pendingMicro,
+      pending: formatMicroUsdt(pendingMicro),
+      canAdjustDownMicro: Math.max(0, balance - pendingMicro),
+      canAdjustDown: formatMicroUsdt(Math.max(0, balance - pendingMicro)),
+    };
+  }
+  return json({
+    ok: true,
+    enabled: flags.payments,
+    maxAdjustMicro: MAX_ADJUST_MICRO,
+    maxAdjust: formatMicroUsdt(MAX_ADJUST_MICRO),
+    confirm: ADJUST_CONFIRM,
+    actor: who.role,
+    player,
+  }, 200, { 'Cache-Control': 'no-store' });
+}
+
+/**
+ * Начислить или списать USDT игроку — компенсацией `adjust` в денежном журнале.
+ *
+ * Это единственный легальный способ «списать деньги»: `pay_ledger` append-only
+ * (UPDATE/DELETE закрыты триггерами), а `parseUsdtToMicro` не принимает
+ * отрицательную сумму, поэтому списание обязано быть новой записью с обратным
+ * знаком и своим ключом идемпотентности. `dryRun` по умолчанию `true`: первый
+ * вызов показывает, что станет с балансом, второй (с `confirm`) пишет.
+ */
+export async function adminPayAdjust(request: Request, env: Env): Promise<Response> {
+  // Движение денег: не для помощника. Младший доступ читает баланс и очередь,
+  // но менять чужие USDT может только владелец.
+  const who = requireOwner(await requireAdmin(request, env));
+  if (!(await ensurePaySchema(env.DB))) throw new ApiError(503, 'pay_unavailable');
+  if (!payFlags(env).payments) throw new ApiError(503, 'payments_disabled');
+
+  const body = await readJsonObject(request);
+  const parsed = parseAdjustInput(body);
+  if (!parsed.ok) throw new ApiError(adjustStatus(parsed.error), parsed.error);
+
+  const found = await findUserByRef(env.DB, parsed.value.userId);
+  if (!found.ok) throw new ApiError(404, found.error);
+
+  const now = Date.now();
+  try {
+    const result = await adjustBalance(env.DB, {
+      userId: found.id,
+      deltaMicro: parsed.value.deltaMicro,
+      reason: parsed.value.reason,
+      idemKey: parsed.value.idemKey,
+      confirm: parsed.value.confirm,
+      dryRun: parsed.value.dryRun,
+      actor: who.id,
+    }, now);
+    if (!result.dryRun && !result.duplicated) {
+      await ensureAdminSchema(env.DB);
+      await writeAdminAudit(env.DB, {
+        actor: who.id, role: who.role,
+        action: result.direction === 'debit' ? 'balance_debit' : 'balance_credit',
+        target: result.playerId,
+        payload: {
+          deltaMicro: result.deltaMicro, reason: result.reason, idemKey: result.idemKey,
+          balanceBefore: result.balanceBeforeMicro, balanceAfter: result.balanceAfterMicro,
+        },
+        now,
+      });
+    }
+    return json({ ok: true, resolvedBy: found.by, actor: who.role, adjust: result },
+      result.dryRun || result.duplicated ? 200 : 201, { 'Cache-Control': 'no-store' });
+  } catch (e) {
+    if (e instanceof AdjustError) throw new ApiError(adjustStatus(e.code), e.code);
+    throw e;
+  }
+}
+
 export async function adminPayPrizeAward(request: Request, env: Env): Promise<Response> {
   // Движение денег: не для помощника. Младший доступ видит очередь и сверку,
   // но одобрять, отправлять и снимать стоп может только владелец.
