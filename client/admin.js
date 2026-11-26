@@ -1,16 +1,36 @@
-// Админка мира: чтение состояния, заморозка и ручные начисления.
-// Токен не сохраняется на диск и не попадает в URL — только sessionStorage и
-// заголовок X-Admin-Token.
+// Админка мира: состояние, заморозка, ручные начисления, карточка игрока и
+// доступы (приглашение младшего админа).
+//
+// Ни токен, ни ключ помощника не сохраняются на диск и не попадают в URL:
+// только sessionStorage этой вкладки и заголовки `X-Admin-Token` / `X-Admin-Key`.
+// Ссылка-приглашение несёт ключ во фрагменте (`#k=`) — фрагмент не уходит ни в
+// историю, ни в `Referer`, ни в логи прокси, в отличие от `?k=`. Фрагмент мы
+// перекладываем в sessionStorage и тут же стираем из адресной строки.
 
 const $ = (sel) => document.querySelector(sel);
 const setText = (sel, text) => { const n = $(sel); if (n) n.textContent = text; };
 
+const KEY_SESSION = 'astra:admin-key';
+
 function token() { return sessionStorage.getItem('astra:admin') || ''; }
 function email() { return sessionStorage.getItem('astra:admin-email') || ''; }
+function adminKey() { return sessionStorage.getItem(KEY_SESSION) || ''; }
 function world() { return ($('#world').value || 'w1').trim(); }
 
+/** Ключ из ссылки-приглашения: `#k=astra-admin_…`. */
+function adoptInviteFragment() {
+  const hash = location.hash || '';
+  const match = /[#&]k=([^&\s]+)/.exec(hash);
+  if (!match) return false;
+  try { sessionStorage.setItem(KEY_SESSION, decodeURIComponent(match[1])); } catch { /* приватный режим */ }
+  // Стираем fragment: он больше не нужен, а оставаться в адресной строке ему
+  // незачем — ключ не должен переживать закрытие вкладки.
+  history.replaceState(null, '', location.pathname + location.search);
+  return true;
+}
+
 async function call(path, options = {}) {
-  // Мир указываем только там, где он нужен: пул и деньги живут в D1, а не в DO.
+  // Мир указываем только там, где он нужен: пул, деньги и доступы живут в D1, а не в DO.
   const needsWorld = path.startsWith('/admin/world');
   const url = needsWorld
     ? `${path}${path.includes('?') ? '&' : '?'}world=${encodeURIComponent(world())}`
@@ -18,8 +38,9 @@ async function call(path, options = {}) {
   const res = await fetch(url, {
     ...options,
     headers: {
-      'X-Admin-Token': token(),
-      'X-Admin-Email': email(),
+      ...(token() ? { 'X-Admin-Token': token() } : {}),
+      ...(adminKey() ? { 'X-Admin-Key': adminKey() } : {}),
+      ...(email() ? { 'X-Admin-Email': email() } : {}),
       // Content-Type только при теле: на GET лишний заголовок ломает CORS-предпроверку.
       ...(options.body ? { 'Content-Type': 'application/json' } : {}),
       ...(options.headers || {}),
@@ -29,6 +50,41 @@ async function call(path, options = {}) {
   return { status: res.status, data };
 }
 
+/** Что доступно младшему админу: сервер всё равно проверяет сам, здесь только честный интерфейс. */
+let role = 'owner';
+/**
+ * `reveal` — показывать ли разделы, которые видны только войдя. При старте
+ * страницы они обязаны оставаться спрятанными: форма «выдать доступ»,
+ * доступная до входа, выглядит как дыра, даже если сервер всё отвергает.
+ */
+function applyRole(data, reveal = true) {
+  role = data.role === 'junior' ? 'junior' : 'owner';
+  setText('#role', !reveal
+    ? 'Вход: токен владельца или ключ помощника из ссылки.'
+    : role === 'owner'
+      ? 'Вы вошли как владелец: доступно всё.'
+      : `Вы вошли как младший админ${data.label ? ` (${data.label})` : ''}: деньги, доступы и удаление игроков владельцу не отдают.`);
+  if (reveal && role === 'owner') {
+    for (const sel of ['#staff-block', '#audit-block']) {
+      const node = $(sel);
+      if (node) node.hidden = false;
+    }
+  }
+  for (const sel of ['#player-block', '#player-unblock', '#player-close']) {
+    const btn = $(sel);
+    if (btn) btn.disabled = role !== 'owner';
+  }
+  for (const sel of ['#freeze', '#unfreeze', '#pay-stop', '#pay-resume', '#pool-add']) {
+    const btn = $(sel);
+    if (btn) btn.disabled = role !== 'owner';
+  }
+  // «Потолка нет» до входа — это обещание, которого мы дать не можем: роль ещё
+  // не известна, поэтому при старте страницы строка пустая.
+  setText('#grant-help', !reveal ? '' : role === 'owner'
+    ? 'Потолка нет. Минус в сумме — списание.'
+    : `Потолок одной выдачи: ${Number.isFinite(data.grantLimit) ? data.grantLimit : '—'} ASTRA.`);
+}
+
 // Коды отказа с сервера — в человеческий текст. Раньше любая ошибка показывалась
 // как «Причина обязательна», поэтому настоящая причина (не тот мир, нет игрока,
 // не задан ADMIN_TOKEN) была не видна.
@@ -36,7 +92,8 @@ const ERROR_TEXT = {
   admin_disabled: 'ADMIN_TOKEN не задан в секретах Worker — добавьте секрет и задеплойте.',
   admin_forbidden: 'Токен не совпал с ADMIN_TOKEN.',
   admin_email_forbidden: 'Почта не привязана: нужен email из секрета ADMIN_EMAIL.',
-  admin_token_required: 'Введите токен.',
+  admin_token_required: 'Введите токен (или вставьте ссылку-приглашение).',
+  admin_weak_token: 'ADMIN_TOKEN слишком короткий: нужно 24+ случайных символа, админка не работает.',
   too_many_attempts: 'Слишком много неверных попыток с этого адреса. Подождите 15 минут — блокировка снимется сама.',
   bad_world: 'Мир пишется латиницей: w1.',
   bad_target: 'Укажите игрока: полный id, начало id или email.',
@@ -45,6 +102,25 @@ const ERROR_TEXT = {
   player_not_found: 'Игрок не найден ни в одном мире. Проверьте id или email.',
   ambiguous_player: 'Под это начало id подходит несколько игроков — введите id целиком или email.',
   bad_request: 'Проверьте поля: игрок, сумма, причина.',
+  admin_key_unknown: 'Ключ не найден: доступ отозван или ссылка из другого окружения. Попросите владельца выдать новый.',
+  admin_key_revoked: 'Этот доступ отозван владельцем.',
+  admin_key_expired: 'Срок действия ключа истёк — попросите владельца продлить (новый ключ).',
+  admin_store_unavailable: 'Таблицы доступов нет в базе: прогоните миграцию 0011_admin_accounts.sql (или перезагрузите — админка создаёт их сама).',
+  owner_only: 'Это действие только для владельца: деньги, доступы и закрытие аккаунтов.',
+  grant_limit: 'Сумма больше потолка этого доступа. Попросите владельца.',
+  bad_label: 'Имя помощника — минимум 2 символа.',
+  bad_email: 'Email не похож на адрес.',
+  bad_days: 'Срок — целое число дней от 1 до 90.',
+  bad_grant_limit: 'Потолок — целое число от 1 до 20 000 ASTRA.',
+  bad_account: 'Не понят, какой доступ отзывать.',
+  account_not_active: 'Этот доступ уже отозван.',
+  bad_action: 'Непонятное действие с игроком.',
+  confirm_required: 'Для удаления впишите DELETE.',
+  not_blocked: 'Игрок не заблокирован — снимать нечего.',
+  player_already_closed: 'Аккаунт уже закрыт.',
+  player_has_funds: 'У игрока лежат USDT или висит незакрытая заявка на выплату: сначала урегулируйте деньги, потом удаляйте.',
+  pay_unavailable: 'Баланс денег не прочитан — удаление невозможно, иначе можно потерять остаток игрока.',
+  insufficient_funds: 'На балансе игрока меньше, чем вы списываете.',
 };
 function errorText(data, status) {
   const code = data && data.error;
@@ -218,6 +294,8 @@ function renderSummary(data) {
   $('#summary-block').hidden = false;
   $('#players-block').hidden = false;
   $('#grant-block').hidden = false;
+  $('#pcard-block').hidden = false;
+  if (role === 'owner') { $('#staff-block').hidden = false; $('#audit-block').hidden = false; }
   const t = data.totals || {};
   $('#totals').replaceChildren(...[
     ['Игроков', t.players], ['ASTRA в мире', t.astra], ['Очков', t.points],
@@ -255,23 +333,220 @@ function renderSummary(data) {
   $('#players').replaceChildren(head, body);
 }
 
+// ── Карточка игрока: найти, заблокировать, закрыть ─────────────────────────
+let playerFound = null;
+
+function fmtMoney(micro) {
+  if (micro === null || micro === undefined) return 'нет данных';
+  return `${(Number(micro) / 1e6).toFixed(6)} USDT`;
+}
+
+function renderPlayer(data) {
+  const p = data.player || {};
+  const g = data.world || {};
+  playerFound = p.id || null;
+  // Другой игрок — старое подтверждение не должно переехать за ним.
+  $('#player-confirm-wrap').hidden = true;
+  $('#player-confirm').value = '';
+  const cells = [
+    ['Позывной', g.label || '—'],
+    ['id', (p.id || '').slice(0, 13)],
+    ['Мир', p.worldId || '—'],
+    ['Статус', p.status || '—'],
+    ['ASTRA', g.astra ?? p.astra ?? 0],
+    ['Очки', g.points ?? 0],
+    ['USDT', fmtMoney(p.payBalanceMicro)],
+    ['Заявок в работе', p.openWithdrawals ?? 0],
+    ['Сессий', p.sessions ?? 0],
+    ['Почта', p.email || 'нет'],
+  ];
+  totalsGrid($('#player-card'), cells);
+  const addr = (p.addresses || []).map((a) => `${a.chain}:${a.address}`).join(' · ');
+  setText('#player-note', addr ? `Адреса пополнения: ${addr}.` : 'Адресов пополнения нет.');
+  const blocked = p.status === 'blocked';
+  $('#player-block').disabled = role !== 'owner' || blocked;
+  $('#player-unblock').disabled = role !== 'owner' || !blocked;
+  $('#player-close').disabled = role !== 'owner' || p.status === 'deleted';
+  setText('#player-status', blocked
+    ? 'Игрок заблокирован: вход закрыт, данные на месте.'
+    : `Игрок ${p.id ? p.id.slice(0, 8) : ''} найден.`);
+}
+
+async function findPlayer() {
+  const ref = $('#player-ref').value.trim();
+  if (!ref) { setText('#player-status', ERROR_TEXT.bad_target); return; }
+  setText('#player-status', 'Ищем…');
+  const { status, data } = await call(`/admin/player?player=${encodeURIComponent(ref)}`);
+  if (status !== 200) { setText('#player-status', errorText(data, status)); playerFound = null; return; }
+  renderPlayer(data);
+}
+
+async function playerAct(action) {
+  if (!playerFound) { setText('#player-status', 'Сначала найдите игрока.'); return; }
+  const reason = $('#player-reason').value.trim();
+  if (!reason) { setText('#player-status', ERROR_TEXT.reason_required); return; }
+  const body = { player: playerFound, action, reason };
+  if (action === 'close') {
+    if ($('#player-confirm').value.trim() !== 'DELETE') {
+      setText('#player-status', ERROR_TEXT.confirm_required);
+      $('#player-confirm').focus();
+      return;
+    }
+    delete body.action;
+  }
+  const path = action === 'close' ? '/admin/player/close' : '/admin/player/block';
+  setText('#player-status', action === 'close' ? 'Закрываем аккаунт…' : 'Меняем доступ…');
+  try {
+    const { status, data } = await call(path, { method: 'POST', body: JSON.stringify(body) });
+    if (status !== 200) { setText('#player-status', errorText(data, status)); return; }
+    // Сервер знает про последствия лучше нас (например, что позывной остался
+    // занят, потому что мир не ответил) — показываем его формулировку.
+    if (action === 'close' && data.note) {
+      setText('#player-status', `Аккаунт закрыт: сессий отозвано ${data.sessions}. ${data.note}`);
+    } else {
+      setText('#player-status', action === 'close'
+        ? `Аккаунт закрыт: сессий отозвано ${data.sessions}. Журналы остались.`
+        : `${action === 'block' ? 'Вход закрыт' : 'Блокировка снята'}: сессий отозвано ${data.sessions}.`);
+    }
+    $('#player-confirm').value = '';
+    $('#player-confirm-wrap').hidden = true;
+    load();
+    findPlayer();
+  } catch (e) {
+    setText('#player-status', `Сеть недоступна: ${e.message}.`);
+  }
+}
+
+// ── Доступы: приглашения младших админов ───────────────────────────────────
+function humanDate(ms) {
+  if (!ms) return '—';
+  return new Date(Number(ms)).toLocaleString('ru-RU');
+}
+
+async function loadStaff() {
+  const { status, data } = await call('/admin/accounts');
+  if (status !== 200) { setText('#staff-status', `Доступы недоступны: ${errorText(data, status)}`); return; }
+  const head = document.createElement('thead');
+  head.innerHTML = '<tr><th>Кого зовём</th><th>Роль</th><th>Потолок</th><th>Действует до</th><th>Последний вход</th><th>Статус</th><th></th></tr>';
+  const body = document.createElement('tbody');
+  const rows = (data.accounts || []).map((a) => {
+    const tr = document.createElement('tr');
+    const statusText = a.status === 'revoked' ? 'отозван' : a.expired ? 'срок вышел' : a.stale ? 'не используется' : 'активен';
+    for (const value of [a.label, a.role, a.grantLimit, humanDate(a.expiresAt), a.lastUsedAt ? humanDate(a.lastUsedAt) : 'ещё не входил', statusText]) {
+      const td = document.createElement('td');
+      td.textContent = String(value ?? '—');
+      tr.append(td);
+    }
+    const td = document.createElement('td');
+    if (a.status === 'active') {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'ghost';
+      btn.textContent = 'Отозвать';
+      btn.addEventListener('click', () => revokeAccount(a.id));
+      td.append(btn);
+    }
+    tr.append(td);
+    return tr;
+  });
+  if (!rows.length) {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 7; td.className = 'muted'; td.textContent = 'Младших админов нет.';
+    tr.append(td); rows.push(tr);
+  }
+  $('#staff').replaceChildren(head, ...rows);
+  setText('#staff-status', `Доступов: ${(data.accounts || []).length}. Ключи в базе лежат только хешами — показать их повторно нельзя.`);
+}
+
+async function revokeAccount(id) {
+  const { status, data } = await call('/admin/accounts/revoke', { method: 'POST', body: JSON.stringify({ id }) });
+  setText('#staff-status', status === 200 ? 'Доступ отозван: ключ перестал работать немедленно.' : errorText(data, status));
+  loadStaff();
+}
+
+async function createInvite() {
+  const btn = $('#invite-create');
+  btn.disabled = true;
+  setText('#invite-status', 'Создаём…');
+  try {
+    const { status, data } = await call('/admin/accounts/invite', {
+      method: 'POST',
+      body: JSON.stringify({
+        label: $('#invite-label').value.trim(),
+        email: $('#invite-email').value.trim(),
+        days: Number($('#invite-days').value),
+        grantLimit: Number($('#invite-limit').value),
+        note: $('#invite-note').value.trim(),
+      }),
+    });
+    if (status !== 201) { setText('#invite-status', errorText(data, status)); return; }
+    const link = data.link || data.key;
+    const a = $('#invite-href');
+    a.textContent = link;
+    a.href = link;
+    $('#invite-link').hidden = false;
+    // Ключ живёт ровно в этом ответе: повторяем его текстом, чтобы его можно
+    // было отправить в мессенджере, и больше нигде.
+    navigator.clipboard?.writeText(link).catch(() => {});
+    setText('#invite-status', `Готово. Отправьте ссылку помощнику и закройте окно — второго шанса показать ключ нет.`);
+    loadStaff();
+  } catch (e) {
+    setText('#invite-status', `Сеть недоступна: ${e.message}.`);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function loadAudit() {
+  const { status, data } = await call('/admin/audit?limit=25');
+  if (status !== 200) { setText('#audit-status', `Журнал недоступен: ${errorText(data, status)}`); return; }
+  const head = document.createElement('thead');
+  head.innerHTML = '<tr><th>Когда</th><th>Кто</th><th>Действие</th><th>Над кем</th><th>Детали</th></tr>';
+  const body = document.createElement('tbody');
+  for (const e of data.entries || []) {
+    const tr = document.createElement('tr');
+    const payload = e.payload && Object.keys(e.payload).length ? JSON.stringify(e.payload) : '—';
+    for (const value of [humanDate(e.createdAt), e.role === 'owner' ? 'владелец' : `помощник ${e.actor}`.trim(), e.action, String(e.target || '').slice(0, 10), payload]) {
+      const td = document.createElement('td');
+      td.textContent = String(value);
+      tr.append(td);
+    }
+    body.append(tr);
+  }
+  if (!body.children.length) {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 5; td.className = 'muted'; td.textContent = 'Действий пока нет.';
+    tr.append(td); body.append(tr);
+  }
+  $('#audit').replaceChildren(head, body);
+  setText('#audit-status', `Записей: ${(data.entries || []).length}.`);
+}
+
 async function load() {
+  // Сначала «кто я»: младшему админу не зачем дёргать `/admin/world` владельца и
+  // видеть кнопки, которые сервер всё равно отвергнет.
+  const who = await call('/admin/session');
+  if (who.status !== 200) {
+    setText('#status', errorText(who.data, who.status));
+    return;
+  }
+  applyRole(who.data);
   const { status, data } = await call('/admin/world');
   if (status !== 200) {
-    const reason = data.error === 'admin_disabled' ? 'ADMIN_TOKEN не задан в секретах Worker — добавьте секрет и задеплойте.'
-      : data.error === 'admin_forbidden' ? 'Токен не совпал с ADMIN_TOKEN.'
-        : data.error === 'admin_email_forbidden' ? 'Эта почта не привязана: нужен email из секрета ADMIN_EMAIL.'
-          : data.error === 'admin_token_required' ? 'Введите токен.'
-            : data.error === 'too_many_attempts' ? 'Слишком много неверных попыток с этого адреса. Подождите 15 минут — блокировка снимется сама.'
-            : data.error === 'bad_world' ? 'Мир пишется латиницей: w1.'
-              : `Отказ: ${data.error || status}.`;
-    setText('#status', reason);
+    setText('#status', `Отказ: ${errorText(data, status)}`);
+    // Мир недоступен (например, wrong_world для помощника) — доступы и журнал
+    // при этом читаемы, и их надо показать: иначе владелец не сможет отозвать
+    // ключ, «потому что страница не загрузилась».
+    if (role === 'owner') { $('#staff-block').hidden = false; $('#audit-block').hidden = false; loadStaff(); loadAudit(); }
     return;
   }
   setText('#status', `Загружено. Мир ${data.world}.`);
   renderSummary(data);
   loadPool();
   loadPay();
+  if (role === 'owner') { loadStaff(); loadAudit(); }
 }
 
 $('#connect').addEventListener('click', () => {
@@ -293,6 +568,29 @@ $('#unfreeze').addEventListener('click', async () => {
 });
 
 $('#pool-add').addEventListener('click', addPoolEntry);
+$('#player-find').addEventListener('click', findPlayer);
+$('#player-block').addEventListener('click', () => playerAct('block'));
+$('#player-unblock').addEventListener('click', () => playerAct('unblock'));
+// Удаление — в два касания: сначала показываем поле подтверждения, только потом
+// спрашиваем сервер. «Одно нажатие и аккаунта нет» для необратимого действия —
+// не защита, а лотерея.
+$('#player-close').addEventListener('click', () => {
+  const wrap = $('#player-confirm-wrap');
+  if (wrap.hidden) {
+    wrap.hidden = false;
+    $('#player-confirm').focus();
+    setText('#player-status', 'Удаление необратимо: почта и пароль стираются сразу. Впишите DELETE и нажмите ещё раз.');
+    return;
+  }
+  playerAct('close');
+});
+$('#player-reason').addEventListener('keydown', (e) => { if (e.key === 'Enter') findPlayer(); });
+$('#player-ref').addEventListener('keydown', (e) => { if (e.key === 'Enter') findPlayer(); });
+$('#invite-create').addEventListener('click', createInvite);
+$('#invite-copy').addEventListener('click', () => {
+  const link = $('#invite-href').href || $('#invite-href').textContent;
+  navigator.clipboard?.writeText(link).then(() => setText('#invite-status', 'Ссылка скопирована.')).catch(() => setText('#invite-status', 'Скопируйте вручную: буфер обмена недоступен.'));
+});
 $('#pay-stop').addEventListener('click', () => setStop(true));
 $('#pay-resume').addEventListener('click', () => setStop(false));
 
@@ -332,10 +630,24 @@ for (const sel of ['#grant-player', '#grant-amount', '#grant-reason']) {
   $(sel).addEventListener('keydown', (e) => { if (e.key === 'Enter') grant(); });
 }
 
+// Начисление/списание: минус меняет знак у уже введённой суммы, чтобы «забрать
+// назад» не требовало вручную ставить «-».
+$('#grant-flip').addEventListener('click', () => {
+  const input = $('#grant-amount');
+  input.value = String(-Math.abs(Number(input.value) || 0));
+  setText('#grant-status', Number(input.value) < 0 ? 'Режим списания: сумма уйдёт с баланса игрока.' : 'Режим начисления.');
+});
+
 // Форму начисления показываем сразу: сервер всё равно проверит токен. Раньше она
 // открывалась только после успешного /admin/world, и при сбое её не было вовсе.
 $('#grant-block').hidden = false;
+applyRole({ role: 'owner', grantLimit: null }, false);
 
 // Email подставляем из прошлой вкладки: токен придётся ввести заново.
 $('#email').value = email();
-if (token()) load();
+// Ссылка-приглашение: ключ во фрагменте. Подставляем и сразу идём дальше —
+// вводить 43 символа с телефона никто не должен.
+if (adoptInviteFragment()) {
+  $('#status').textContent = 'Ключ из ссылки принят.';
+  load();
+} else if (token() || adminKey()) load();

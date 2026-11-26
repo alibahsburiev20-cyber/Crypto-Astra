@@ -91,6 +91,42 @@ export function adminSummary(sql: SqlStorage, limit = 50, now = Date.now()): Adm
   };
 }
 
+export interface AdminPlayerInfo {
+  id: string; label: string; level: number; xp: number; astra: number; points: number;
+  ships: number; frozen: boolean;
+}
+
+/**
+ * Карточка одного игрока в мире — для админки.
+ *
+ * Отдельная короткая функция вместо `adminSummary(50)` с поиском по списку:
+ * «сколько у него монет» надо знать про ЛЮБОГО игрока, а не про первых пятидесяти
+ * по дате регистрации. Иначе карточка последнего новичка выглядела бы как «в
+ * мире его нет», и по этой ложной кнопка «закрыть аккаунт» была бы доступной
+ * без учёта монет.
+ */
+export function adminPlayerInfo(sql: SqlStorage, playerId: string, now = Date.now()): AdminPlayerInfo {
+  if (!playerExists(sql, playerId)) throw new ApiError(404, 'player_not_found');
+  const row = sql.exec(
+    `SELECT p.level AS level, p.xp AS xp,
+            COALESCE((SELECT amount FROM balances WHERE player_id = p.id AND asset = 'astra'), 0) AS astra,
+            COALESCE((SELECT amount FROM balances WHERE player_id = p.id AND asset = 'points'), 0) AS points,
+            (SELECT COUNT(*) FROM ships WHERE player_id = p.id) AS ships
+       FROM players p WHERE p.id = ?`,
+    playerId,
+  ).toArray()[0];
+  return {
+    id: playerId,
+    label: publicIdentity(sql, playerId, now).label,
+    level: Number(row?.level ?? 0),
+    xp: Number(row?.xp ?? 0),
+    astra: Number(row?.astra ?? 0),
+    points: Number(row?.points ?? 0),
+    ships: Number(row?.ships ?? 0),
+    frozen: isFrozen(sql),
+  };
+}
+
 export function setFrozen(sql: SqlStorage, frozen: boolean): { frozen: boolean } {
   sql.exec(
     `INSERT INTO meta (key, value) VALUES ('frozen', ?)

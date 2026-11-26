@@ -12,6 +12,7 @@
     "build:minigame": "node scripts/build-minigame.mjs",
     "build:arcade": "node scripts/build-arcade.mjs",
     "check": "npm run typecheck && npm run typecheck:scripts && npm test",
+    "check:admin": "bash scripts/admin-loopback.sh",
     "seed": "tsx scripts/seed-local.ts",
     "simulate": "tsx scripts/simulate-economy.ts",
     "check-ledger": "tsx scripts/check-ledger.ts",

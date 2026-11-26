@@ -239,7 +239,9 @@ describe('админка: доступ по токену и почте', () => {
   it('пустой и неверный токен отбиваются', async () => {
     await expect(requireAdmin(req(), env({ ADMIN_TOKEN: 'secret-token-for-unit-tests-32!' }))).rejects.toThrow(/admin_token_required/);
     await expect(requireAdmin(req({ 'X-Admin-Token': 'wrong' }), env({ ADMIN_TOKEN: 'secret-token-for-unit-tests-32!' }))).rejects.toThrow(/admin_forbidden/);
-    await expect(requireAdmin(req({ 'X-Admin-Token': 'secret-token-for-unit-tests-32!' }), env({ ADMIN_TOKEN: 'secret-token-for-unit-tests-32!' }))).resolves.toBeUndefined();
+    // Успех возвращает, КТО вошёл: маршрутам нужна роль (владелец / младший).
+    await expect(requireAdmin(req({ 'X-Admin-Token': 'secret-token-for-unit-tests-32!' }), env({ ADMIN_TOKEN: 'secret-token-for-unit-tests-32!' })))
+      .resolves.toMatchObject({ role: 'owner' });
   });
 
   it('если задан ADMIN_EMAIL, почта обязательна и сверяется без учёта регистра', async () => {
@@ -248,11 +250,13 @@ describe('админка: доступ по токену и почте', () => {
     await expect(requireAdmin(req({ 'X-Admin-Token': 'secret-token-for-unit-tests-32!', 'X-Admin-Email': 'other@example.com' }), e)).rejects.toThrow(/admin_email_forbidden/);
     await expect(requireAdmin(
       req({ 'X-Admin-Token': 'secret-token-for-unit-tests-32!', 'X-Admin-Email': 'Alibahsburiev20@Gmail.com' }), e,
-    )).resolves.toBeUndefined();
+    )).resolves.toMatchObject({ role: 'owner' });
   });
 
   it('без ADMIN_EMAIL почта не требуется', async () => {
-    await expect(requireAdmin(req({ 'X-Admin-Token': 'secret-token-for-unit-tests-32!' }), env({ ADMIN_TOKEN: 'secret-token-for-unit-tests-32!' }))).resolves.toBeUndefined();
+    // Успех возвращает, КТО вошёл: маршрутам нужна роль (владелец / младший).
+    await expect(requireAdmin(req({ 'X-Admin-Token': 'secret-token-for-unit-tests-32!' }), env({ ADMIN_TOKEN: 'secret-token-for-unit-tests-32!' })))
+      .resolves.toMatchObject({ role: 'owner' });
   });
 });
 

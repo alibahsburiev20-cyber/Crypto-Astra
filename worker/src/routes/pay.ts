@@ -25,7 +25,7 @@ import { formatMicroUsdt, isMicroAmount, parseUsdtToMicro } from '../pay/tron/am
 import { usdtContract } from '../pay/tron/contracts';
 import { parsePayChain, type PayChain } from '../pay/units';
 import { readCursor } from '../pay/evm/deposits';
-import { requireAdmin } from '../http/admin';
+import { requireAdmin, requireOwner } from '../http/admin';
 import {
   DAILY_LIMIT_MICRO, MIN_WITHDRAW_MICRO, PayoutError, approveWithdrawal, confirmWithdrawal, minWithdrawMicro,
   failWithdrawal, listWithdrawals, markBroadcast, markSent, requestWithdrawal, reserveWithdrawal,
@@ -482,7 +482,9 @@ const ACTIONS: Record<string, (db: D1Database, id: string, body: Record<string, 
 };
 
 export async function adminPayWithdrawal(request: Request, env: Env): Promise<Response> {
-  await requireAdmin(request, env);
+  // Движение денег: не для помощника. Младший доступ видит очередь и сверку,
+  // но одобрять, отправлять и снимать стоп может только владелец.
+  requireOwner(await requireAdmin(request, env));
   if (!(await ensurePaySchema(env.DB))) throw new ApiError(503, 'pay_unavailable');
   const body = await readJsonObject(request);
   const id = String(body.id ?? '');
@@ -499,7 +501,9 @@ export async function adminPayWithdrawal(request: Request, env: Env): Promise<Re
 }
 
 export async function adminPayStop(request: Request, env: Env): Promise<Response> {
-  await requireAdmin(request, env);
+  // Движение денег: не для помощника. Младший доступ видит очередь и сверку,
+  // но одобрять, отправлять и снимать стоп может только владелец.
+  requireOwner(await requireAdmin(request, env));
   if (!(await ensurePaySchema(env.DB))) throw new ApiError(503, 'pay_unavailable');
   const body = await readJsonObject(request);
   const stop = body.stop !== false;
@@ -520,7 +524,9 @@ export async function adminPayStop(request: Request, env: Env): Promise<Response
  * чем «будто отправили».
  */
 export async function adminPaySend(request: Request, env: Env): Promise<Response> {
-  await requireAdmin(request, env);
+  // Движение денег: не для помощника. Младший доступ видит очередь и сверку,
+  // но одобрять, отправлять и снимать стоп может только владелец.
+  requireOwner(await requireAdmin(request, env));
   if (!(await ensurePaySchema(env.DB))) throw new ApiError(503, 'pay_unavailable');
 
   const body = await readJsonObject(request);
@@ -810,7 +816,9 @@ export async function adminPayPrize(request: Request, env: Env): Promise<Respons
  * ничего не пишет: первый вызов должен быть проверкой, а не списанием.
  */
 export async function adminPayPrizeAward(request: Request, env: Env): Promise<Response> {
-  await requireAdmin(request, env);
+  // Движение денег: не для помощника. Младший доступ видит очередь и сверку,
+  // но одобрять, отправлять и снимать стоп может только владелец.
+  requireOwner(await requireAdmin(request, env));
   if (!(await ensurePaySchema(env.DB))) throw new ApiError(503, 'pay_unavailable');
 
   const body = await readJsonObject(request);

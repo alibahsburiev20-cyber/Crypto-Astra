@@ -8,6 +8,13 @@
 // почта лишь сужает круг, а решает всё равно токен. Пароли игроков и админов в
 // этом контуре не хранятся вообще.
 //
+// Второй способ войти — `X-Admin-Key`: ключ младшего админа из `admin_accounts`
+// (ссылка-приглашение из админки). Роли нужны затем, чтобы «помощник, который
+// правит ASTRA» не мог ни отправить выплату, ни отозвать чужой доступ, ни закрыть
+// аккаунт: все эти действия требуют владельца. Проверка идёт по базе на каждый
+// запрос — отозванный доступ перестаёт работать немедленно, без перевыпуска
+// секрета и без пересборки воркера.
+//
 // Третий замок появился потому, что домен и Cloudflare Access — платная история,
 // а админка должна быть защищена и на бесплатном `*.workers.dev`: подбор токена
 // с одного IP блокируется на 15 минут после 10 ошибок (та же таблица
@@ -20,6 +27,10 @@
 import type { Env } from '../env';
 import { ApiError } from '../world/errors';
 import { ipOf } from '../auth/rateLimit';
+import { OWNER_PRINCIPAL, lookupAdminKey, touchAdminAccount, type AdminPrincipal } from '../admin/accounts';
+import { ensureAdminSchema } from '../admin/schema';
+
+export type { AdminPrincipal } from '../admin/accounts';
 
 export const ADMIN_WINDOW_MS = 15 * 60 * 1000;
 export const ADMIN_BLOCK_MS = 15 * 60 * 1000;
@@ -97,8 +108,16 @@ async function failAttempt(env: Env, key: string, now: number, error: ApiError):
  */
 export const ADMIN_TOKEN_MIN = 24;
 
-export async function requireAdmin(request: Request, env: Env): Promise<void> {
+/**
+ * Проверка доступа. Возвращает, КТО вошёл: роль решает дальнейшие гейты, и
+ * возвращать «просто ок» было бы нельзя — маршруты различают владельца и
+ * младшего админа.
+ */
+export async function requireAdmin(request: Request, env: Env): Promise<AdminPrincipal> {
   const expected = String(env.ADMIN_TOKEN ?? '');
+  // Ключи младших админов живут в той же админке, что и секрет владельца: если
+  // `ADMIN_TOKEN` не задан или он короткий, админка закрыта ДЛЯ ВСЕХ. Иначе
+  // «включим помощнику, а себе секрет не заводили» превратилось бы в дыру.
   if (!expected) throw new ApiError(503, 'admin_disabled');
   if (expected.length < ADMIN_TOKEN_MIN) throw new ApiError(503, 'admin_weak_token');
 
@@ -109,22 +128,62 @@ export async function requireAdmin(request: Request, env: Env): Promise<void> {
   if (blocked > now) throw new ApiError(429, 'too_many_attempts', Math.ceil((blocked - now) / 1000));
 
   const given = request.headers.get('X-Admin-Token') ?? '';
-  // Пустой заголовок — это не попытка подбора: так стучится страница без входа.
-  if (!given) throw new ApiError(401, 'admin_token_required');
-  if (!sameToken(given, expected)) await failAttempt(env, key, now, new ApiError(403, 'admin_forbidden'));
+  const givenKey = request.headers.get('X-Admin-Key') ?? '';
+  const sentMail = (request.headers.get('X-Admin-Email') ?? '').trim().toLowerCase();
+  // Пустые заголовки — это не попытка подбора: так стучится страница без входа.
+  if (!given && !givenKey) throw new ApiError(401, 'admin_token_required');
 
-  const mail = String(env.ADMIN_EMAIL ?? '').trim().toLowerCase();
-  if (mail) {
-    const sent = (request.headers.get('X-Admin-Email') ?? '').trim().toLowerCase();
-    if (!sent || !sameToken(sent, mail)) await failAttempt(env, key, now, new ApiError(403, 'admin_email_forbidden'));
+  if (given && sameToken(given, expected)) {
+    const mail = String(env.ADMIN_EMAIL ?? '').trim().toLowerCase();
+    if (mail && (!sentMail || !sameToken(sentMail, mail))) {
+      return await failAttempt(env, key, now, new ApiError(403, 'admin_email_forbidden'));
+    }
+    await clearAttempts(env, key, state);
+    return OWNER_PRINCIPAL;
   }
 
-  // Успех сбрасывает счётчик, чтобы редкая опечатка не копилась месяцами.
-  if (state && (state.attempts > 0 || state.blockedUntil > 0)) {
+  if (givenKey) {
+    if (!(await ensureAdminSchema(env.DB))) throw new ApiError(503, 'admin_store_unavailable');
+    let found: Awaited<ReturnType<typeof lookupAdminKey>>;
     try {
-      await env.DB.prepare('DELETE FROM auth_limits WHERE key = ?').bind(key).run();
+      found = await lookupAdminKey(env.DB, givenKey, now);
     } catch (e) {
-      console.error('admin limit clear failed', e);
+      console.error('admin key lookup failed', e);
+      throw new ApiError(503, 'admin_store_unavailable');
     }
+    if (found.status === 'revoked') throw new ApiError(403, 'admin_key_revoked');
+    if (found.status === 'expired') throw new ApiError(403, 'admin_key_expired');
+    if (found.status === 'ok') {
+      // Email доступа — вторая щеколда именно этого ключа: украденная ссылка
+      // из переписки не заработает у того, у кого другой ящик. Для владельца
+      // её роль играет `ADMIN_EMAIL`, тут логика та же, но на строку в базе.
+      const bound = String(found.account.email ?? '').trim().toLowerCase();
+      if (bound && (!sentMail || !sameToken(sentMail, bound))) {
+        return await failAttempt(env, key, now, new ApiError(403, 'admin_email_forbidden'));
+      }
+      await touchAdminAccount(env.DB, found.account.id, now, ipOf(request) ?? '');
+      await clearAttempts(env, key, state);
+      return found.principal;
+    }
+    // Считаем как попытку подбора: «ключа с таким хешем нет» — это ровно то, что
+    // видит перебор. Просроченный и отозванный ключи — не перебор, их не считаем.
+    return await failAttempt(env, key, now, new ApiError(403, 'admin_key_unknown'));
+  }
+
+  return await failAttempt(env, key, now, new ApiError(403, 'admin_forbidden'));
+}
+
+/** Требование «это владелец». Младшему админу доступ к деньгам не выдаётся. */
+export function requireOwner(principal: AdminPrincipal): AdminPrincipal {
+  if (principal.role !== 'owner') throw new ApiError(403, 'owner_only');
+  return principal;
+}
+
+async function clearAttempts(env: Env, key: string, state: { attempts: number; blockedUntil: number } | null): Promise<void> {
+  if (!state || (state.attempts === 0 && state.blockedUntil === 0)) return;
+  try {
+    await env.DB.prepare('DELETE FROM auth_limits WHERE key = ?').bind(key).run();
+  } catch (e) {
+    console.error('admin limit clear failed', e);
   }
 }

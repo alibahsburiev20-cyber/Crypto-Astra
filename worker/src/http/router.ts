@@ -14,7 +14,10 @@ import {
   payQr, payStatus, payWithdraw, payWithdrawals,
 } from '../routes/pay';
 import { adminPool, adminPoolEntry, poolPublic } from '../routes/pool';
-import { adminFreeze, adminGrant, adminWorld } from '../routes/admin';
+import {
+  adminAccountInvite, adminAccountRevoke, adminAccounts, adminAuditLog, adminFreeze, adminGrant,
+  adminPlayer, adminPlayerBlock, adminPlayerClose, adminSession, adminWorld,
+} from '../routes/admin';
 import { accountDelete, accountExport } from '../routes/account';
 import { enforceUserLimit } from './userLimit';
 import { errorResponse, json, readJson } from './response';
@@ -118,6 +121,19 @@ export async function route(request: Request, env: Env): Promise<Response> {
       if (m === 'POST' && p === '/admin/pay/withdrawal') return await adminPayWithdrawal(request, env);
       if (m === 'POST' && p === '/admin/pay/stop') return await adminPayStop(request, env);
       if (m === 'POST' && p === '/admin/pay/send') return await adminPaySend(request, env);
+      return json({ error: 'not_found' }, 404);
+    }
+    if (p === '/admin/session' || p === '/admin/accounts' || p === '/admin/accounts/invite'
+      || p === '/admin/accounts/revoke' || p === '/admin/audit'
+      || p === '/admin/player' || p === '/admin/player/block' || p === '/admin/player/close') {
+      if (m === 'GET' && p === '/admin/session') return await adminSession(request, env);
+      if (m === 'GET' && p === '/admin/accounts') return await adminAccounts(request, env);
+      if (m === 'GET' && p === '/admin/audit') return await adminAuditLog(request, env);
+      if (m === 'GET' && p === '/admin/player') return await adminPlayer(request, env);
+      if (m === 'POST' && p === '/admin/accounts/invite') return await adminAccountInvite(request, env);
+      if (m === 'POST' && p === '/admin/accounts/revoke') return await adminAccountRevoke(request, env);
+      if (m === 'POST' && p === '/admin/player/block') return await adminPlayerBlock(request, env);
+      if (m === 'POST' && p === '/admin/player/close') return await adminPlayerClose(request, env);
       return json({ error: 'not_found' }, 404);
     }
     if (p === '/admin/world' || p === '/admin/world/freeze' || p === '/admin/world/grant') {

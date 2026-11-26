@@ -26,6 +26,9 @@ const FILES = readdirSync(DIR).filter((f) => f.endsWith('.sql')).sort();
 const SELF_HEALED = [
   '0006_pool.sql', '0007_astra_pay.sql', '0008_pay_addresses_chain.sql',
   '0009_pay_addresses_polygon.sql', '0010_pay_withdrawals_chain.sql',
+  // Доступы админки: `ensureAdminSchema` создаёт те же таблицы в рантайме, значит
+  // и «CREATE с IF NOT EXISTS», и «второй прогон ничего не меняет» обязательны.
+  '0011_admin_accounts.sql',
 ];
 
 function sqlOf(files: string[] = FILES): string {

@@ -23,7 +23,7 @@ import { buySlot, garageView } from './modules/garage';
 import {
   clearIdentity, ownIdentity, setCallsign, setStyle, syncPremium, type StyleAllowance, type StyleValue,
 } from './modules/identity';
-import { adminSummary, grantAstra, setFrozen } from './modules/adminWorld';
+import { adminPlayerInfo, adminSummary, grantAstra, setFrozen } from './modules/adminWorld';
 import { buyLot, cancelLot, createLot, marketView, type CreateLotInput } from './modules/market';
 import { buyFuel, repairShip } from './modules/upkeep';
 import {
@@ -167,6 +167,11 @@ export class World extends DurableObject<Env> {
   // ── Админка мира (этап 15) ─────────────────────────────────────────────────
   adminWorld() {
     return this.ctx.storage.transactionSync(() => adminSummary(this.sql));
+  }
+
+  /** Карточка игрока для админки: монеты, очки, корабли, заморозка мира. */
+  adminPlayer(playerId: string) {
+    return this.ctx.storage.transactionSync(() => adminPlayerInfo(this.sql, playerId, Date.now()));
   }
 
   setFrozen(frozen: boolean) {
