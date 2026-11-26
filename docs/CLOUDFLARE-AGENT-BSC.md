@@ -1,37 +1,45 @@
-# Промпт: проверить BSC-тестнет и закрыть шаг 8 (для агента с доступом к Cloudflare)
+# Промпт: проверить тестнет EVM-рельса (BNB Chain + Polygon) и закрыть шаг 8
 
 Самодостаточный текст: вставляется агенту целиком, ничего дописывать не нужно.
 Жёсткие правила (1–7) — те же, что в `docs/CLOUDFLARE-AGENT-PROMPT.md`; они
 обязательны, даже если ниже не повторены.
 
+Сетей две — **BNB Chain testnet (97)** и **Polygon Amoy (80002)** — и прогон
+обязан пройти ОБЕ. «Зелёный BNB» про Polygon не говорит ничего: там другой
+контракт, другая шкала знаков (6 против 18), другой `chainId` и другое число
+подтверждений, и всё это — конфигурация, а не код.
+
 ---
 
 ~~~~text
 Ты — инженер с доступом к моему аккаунту Cloudflare и к машине, где есть git,
-node 20+, npm и произвольный исходящий HTTPS. Задача: проверить рельс
-USDT BEP-20 (BNB Chain) на тестнете от начала до конца и принести мне
-доказательства, а не слова. Это последнее, что стоит между «код готов» и
+node 20+, npm и произвольный исходящий HTTPS. Задача: проверить EVM-рельс USDT (USDT
+на вход и USDT на выход, без обмена на нативку) на тестнете от начала до конца —
+в BNB Chain (97) и в Polygon Amoy (80002) — и принести мне доказательства, а не
+слова. Это последнее, что стоит между «код готов» и
 «можно включать сеть игрокам».
 
 РЕПОЗИТОРИЙ: github.com/alibahsburiev20-cyber/Crypto-Astra
 ВЕТКА: arena/aa380538-crypto-astra (не main — правки в git сегодня не нужны)
 ПРОД (только чтение): https://crypto-astra.cryptoastra.workers.dev
 D1: astra-global (прод), astra-preview (превью). Сеть прода сейчас TRON
-(mainnet, USDT TRC-20). BSC-рельс в коде есть, в прод-конфигурацию НЕ включён.
+(mainnet, USDT TRC-20). EVM-рельс (BNB + Polygon) в коде есть, в прод-
+конфигурацию НЕ включён.
 
 ЧТО УЖЕ СДЕЛАНО (не повторяй):
 - Код BSC-рельса написан и покрыт юнит-тестами (118 кейсов на подставной ноде).
 - Сквозной прогон существует: scripts/pay-bsc-rehearsal.ts, npm-скрипт
   `pay:rehearse`. Правила вердиктов — scripts/lib/rehearse.ts, покрыты тестом.
-- Локальный прогон (без сети) зелёный: 39 шагов OK, 2 помечены «не тронули».
-  Твоя задача — именно прогон ПРОТИВ ЖИВОЙ НОДЫ тестнета.
+- Локальный прогон (без сети) зелёный для ОБОИХ сетей: 39 шагов OK, 3 помечены
+  «не тронули». Твоя задача — именно прогон ПРОТИВ ЖИВОЙ НОДЫ тестнета.
 - Документ с расшифровкой каждого шага: docs/BSC-TESTNET-RUNBOOK.md. Прочитай
   его до начала, там таблица «что значит красный шаг».
 
 ЧЕГО ТЫ НЕ ДЕЛАЕШЬ НИ ПРИ КАКИХ УСЛОВИЯХ:
 1. Не включаешь PAYOUTS_ENABLED, SWEEP_ENABLED, POOL_ENABLED. Не трогаешь
-   PAY_CHAIN, PAY_NETWORK, PAY_USDT_CONTRACT, PAY_HOT_ADDRESS, PAY_EVM_CONTRACT
-   на проде. Прод — только GET-запросы и SELECT.
+   PAY_CHAIN, PAY_EVM_CHAINS, PAY_NETWORK, PAY_USDT_CONTRACT, PAY_HOT_ADDRESS,
+   PAY_EVM_CONTRACT, PAY_EVM_CONTRACT_BNB, PAY_EVM_CONTRACT_POL на проде.
+   Прод — только GET-запросы и SELECT.
 2. Не генерируешь, не просишь и не записываешь SIGNER_PRIVATE_KEY (ни в Signer,
    ни в переменные). Не печатаешь в чат, в лог, в файл отчёта НИ ОДНОГО
    приватного ключа и ни одного seed. Если тестовый ключ попал в команду —
@@ -48,8 +56,10 @@ D1: astra-global (прод), astra-preview (превью). Сеть прода �
    наугад» и не объявлять успех «в целом».
 
 Я ПОДГОТОВИЛ (значения пришлю тебе отдельным сообщением, в git их нет):
-  TESTNET_TOKEN=0x…          # адрес USDT-подобного токена, который я задеплоил в BSC testnet
-  TESTNET_HOT=0x…            # адрес моего тестового кошелька (на нём тестовый BNB)
+  TESTNET_TOKEN=0x…          # адрес USDT-токена (18 знаков), который я задеплоил в BSC testnet
+  TESTNET_TOKEN_POL=0x…      # то же в Polygon Amoy, но токен с decimals() = 6
+  TESTNET_RPC_POL=https://rpc-amoy.polygon.technology
+  TESTNET_HOT=0x…            # адрес моего тестового кошелька (на нём тестовый BNB и tPOL)
   TESTNET_HOT_KEY_FILE=…     # путь к файлу с приватным ключом ТЕСТОВОГО кошелька,
                              # если я попрошу настоящую отправку; читать только через stdin/env
   PLAYER_USDT_SENT=yes|no    # отправил ли я себе 5 токенов на адрес, который ты мне назовёшь
@@ -62,10 +72,13 @@ D1: astra-global (прод), astra-preview (превью). Сеть прода �
   git checkout arena/aa380538-crypto-astra && npm ci
   npm run check
   npm run pay:rehearse -- --loopback ; echo "exit=$?"
-Ожидаю: `npm run check` — все тесты зелёные (сейчас 93 файла / 1088 кейсов);
-loopback-прогон — 39 строк OK, код выхода 2. Код 2 означает «сошлось, но часть
-шагов не тронута» — это правильный ответ для прогона без сети, не ошибка.
-Любое другое число или код = блокировка, пиши мне с выводом.
+Ожидаю: `npm run check` — все тесты зелёные (сейчас 95 файлов / 1132 кейса);
+loopback-прогон — 39 строк OK и 3 «ПРОПУСК», код выхода 2, в ОБОИХ запусках:
+  npm run pay:rehearse -- --loopback
+  npm run pay:rehearse -- --loopback --chain polygon
+Код 2 означает «сошлось, но часть шагов не тронута» — это правильный ответ для
+прогона без сети, не ошибка. Любое другое число или код = блокировка, пиши мне
+с выводом.
 
 ШАГ 2. Нода и контракт: существует ли то, с чем мы собираемся работать
   RPC=https://bsc-testnet-rpc.publicnode.com
@@ -156,10 +169,35 @@ value / получатель / сумма / chainId / nonce», «замок nonc
 индексатора и нет ли ошибок `pay`. Если в логах видно `pay payouts confirm` или
 `orphan deposit` при выключенных флагах — это находка, напиши её полностью.
 
+ШАГ 5b. Polygon Amoy: ШАГИ 2–5 ещё раз, с суффиксом _POL
+  RPC_POL=$TESTNET_RPC_POL
+  curl -s -m 12 -X POST $RPC_POL -H 'content-type: application/json' \
+    -d '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}'        # 0x13882 = 80002
+  curl -s -m 12 -X POST $RPC_POL -H 'content-type: application/json' \
+    -d '{"jsonrpc":"2.0","id":3,"method":"eth_getCode","params":["'$TESTNET_TOKEN_POL'",'latest"]}'
+  curl -s -m 12 -X POST $RPC_POL -H 'content-type: application/json' \
+    -d '{"jsonrpc":"2.0","id":4,"method":"eth_call","params":[{"to":"'$TESTNET_TOKEN_POL'","data":"0x95d89b41"},"latest"]}'
+Ожидания отличаются от BNB в трёх числах, и это ровно то, что мы проверяем:
+`chainId` = 80002, `decimals()` = 0x06 (шесть, не восемнадцать), газ — POL
+(tPOL с faucet), подтверждений 12. Прогон зовётся так (имена переменные — свои):
+  PAY_CHAIN=polygon PAY_NETWORK=testnet PAY_EVM_CHAINS=polygon \
+  PAY_EVM_RPC_POL=$RPC_POL PAY_EVM_CONTRACT_POL=$TESTNET_TOKEN_POL \
+  PAY_EVM_CONFIRMATIONS_POL=12 PAY_HOT_ADDRESS=$TESTNET_HOT \
+  npx tsx scripts/pay-bsc-rehearsal.ts --blocks 3000 --amount-micro 5000000
+  # и с --send --hot-key <файл> — как в ШАГЕ 4
+Отрицательные проверки a–e из ШАГА 5 повторяются для Polygon в тех же именах
+(`PAY_EVM_CONTRACT_POL=""` → ПРОВАЛ «контракт»). Плюс одна своя:
+  f) PAY_CHAIN=polygon без PAY_EVM_CHAINS → ПРОВАЛ «список сетей»: адреса
+     выдаём в Polygon, а сканер по умолчанию смотрит BNB — прогон обязан это
+     поймать, а не «зелёный».
+Если мой токен в Amoy оказался 18-значным — СТОП и напиши мне: прогон с ним
+проверяет не ту шкалу, что в бою, и «OK» на такой конфигурации хуже красного.
+
 ШАГ 7. Отчёт (формат обязателен, он влезает в одно сообщение)
   1. npm run check: <число файлов>/<число кейсов>, green|red
-  2. loopback: <число OK>, exit=<код>
-  3. нода: chainId=<..>, head=<..>, decimals=<..>, BNB на кошельке=<..>
+  2. loopback: <число OK>, exit=<код> — ОТДЕЛЬНО для bnb и для polygon
+  3. нода: chainId=<..>, head=<..>, decimals=<..>, BNB/POL на кошельке=<..>
+     — по каждой сети
   4. адрес игрока для пополнения: 0x…
   5. скан+зачисление: OK|ПРОПУСК|ПРОВАЛ — <одна строяя причина>
   6. подпись и отправка: OK|ПРОПУСК|ПРОВАЛ — <txid, если был>
@@ -180,5 +218,5 @@ value / получатель / сумма / chainId / nonce», «замок nonc
 | Починить всё, что прогон показал красным | я (код, тесты, пуш) |
 | Исполнение сбора USDT с адресов игроков + недельный цикл (`closeCycle`, строки `confirmed_in`, «приз → мне → остаток в пул») — сейчас в рантайме этого нет ни в TRON, ни в BSC | я, по твоему «делай» |
 | Схема «общий адрес + тег суммой» вместо адреса на игрока (снимает ~90 % газа на выплатах) | я, по твоему «делай» |
-| Включение `PAY_CHAIN=bsc` и USDT-контракта на проде, `PAYOUTS_ENABLED`/`SWEEP_ENABLED`, `SIGNER_PRIVATE_KEY` в Signer | только ты, письменно |
+| Включение `PAY_CHAIN`/`PAY_EVM_CHAINS` и USDT-контрактов на проде (по одному на сеть: `PAY_EVM_CONTRACT_BNB`, `PAY_EVM_CONTRACT_POL`), `PAYOUTS_ENABLED`/`SWEEP_ENABLED`, `SIGNER_PRIVATE_KEY` в Signer | только ты, письменно |
 | Удаление TRON | я, после зелёного тестнета и нуля на TRON-адресах |
