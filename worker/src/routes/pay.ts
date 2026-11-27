@@ -20,6 +20,13 @@ import {
   MAX_PRIZE_AWARD_MICRO, PrizeError, awardPrize, listPrizes, prizeSummary,
 } from '../pay/prize';
 import { ensurePaySchema, PAY_SCHEMA_VERSION, PAY_TABLES } from '../pay/schema';
+import {
+  SWEEP_CONFIRM, SWEEP_IDEM_PREFIX, SWEEP_RUN_LIMIT, SweepError, evmSweepSignerClient, listSweeps, runEvmSweep,
+} from '../pay/evm/sweeps';
+import { ADJUST_CONFIRM, MAX_ADJUST_MICRO, AdjustError, adjustBalance, adjustStatus, parseAdjustInput, pendingWithdrawalMicro } from '../pay/adjust';
+import { writeAdminAudit } from '../admin/accounts';
+import { ensureAdminSchema } from '../admin/schema';
+import { findUserByRef } from './admin';
 import { ShopError, catalogForClient, entitlements, premiumStatus, purchase } from '../pay/shop';
 import { formatMicroUsdt, isMicroAmount, parseUsdtToMicro } from '../pay/tron/amount';
 import { usdtContract } from '../pay/tron/contracts';
@@ -757,7 +764,125 @@ export async function adminPaySweepPlan(request: Request, env: Env): Promise<Res
 }
 
 
-// --- Призы из фонда сезона ----------------------------------------------------
+// --- Исполнение сбора (sweep) -------------------------------------------------
+//
+// План умел показывать «что лежит на адресах игроков», и дальше оператор шёл
+// руками. Здесь — исполнение: один адрес или несколько за вызов, подпись ключом
+// депозита в Signer, отправка, и строка в `pay_sweeps` на каждую попытку.
+// Баланс игрока при этом не меняется: деньги зачтены по событию сети, а сбор —
+// перекладывание внутри нашего хранения.
+
+/** Собрать USDT с депозитных адресов в EVM. `dryRun` по умолчанию — ничего не двигает. */
+export async function adminPaySweepRun(request: Request, env: Env): Promise<Response> {
+  // Подпись чужим ключом — не для помощника: младший доступ видит план и список,
+  // но сбор решает владелец.
+  const who = requireOwner(await requireAdmin(request, env));
+  if (!(await ensurePaySchema(env.DB))) throw new ApiError(503, 'pay_unavailable');
+  const flags = payFlags(env);
+  if (!flags.payments) throw new ApiError(503, 'payments_disabled');
+  // Пока `SWEEP_ENABLED` выключен, исполнение недоступно — намеренно: «кнопка
+  // есть, а транзакции уходят» — худший из возможных интерфейсов для денег.
+  if (!flags.sweep) throw new ApiError(503, 'sweep_disabled');
+
+  const body = await readJsonObject(request);
+  // Формат адреса проверяем до конфигурации сети: «опечатались в адресе» — вина
+  // запроса, а не сервера, и 503 «сеть не настроена» увёл бы искать причину не туда.
+  const address = String(body.address ?? '').trim();
+  if (address && !/^0x[0-9a-f]{40}$/i.test(address)) throw new ApiError(400, 'bad_address');
+  const destination = String(env.PAY_HOT_ADDRESS ?? '').trim();
+  if (!destination) throw new ApiError(503, 'hot_wallet_missing');
+  const chain = parsePayChain(body.chain) ?? (chainSpec(env, flags).chain === 'tron' ? 'bsc' : chainSpec(env, flags).chain);
+  if (chain !== 'bsc' && chain !== 'polygon') throw new ApiError(400, 'bad_chain');
+  const spec = chainSpecFor(env, chain, flags);
+  if (!spec.contract || !spec.apiBase) throw new ApiError(503, 'chain_not_configured');
+  const chainId = Number(spec.chainId ?? 0);
+  if (!chainId) throw new ApiError(503, 'chain_id_missing');
+
+  const idemKey = String(request.headers.get('Idempotency-Key') ?? body.idem ?? '').trim();
+
+  try {
+    const result = await runEvmSweep({
+      db: env.DB,
+      rpc: evmRpcFor(env, fetch, spec),
+      signer: evmSweepSignerClient(env),
+      chain,
+      chainId,
+      contract: spec.contract,
+      network: flags.network,
+      destination,
+      actor: who.id,
+      idemKey,
+      dryRun: body.dryRun !== false,
+      confirm: String(body.confirm ?? ''),
+      address: address || undefined,
+      now: Date.now(),
+    });
+    // Ссылки строит сервер: `txUrl`/`addressUrl` знает конфигурация сети, а
+    // клиент их не должен ни восстанавливать, ни угадывать.
+    const rows = result.rows.map((row) => ({
+      ...row,
+      explorerTx: row.txid ? spec.txUrl(row.txid) : '',
+      addressUrl: spec.addressUrl(row.address),
+    }));
+    return json({
+      ok: true,
+      actor: who.role,
+      confirm: SWEEP_CONFIRM,
+      idemPrefix: SWEEP_IDEM_PREFIX,
+      runLimit: SWEEP_RUN_LIMIT,
+      explorer: spec.explorer,
+      sweep: {
+        ...result,
+        rows,
+        minAmount: formatMicroUsdt(result.minMicro),
+      },
+      flags: { sweep: flags.sweep, payouts: flags.payouts, network: flags.network, chain },
+    }, result.dryRun ? 200 : 201, { 'Cache-Control': 'no-store' });
+  } catch (e) {
+    if (e instanceof SweepError) {
+      const status = e.code === 'address_not_ours' || e.code === 'sweep_in_progress' ? 409
+        : e.code === 'confirm_required' || e.code === 'bad_idem_key' ? 400
+          : e.code === 'chain_error' ? 502
+            : 400;
+      throw new ApiError(status, e.code);
+    }
+    if (e instanceof BroadcastError) {
+      // Отказ подписи или сети: деньги не ушли, адрес можно пробовать снова.
+      throw new ApiError(502, e.code);
+    }
+    throw e;
+  }
+}
+
+/** История сборок: чья строка, сколько, чем подтвердилась. Только чтение. */
+export async function adminPaySweeps(request: Request, env: Env): Promise<Response> {
+  await requireAdmin(request, env);
+  if (!(await ensurePaySchema(env.DB))) throw new ApiError(503, 'pay_unavailable');
+  const url = new URL(request.url);
+  const limit = Number(url.searchParams.get('limit') ?? 20);
+  const chain = parsePayChain(url.searchParams.get('chain')) ?? undefined;
+  const rows = await listSweeps(env.DB, Number.isFinite(limit) ? limit : 20, chain);
+  const flags = payFlags(env);
+  const sweeps = rows.map((row) => {
+    const spec = chainSpecFor(env, row.chain, flags);
+    return {
+      ...row,
+      explorerTx: row.txid ? spec.txUrl(row.txid) : '',
+      addressUrl: spec.addressUrl(row.address),
+    };
+  });
+  return json({
+    ok: true,
+    sweeps,
+    confirm: SWEEP_CONFIRM,
+    runLimit: SWEEP_RUN_LIMIT,
+    // План и список помощнику показываем: «что лежит на адресах» — не секрет,
+    // в отличие от права это подписать.
+    flags: { sweep: flags.sweep, payments: flags.payments, network: flags.network },
+  }, 200, { 'Cache-Control': 'no-store' });
+}
+
+
 //
 // Фонд = 40 % выручки магазина. Приз списывается из фонда и зачисляется на
 // баланс игрока; дальше деньги уходят обычным выводом. Здесь нет ни подписи, ни
@@ -815,6 +940,101 @@ export async function adminPayPrize(request: Request, env: Env): Promise<Respons
  * Начислить приз. `dryRun` (по умолчанию `true`) показывает, что произойдёт, и
  * ничего не пишет: первый вызов должен быть проверкой, а не списанием.
  */
+/**
+ * Что разрешено скорректировать вручную: лимит одной операции, слово
+ * подтверждения и текущий баланс игрока. Отдельная ручка нужна затем, чтобы
+ * превью в админке не угадывало числа: сервер сам говорит, сколько у игрока
+ * USDT и сколько из этого уже обещано незакрытым заявкам на вывод.
+ */
+export async function adminPayAdjustInfo(request: Request, env: Env): Promise<Response> {
+  const who = requireOwner(await requireAdmin(request, env));
+  if (!(await ensurePaySchema(env.DB))) throw new ApiError(503, 'pay_unavailable');
+  const url = new URL(request.url);
+  const flags = payFlags(env);
+  const ref = (url.searchParams.get('player') ?? '').trim();
+  let player: Record<string, unknown> | null = null;
+  let pendingMicro = 0;
+  if (ref) {
+    const found = await findUserByRef(env.DB, ref);
+    if (!found.ok) throw new ApiError(404, found.error);
+    const balance = await payBalanceMicro(env.DB, found.id);
+    pendingMicro = await pendingWithdrawalMicro(env.DB, found.id);
+    player = {
+      id: found.id,
+      balanceMicro: balance,
+      balance: formatMicroUsdt(balance),
+      pendingMicro,
+      pending: formatMicroUsdt(pendingMicro),
+      canAdjustDownMicro: Math.max(0, balance - pendingMicro),
+      canAdjustDown: formatMicroUsdt(Math.max(0, balance - pendingMicro)),
+    };
+  }
+  return json({
+    ok: true,
+    enabled: flags.payments,
+    maxAdjustMicro: MAX_ADJUST_MICRO,
+    maxAdjust: formatMicroUsdt(MAX_ADJUST_MICRO),
+    confirm: ADJUST_CONFIRM,
+    actor: who.role,
+    player,
+  }, 200, { 'Cache-Control': 'no-store' });
+}
+
+/**
+ * Начислить или списать USDT игроку — компенсацией `adjust` в денежном журнале.
+ *
+ * Это единственный легальный способ «списать деньги»: `pay_ledger` append-only
+ * (UPDATE/DELETE закрыты триггерами), а `parseUsdtToMicro` не принимает
+ * отрицательную сумму, поэтому списание обязано быть новой записью с обратным
+ * знаком и своим ключом идемпотентности. `dryRun` по умолчанию `true`: первый
+ * вызов показывает, что станет с балансом, второй (с `confirm`) пишет.
+ */
+export async function adminPayAdjust(request: Request, env: Env): Promise<Response> {
+  // Движение денег: не для помощника. Младший доступ читает баланс и очередь,
+  // но менять чужие USDT может только владелец.
+  const who = requireOwner(await requireAdmin(request, env));
+  if (!(await ensurePaySchema(env.DB))) throw new ApiError(503, 'pay_unavailable');
+  if (!payFlags(env).payments) throw new ApiError(503, 'payments_disabled');
+
+  const body = await readJsonObject(request);
+  const parsed = parseAdjustInput(body);
+  if (!parsed.ok) throw new ApiError(adjustStatus(parsed.error), parsed.error);
+
+  const found = await findUserByRef(env.DB, parsed.value.userId);
+  if (!found.ok) throw new ApiError(404, found.error);
+
+  const now = Date.now();
+  try {
+    const result = await adjustBalance(env.DB, {
+      userId: found.id,
+      deltaMicro: parsed.value.deltaMicro,
+      reason: parsed.value.reason,
+      idemKey: parsed.value.idemKey,
+      confirm: parsed.value.confirm,
+      dryRun: parsed.value.dryRun,
+      actor: who.id,
+    }, now);
+    if (!result.dryRun && !result.duplicated) {
+      await ensureAdminSchema(env.DB);
+      await writeAdminAudit(env.DB, {
+        actor: who.id, role: who.role,
+        action: result.direction === 'debit' ? 'balance_debit' : 'balance_credit',
+        target: result.playerId,
+        payload: {
+          deltaMicro: result.deltaMicro, reason: result.reason, idemKey: result.idemKey,
+          balanceBefore: result.balanceBeforeMicro, balanceAfter: result.balanceAfterMicro,
+        },
+        now,
+      });
+    }
+    return json({ ok: true, resolvedBy: found.by, actor: who.role, adjust: result },
+      result.dryRun || result.duplicated ? 200 : 201, { 'Cache-Control': 'no-store' });
+  } catch (e) {
+    if (e instanceof AdjustError) throw new ApiError(adjustStatus(e.code), e.code);
+    throw e;
+  }
+}
+
 export async function adminPayPrizeAward(request: Request, env: Env): Promise<Response> {
   // Движение денег: не для помощника. Младший доступ видит очередь и сверку,
   // но одобрять, отправлять и снимать стоп может только владелец.

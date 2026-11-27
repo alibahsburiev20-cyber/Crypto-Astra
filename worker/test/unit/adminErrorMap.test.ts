@@ -12,6 +12,7 @@ const root = new URL('../../../', import.meta.url);
 const ADMIN_SOURCES = [
   'worker/src/http/admin.ts',
   'worker/src/routes/admin.ts',
+  'worker/src/routes/pay.ts',
   'worker/src/admin/accounts.ts',
   'worker/src/admin/players.ts',
   'worker/src/admin/schema.ts',
@@ -57,6 +58,14 @@ describe('карта ошибок админки', () => {
     const declared = [...adminJs.matchAll(/^ {2}([a-z_]+): '/gm)].map((m) => m[1]);
     expect(declared.length).toBeGreaterThan(15);
     expect(declared.filter((code) => !known.has(code))).toEqual([]);
+  });
+
+  it('деньги админки сканируются: `routes/pay.ts` в списке источников', () => {
+    // Отказы сбора и корректировки живут в `routes/pay.ts`. Без этого файла в
+    // списке тест «зелёный», а оператор видит `Отказ: sweep_disabled`.
+    expect(ADMIN_SOURCES).toContain('worker/src/routes/pay.ts');
+    expect(all.has('sweep_disabled')).toBe(true);
+    expect(all.has('hot_wallet_missing')).toBe(true);
   });
 
   it('сканер не «слепой»: админские файлы действительно перечислены', () => {

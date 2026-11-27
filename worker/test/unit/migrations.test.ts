@@ -29,6 +29,8 @@ const SELF_HEALED = [
   // Доступы админки: `ensureAdminSchema` создаёт те же таблицы в рантайме, значит
   // и «CREATE с IF NOT EXISTS», и «второй прогон ничего не меняет» обязательны.
   '0011_admin_accounts.sql',
+  // Журнал сборов: `ensurePaySchema` создаёт `pay_sweeps` в рантайме — те же права.
+  '0012_pay_sweeps.sql',
 ];
 
 function sqlOf(files: string[] = FILES): string {
@@ -107,7 +109,8 @@ describe('миграции D1 идемпотентны', () => {
     for (const s of PAY_STATEMENTS) runtimeFirst.exec(s);
     for (const s of PAY_PARTIAL_INDEXES) runtimeFirst.exec(s);
     for (const s of PAY_TRIGGERS) runtimeFirst.exec(s);
-    const chain = ['0007_astra_pay.sql', '0008_pay_addresses_chain.sql', '0009_pay_addresses_polygon.sql', '0010_pay_withdrawals_chain.sql'];
+    const chain = ['0007_astra_pay.sql', '0008_pay_addresses_chain.sql', '0009_pay_addresses_polygon.sql',
+      '0010_pay_withdrawals_chain.sql', '0012_pay_sweeps.sql'];
     expect(() => runtimeFirst.exec(sqlOf(chain))).not.toThrow();
 
     // Эталон: только миграция.

@@ -125,6 +125,10 @@ purchasesEnabled, history[], entitlements[] }`. История — только 
 | GET | `/admin/pay/sweep/plan` | админ | план сбора: по каждому адресу USDT и нативная монета на комиссию (TRX в TRON, BNB в BSC), хватает ли на газ, и сколько газа занести, чтобы собрать остальное; ничего не двигает |
 | GET | `/admin/pay/prize` | админ | сколько в призовом фонде, сколько выдано, баланс кошелька (USDT/TRX) и последние призы |
 | POST | `/admin/pay/prize/award` | админ | начислить приз из фонда на баланс игрока; `dryRun` по умолчанию, сумма не больше остатка фонда |
+| GET | `/admin/pay/adjust` | владелец | `?player=` — баланс игрока, сколько из него обещано незакрытым заявкам (`pending`) и сколько вообще можно списать (`canAdjustDown`), потолок одной операции. Без параметра — только лимиты |
+| POST | `/admin/pay/adjust` | владелец | начислить или списать USDT проводкой `adjust`: `{ player, amount: "-5", reason, idem, dryRun?, confirm? }`. `dryRun` по умолчанию `true`; запись — только с `dryRun: false` и `confirm: "ADJUST"` |
+| POST | `/admin/pay/sweep/run` | владелец | исполнить сбор USDT с депозитных адресов в EVM: `{ chain: "bsc"\|"polygon", address?, idem, dryRun?, confirm? }`. `dryRun` по умолчанию — план по адресам, ни подписи, ни записи. Сбор — только `dryRun: false` + `confirm: "SWEEP"`; за вызов не больше 5 адресов, адрес обязан принадлежать нашему дереву вывода, `idem` уходит в `pay_sweeps.idem_key` как `admswp:<ключ>:<адрес>`. Отказы: `503 payments_disabled` / `sweep_disabled` / `hot_wallet_missing` / `chain_not_configured` / `chain_id_missing`, `400 bad_address` / `bad_chain` / `confirm_required` / `bad_idem_key` / `no_candidates`, `409 address_not_ours` / `sweep_in_progress`, `502 chain_error` / `signer_*` / `tx_hash_mismatch` |
+| GET | `/admin/pay/sweeps` | админ | журнал намерений сбора: адрес, сумма, `nonce`, статус (`queued` → `broadcasting` → `sent` → `confirmed` / `failed`), txid и ссылка на обозреватель, причина отказа. `?chain=`, `?limit=` (до 100). Чтение — можно и помощнику: это не подпись |
 | POST | `/admin/pay/send` | админ | подпись и отправка зарезервированной выплаты; `409 hot_wallet_insufficient_usdt` / `hot_wallet_no_trx` (TRON) / `hot_wallet_no_bnb` (BSC) — платить нечем, заявка остаётся `reserved`; `502 chain_id_mismatch`, `gas_price_too_high`, `nonce_busy`, `hot_address_mismatch`, `signer_contract_mismatch` — конфигурация, деньги не двинулись |
 | (cron) | — | — | в BSC подтверждение выплаты по квитанции сети (`pay/evm/payouts.ts`) делает cron: `sent → confirmed`, реверт → `failed` с возвратом. Вручную подтверждения не требуются |
 | GET | `/admin/pay/solvency` | админ | обязательства (балансы игроков + призовой фонд) против активов в блокчейне: покрытие, дефицит. `plan.truncated: true` означает «адресов больше, чем мы прочитали» — в этом случае активы считаются неполными и «покрыто» не утверждается |
@@ -534,6 +538,17 @@ Miner, Explorer, Cruiser, Flagship). Восьмая клетка при шест
 | POST | `/admin/accounts/invite` | `{ label, email?, days?, grantLimit?, note? }` | 201: `id`, `key`, `link`, `expiresAt` — только владельцу |
 | POST | `/admin/accounts/revoke` | `{ id }` | `revoked` — только владельцу |
 | GET | `/admin/audit` | `?limit=1…100` (по умолчанию 25) | `entries[]` — только владельцу |
+
+Корректировка USDT — единственный легальный способ «списать деньги» игроку:
+`pay_ledger` закрыт триггерами от `UPDATE`/`DELETE`, а `parseUsdtToMicro` не
+принимает отрицательную сумму, поэтому списание обязано быть новой записью с
+обратным знаком, своей причиной и своим `idem_key` (`admadj:<ключ>`). Границы:
+`balance_below_zero` (409) — баланс не уходит в минус;
+`below_pending_withdrawals` (409) — нельзя съесть деньги, обещанные заявкой в
+`requested`/`approved`; `amount_too_big` (422) — больше 5 000 USDT за раз;
+`confirm_required` (400) — нет слова `ADJUST`; `idem_conflict` (409) — под тем же
+ключом уже лежит другая сумма. Повтор с тем же ключом и той же суммой — `200` с
+`duplicated: true`, а не второе списание.
 
 `grantLimit` — потолок одной выдачи/списания ASTRA для этого доступа (1…20000,
 по умолчанию 5000): сумма больше него отвечает `grant_limit` (409), по модулю —

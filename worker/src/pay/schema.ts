@@ -43,6 +43,7 @@ export const PAY_TABLES = [
   'pay_pool_cycles',
   'pay_withdrawals',
   'pay_payouts',
+  'pay_sweeps',
   'pay_treasury',
   'pay_operations',
   'pay_audit_log',
@@ -268,7 +269,31 @@ export const PAY_STATEMENTS: string[] = [
      error TEXT NOT NULL DEFAULT '',
      UNIQUE (withdrawal_id, attempt))`,
 
-  // 12. Казна: фактический баланс берётся только из блокчейна, не из наших расчётов.
+  // 12. Сбор с депозитных адресов (миграция 0012). Намерение неизменяемо: движется
+  // только `status`, `txid` и отметки — иначе «журнал» становится черновиком.
+  `CREATE TABLE IF NOT EXISTS pay_sweeps (
+     id TEXT PRIMARY KEY,
+     chain TEXT NOT NULL CHECK (chain IN ('bsc', 'polygon')),
+     address TEXT NOT NULL,
+     user_id TEXT,
+     derivation_index INTEGER NOT NULL CHECK (derivation_index >= 0),
+     contract TEXT NOT NULL,
+     destination TEXT NOT NULL,
+     amount_micro INTEGER NOT NULL CHECK (amount_micro > 0),
+     gas_limit INTEGER NOT NULL CHECK (gas_limit > 0),
+     max_fee_wei TEXT NOT NULL DEFAULT '',
+     nonce INTEGER,
+     txid TEXT,
+     status TEXT NOT NULL DEFAULT 'queued'
+       CHECK (status IN ('queued', 'broadcasting', 'sent', 'confirmed', 'failed')),
+     error TEXT NOT NULL DEFAULT '',
+     idem_key TEXT NOT NULL UNIQUE,
+     created_at INTEGER NOT NULL,
+     decided_at INTEGER)`,
+  'CREATE INDEX IF NOT EXISTS idx_pay_sweeps_status ON pay_sweeps (status, created_at)',
+  'CREATE INDEX IF NOT EXISTS idx_pay_sweeps_address ON pay_sweeps (chain, address, created_at)',
+
+  // 12b. Казна: фактический баланс берётся только из блокчейна, не из наших расчётов.
   `CREATE TABLE IF NOT EXISTS pay_treasury (
      id TEXT PRIMARY KEY,
      kind TEXT NOT NULL CHECK (kind IN ('hot', 'cold', 'deposit')),
@@ -310,6 +335,12 @@ export const PAY_TRIGGERS: string[] = [
      BEGIN SELECT RAISE(ABORT, 'pay audit log is append-only'); END`,
   `CREATE TRIGGER IF NOT EXISTS pay_audit_log_no_delete BEFORE DELETE ON pay_audit_log
      BEGIN SELECT RAISE(ABORT, 'pay audit log is append-only'); END`,
+  // Сбор: статусы двигаются, намерение — нет. `UPDATE OF` разрешает править
+  // `status`/`txid`/`decided_at` и запрещает менять сумму, адрес, сеть и получателя.
+  `CREATE TRIGGER IF NOT EXISTS pay_sweeps_intent_immutable
+     BEFORE UPDATE OF chain, address, user_id, derivation_index, contract, destination, amount_micro, idem_key
+     ON pay_sweeps
+     BEGIN SELECT RAISE(ABORT, 'pay_sweeps intent is immutable'); END`,
 ];
 
 // Частичные UNIQUE-индексы: «один открытый счёт» и «один открытый цикл пула».

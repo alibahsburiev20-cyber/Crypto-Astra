@@ -89,7 +89,9 @@ describe('GET /pay/status.json', () => {
     expect(body.asset).toBe('USDT');
     expect(body.decimals).toBe(6);
     expect(body.schema).toBe('off');
-    expect(body.tables).toBe(15);
+    // 16 = `PAY_TABLES.length`. Литерал, а не `PAY_TABLES.length`, нарочно: новая
+    // таблица обязана быть замечена здесь, а не в логах проде.
+    expect(body.tables).toBe(16);
     expect(body.contract).toBe('TXLAQ63Xg1NAzckPwKHvzw7CSEmLMEqcdj');
     expect((body.flags as Record<string, boolean>).payments).toBe(false);
     // Никаких адресов, ключей и сумм в публичном ответе.

@@ -117,6 +117,57 @@
       <p id="grant-help" class="muted"></p>
       <p id="grant-status" class="muted"></p>
     </section>
+    <section class="block" id="usdt-block" hidden>
+      <h2>USDT: начислить или списать</h2>
+      <p class="muted">Денежный журнал (<code>pay_ledger</code>) закрыт для правки триггерами, поэтому
+        «списать» — это не вычеркнутая строка, а отдельная проводка <code>adjust</code> с обратным
+        знаком: её видят игрок, сверка и экспорт данных. Сначала «Показать итог» — он ничего не
+        меняет; запись создаётся только кнопкой «Применить» со словом <code>ADJUST</code>. В минус
+        баланс не уходит, и нельзя съесть деньги, уже обещанные незакрытой заявкой на вывод.
+        Enter в полях — показать итог, Enter в поле подтверждения — применить.</p>
+      <div class="admin-form">
+        <label>Игрок <input id="adj-player" size="34" autocomplete="off" placeholder="id, начало id или email"></label>
+        <label>USDT <input id="adj-amount" type="number" step="0.000001" value="-5"></label>
+        <button type="button" id="adj-flip" class="ghost">Списать / начислить</button>
+        <button type="button" id="adj-load" class="ghost">Баланс и заявка</button>
+      </div>
+      <label>Причина <input id="adj-reason" size="44" autocomplete="off" placeholder="компенсация за сбой / отмена покупки"></label>
+      <p id="adj-balance" class="muted"></p>
+      <div id="adj-preview" class="admin-totals" hidden></div>
+      <label id="adj-confirm-wrap" hidden>Подтвердите запись (она видна игроку): впишите
+        <input id="adj-confirm" size="10" autocomplete="off"></label>
+      <div class="admin-actions">
+        <button type="button" id="adj-preview-btn"><img src="/icons/ui/admin.png" alt="" width="18" height="18"> Показать итог</button>
+        <button type="button" id="adj-apply">Применить</button>
+      </div>
+      <p id="adj-status" class="muted"></p>
+    </section>
+    <section class="block" id="sweep-block" hidden>
+      <h2>Сбор USDT с адресов приёма</h2>
+      <p class="muted">Каждый игрок получает свой адрес, и USDT не должен лежать на нём: сбор делает
+        с адреса <code>transfer</code> на горячий кошелёк. Ключ подписывает депозитный адрес в Signer —
+        приватных ключей в Worker нет и не будет. «Показать, что соберём» ничего не подписывает и не
+        пишет; «Собрать» требует <code>PAYMENTS_ENABLED=on</code>, <code>SWEEP_ENABLED=on</code>, слово
+        <code>SWEEP</code> и ключ операции — повтор с тем же ключом не удваивает перевод. За одно
+        нажатие не больше 5 адресов, меньше 10 USDT не собираем (комиссия съела бы перевод), а адресу
+        без нативки ставим <code>no_gas</code> и не трогаем. Enter — только просмотр.</p>
+      <div class="admin-form">
+        <label>Сеть <select id="sweep-chain"><option value="bsc">BNB Chain</option><option value="polygon">Polygon</option></select></label>
+        <label>Один адрес <input id="sweep-address" size="44" autocomplete="off" placeholder="0x… — пусто: все подходящие"></label>
+        <button type="button" id="sweep-load" class="ghost">Обновить список сборов</button>
+      </div>
+      <p id="sweep-flags" class="muted"></p>
+      <div id="sweep-preview" class="admin-totals" hidden></div>
+      <p id="sweep-plan" class="muted"></p>
+      <label id="sweep-confirm-wrap" hidden>Подтвердите сбор (уходят транзакции в сеть): впишите
+        <input id="sweep-confirm" size="10" autocomplete="off"></label>
+      <div class="admin-actions">
+        <button type="button" id="sweep-plan-btn"><img src="/icons/ui/admin.png" alt="" width="18" height="18"> Показать, что соберём</button>
+        <button type="button" id="sweep-run">Собрать</button>
+      </div>
+      <p id="sweep-status" class="muted"></p>
+      <table class="arena-table" id="sweep-log"></table>
+    </section>
     <section class="block" id="staff-block" hidden>
       <h2>Доступы</h2>
       <p class="muted">Младший админ входит по ссылке с ключом: видно монеты игрока, можно выдать или

@@ -72,7 +72,8 @@ HttpOnly-cookie. Истёкшие и отозванные строки стар�
 ### admin_audit
 
 Журнал админ-действий: `actor` (`owner` или id доступа), `actor_role`, `action`
-(`grant`, `player_block`, `player_close`, `invite_create`, `invite_revoke`, …),
+(`grant`, `player_block`, `player_close`, `invite_create`, `invite_revoke`,
+`balance_credit`, `balance_debit` — ручная корректировка USDT, …),
 `target`, `payload` (JSON), `created_at`. Это НЕ бухгалтерия: деньги и монеты
 живут в `pay_ledger` и в журнале мира, здесь — «кто нажал» и с какой причиной.
 Запись журнала не может утопить действие, которое уже совершено (ошибка пишется
@@ -96,6 +97,14 @@ npx wrangler d1 migrations apply DB --remote
 | `0005_season_archive.sql` | season_history, world_snapshots |
 | `0006_pool.sql` | pool_entries (append-only, `ref` уникален), индексы и триггеры |
 | `0007_astra_pay.sql` | таблицы Astra Pay: `pay_addresses`, `pay_deposits`, `pay_ledger`, `pay_withdrawals`, `pay_audit_log` (append-only) |
+
+Ручная корректировка баланса игрока (`POST /admin/pay/adjust`, только владелец) —
+это строка `pay_ledger` с `reason = 'adjust'`, `source_ref = 'admin:<причина>'` и
+`idem_key = 'admadj:<ключ оператора>'`; параллельно — `balance_credit` /
+`balance_debit` в `admin_audit`. Правки существующей строки журнала нет и быть не
+может: `UPDATE`/`DELETE` по `pay_ledger` закрыты триггерами, поэтому «списать»
+всегда означает «дописать обратную проводку», которую видят сверка и экспорт
+данных игрока.
 | `0008_pay_addresses_chain.sql` | перестройка `pay_addresses` под колонку `chain` (адрес — на сеть, не на игрока) |
 | `0009_pay_addresses_polygon.sql` | `polygon` в `CHECK (chain)` — вторая EVM-сеть того же рельса |
 | `0010_pay_withdrawals_chain.sql` | `pay_withdrawals.chain`: у заявки своя сеть, платить — в неё |

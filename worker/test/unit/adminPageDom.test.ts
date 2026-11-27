@@ -95,6 +95,68 @@ describe('админка: разметка и скрипт про доступы
     expect(js).not.toContain("$('#invite-key').value");
   });
 
+  it('USDT: списание двухшаговое и превью, и слово подтверждения', () => {
+    for (const id of ['adj-player', 'adj-amount', 'adj-reason', 'adj-confirm', 'adj-confirm-wrap',
+      'adj-preview', 'adj-preview-btn', 'adj-apply', 'adj-balance', 'adj-load', 'adj-flip', 'adj-status']) {
+      expect(html, id).toContain(`id="${id}"`);
+      expect(js, id).toContain(`#${id}`);
+    }
+    expect(js).toContain('/admin/pay/adjust');
+    // Слово подтверждения видно человеку в разметке и совпадает с серверным.
+    expect(html).toContain('<code>ADJUST</code>');
+    // Enter в полях — только превью; запись — из поля подтверждения.
+    expect(js).toContain('adjRun(true)');
+    expect(js).toContain('adjRun(false)');
+    // Превью и запись различаются: `dryRun` обязано доезжать до сервера обоими значениями.
+    expect(js).toContain('body: JSON.stringify({ ...v, idem: adjKey, dryRun, confirm:');
+    // Ключ идемпотентности генерируется один на операцию: повторный клик обязан
+    // вернуть ту же запись, а не списать второй раз.
+    expect(js).toContain('let adjKeyUsed = false;');
+    expect(js).toContain('if (dryRun) adjReady = true;');
+  });
+
+  it('раздел списания USDT скрыт до входа владельца', () => {
+    expect(html).toContain('id="usdt-block" hidden');
+    expect(js).toContain("'#usdt-block'");
+    // Младший его не видит вовсе: сервер ответил бы `owner_only`. Сбор — там же.
+    expect(js).toMatch(/\['#staff-block', '#audit-block', '#usdt-block', '#sweep-block'\]/);
+  });
+
+  it('сбор USDT: два шага, сеть в запросе, и журнал намерений', () => {
+    for (const id of ['sweep-block', 'sweep-chain', 'sweep-address', 'sweep-load', 'sweep-flags', 'sweep-preview',
+      'sweep-plan', 'sweep-plan-btn', 'sweep-run', 'sweep-confirm', 'sweep-confirm-wrap', 'sweep-status', 'sweep-log']) {
+      expect(html, id).toContain(`id="${id}"`);
+      expect(js, id).toContain(`#${id}`);
+    }
+    expect(js).toContain('/admin/pay/sweep/run');
+    expect(js).toContain('/admin/pay/sweeps');
+    // Слово подтверждения видно человеку в разметке и совпадает с серверным.
+    expect(html).toContain('<code>SWEEP</code>');
+    expect(js).toContain('sweepRun(true)');
+    expect(js).toContain('sweepRun(false)');
+    // dryRun доезжает обоими значениями, а не «всегда правда».
+    expect(js).toContain('body: JSON.stringify({ ...v, idem: sweepKey, dryRun, confirm:');
+    // Ключ операции один на попытку и сгорает после живой сборки: второй клик не
+    // должен означать второй перевод.
+    expect(js).toContain('function newSweepKey()');
+    expect(js).toMatch(/if \(dryRun\) newSweepKey\(\);/);
+    expect(js).toContain('sweepReady = true;');
+  });
+
+  it('кнопка сбора не живёт без флагов: объяснение читается до клика', () => {
+    // `#sweep-flags` заполняется серверными флагами, а не догадками клиента.
+    expect(js).toContain('const f = data.flags || {};');
+    expect(js).toContain('PAYMENTS_ENABLED=');
+    expect(js).toContain('SWEEP_ENABLED=');
+  });
+
+  it('ключи словаря ошибок покрывают отказы списания', () => {
+    for (const code of ['balance_below_zero', 'below_pending_withdrawals', 'idem_conflict',
+      'amount_too_big', 'bad_idem_key', 'payments_disabled']) {
+      expect(js, code).toContain(`${code}:`);
+    }
+  });
+
   it('ничего денежного младшему не показывают, а не «показывают и режут на сервере»', () => {
     // Проверка на сервере обязательна и есть; здесь — что интерфейс о роли знает.
     expect(js).toContain("'#staff-block'");

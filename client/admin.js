@@ -65,7 +65,9 @@ function applyRole(data, reveal = true) {
       ? 'Вы вошли как владелец: доступно всё.'
       : `Вы вошли как младший админ${data.label ? ` (${data.label})` : ''}: деньги, доступы и удаление игроков владельцу не отдают.`);
   if (reveal && role === 'owner') {
-    for (const sel of ['#staff-block', '#audit-block']) {
+    // Раздел списания USDT помощнику не показываем вовсе: сервер отвергнет его
+    // `owner_only`, а висящая неактивная кнопка — это «сломано», а не «не для вас».
+    for (const sel of ['#staff-block', '#audit-block', '#usdt-block', '#sweep-block']) {
       const node = $(sel);
       if (node) node.hidden = false;
     }
@@ -115,16 +117,62 @@ const ERROR_TEXT = {
   bad_account: 'Не понят, какой доступ отзывать.',
   account_not_active: 'Этот доступ уже отозван.',
   bad_action: 'Непонятное действие с игроком.',
-  confirm_required: 'Для удаления впишите DELETE.',
   not_blocked: 'Игрок не заблокирован — снимать нечего.',
   player_already_closed: 'Аккаунт уже закрыт.',
   player_has_funds: 'У игрока лежат USDT или висит незакрытая заявка на выплату: сначала урегулируйте деньги, потом удаляйте.',
   pay_unavailable: 'Баланс денег не прочитан — удаление невозможно, иначе можно потерять остаток игрока.',
   insufficient_funds: 'На балансе игрока меньше, чем вы списываете.',
+  confirm_required: 'Нужно слово подтверждения: DELETE — удаление аккаунта, ADJUST — запись в денежный журнал, SWEEP — сбор USDT с адресов.',
+  bad_idem_key: 'Не поняли ключ операции — обновите страницу, он сгенерируется заново.',
+  amount_too_big: 'Одна корректировка — не больше 5 000 USDT: столько же, сколько можно вывести за заявку.',
+  balance_below_zero: 'Столько списать нельзя: баланс уйдёт в минус, а он означает «сколько мы должны игроку».',
+  below_pending_withdrawals: 'У игрока висит заявка на вывод: сначала откажите ей или отправьте, иначе списание съест обещанные деньги.',
+  idem_conflict: 'Под этим ключом уже записана другая сумма — нажмите «Показать итог» ещё раз, получите новый ключ.',
+  // Флаг называется `PAYMENTS_ENABLED` (worker/src/pay/flags.ts), а не
+  // `PAY_PAYMENTS_ENABLED`: подсказка с выдуманным именем отправляет оператора
+  // искать в `wrangler secrets` переменную, которой там не бывает.
+  payments_disabled: 'Денежный контур выключен (PAYMENTS_ENABLED=on не стоит): читать балансы можно, писать нельзя.',
+  // ── Конфигурация сетей и сбора USDT ──────────────────────────────────────
+  hot_wallet_missing: 'PAY_HOT_ADDRESS не задан: сбор некому отправлять, пока не укажете адрес горячего кошелька.',
+  usdt_contract_missing: 'Контракт USDT для сети не задан: PAY_EVM_CONTRACT_BNB (BNB) или PAY_EVM_CONTRACT_POL (Polygon).',
+  chain_not_configured: 'Сеть не настроена: нужны контракт USDT и свой RPC (PAY_EVM_CONTRACT_…, PAY_EVM_RPC_…). Публичный узел для сбора не годится.',
+  chain_id_missing: 'У сети нет chain id (56/97 — BNB, 137/80002 — Polygon): подпись «для другой сети» — это потерянные деньги, поэтому сбор остановлен. Проверьте PAY_NETWORK и PAY_EVM_CHAINS.',
+  chain_not_enabled: 'Сеть не включена в PAY_EVM_CHAINS: добавьте bsc или polygon и перезагрузите Worker.',
+  pay_chain_unknown: 'PAY_CHAIN не понятен: ожидаем tron, bsc или polygon.',
+  payouts_disabled: 'Выплаты выключены (PAYOUTS_ENABLED=on не стоит): сбор это не касается, заявки просто не уходят в сеть.',
+  payouts_stopped: 'Выплаты на стопе (флаг «Стоп выплат»): заявки накопятся, но в сеть не уйдут, пока не снимете стоп.',
+  deposits_disabled: 'Приём депозитов выключен (DEPOSITS_ENABLED): новые поступления не увидим, старое на адресах — можно собрать.',
+  purchases_disabled: 'Покупки выключены (PURCHASES_ENABLED): балансы не меняются, сбор это не трогает.',
+  sweep_disabled: 'Сбор USDT выключен: нужен PAYMENTS_ENABLED=on и SWEEP_ENABLED=on. План («что соберём») доступен и без него.',
+  signer_not_configured: 'Worker не видит Signer: нет привязки сервиса SIGNER или секрета SIGNER_TOKEN. Подписи нет — транзакции нет.',
+  signer_unavailable: 'Signer не ответил: деньги не подписаны и не ушли. Проверьте, что воркер Signer задепложен.',
+  signer_unreachable: 'Signer недоступен: ни одна подпись не получена, транзакции не уходили. Адреса можно пробовать снова.',
+  tx_hash_mismatch: 'Нода назвала не тот хеш, что мы подписали: транзакцию не записываем как подтверждённую — сверьте на обозревателе вручную.',
+  chain_error: 'Сеть не ответила или ответила непонятно: ничего не записано как успешное. Повторите позже — ключ операции защитит от двойного сбора.',
+  no_candidates: 'Собирать нечего: на адресах нет USDT не меньше минимума, или нативки на газ не хватает (план показывает причины по каждому адресу).',
+  address_not_ours: 'Этот адрес не из нашего дерева выводимых (pay_addresses): собрать его нельзя — чужой кошелёк.',
+  sweep_in_progress: 'По этому адресу уже есть незакрытая попытка сбора: сначала дождитесь подтверждений сети, потом повторяйте.',
+  bad_contract: 'Контракт USDT в запросе не совпадает с настроенным для сети: сбор остановлен, иначе перевод ушёл бы на чужой токен.',
+  bad_destination_chain: 'Получатель указан для другой сети: адрес горячего кошелька обязан принадлежать той же сети, откуда собираем.',
+  address_chain_mismatch: 'Адрес игрока относится к другой сети: в выборке этой сети его нет.',
+  above_maximum: 'Сумма больше потолка одной операции: сделайте две записи или поднимите лимит осознанно.',
+  bad_address: 'Не похож на адрес EVM: нужно 0x и 40 шестнадцатеричных символов.',
+  bad_chain: 'Сеть не понята: для сбора бывают bsc и polygon.',
+  bad_id: 'Не понят номер записи.',
+  unknown_product: 'Товара с таким id нет: цены и товары читаются с сервера, а не с клиента.',
+  not_reserved: 'Покупка уже не в состоянии «забронировано»: повторите операцию со свежими данными.',
+  not_found: 'Записи нет: заявка или строка сбора не найдены. Обновите список.',
 };
 function errorText(data, status) {
   const code = data && data.error;
-  return ERROR_TEXT[code] || `Отказ: ${code || status}.`;
+  if (ERROR_TEXT[code]) return ERROR_TEXT[code];
+  // Signer отвечает своим списком причин (`signer_<код>`), и перечислять его в
+  // клиенте — верный способ однажды показать оператору `Отказ: signer_...`.
+  // Смысл у группы один: подпись не выдана, значит деньги не ушли.
+  if (typeof code === 'string' && code.startsWith('signer_')) {
+    return `Signer отказал в подписи (${code.slice(7)}): транзакция не подписана и никуда не ушла.`;
+  }
+  return `Отказ: ${code || status}.`;
 }
 
 // ── Пул: сводка и добавление записи ────────────────────────────────────────
@@ -295,7 +343,7 @@ function renderSummary(data) {
   $('#players-block').hidden = false;
   $('#grant-block').hidden = false;
   $('#pcard-block').hidden = false;
-  if (role === 'owner') { $('#staff-block').hidden = false; $('#audit-block').hidden = false; }
+  if (role === 'owner') { $('#staff-block').hidden = false; $('#audit-block').hidden = false; $('#sweep-block').hidden = false; loadSweeps(); }
   const t = data.totals || {};
   $('#totals').replaceChildren(...[
     ['Игроков', t.players], ['ASTRA в мире', t.astra], ['Очков', t.points],
@@ -323,7 +371,12 @@ function renderSummary(data) {
       td.textContent = String(value);
       tr.append(td);
     }
-    tr.addEventListener('click', () => { $('#grant-player').value = p.id; });
+    tr.addEventListener('click', () => {
+      $('#grant-player').value = p.id;
+      $('#adj-player').value = p.id;
+      markAdjDirty();
+      adjBalance();
+    });
     return tr;
   });
   const head = document.createElement('thead');
@@ -370,6 +423,11 @@ function renderPlayer(data) {
   setText('#player-status', blocked
     ? 'Игрок заблокирован: вход закрыт, данные на месте.'
     : `Игрок ${p.id ? p.id.slice(0, 8) : ''} найден.`);
+  // Карточка и форма корректировки ищут игрока одинаково: держать два разных
+  // ввода, где один уже заполнен, — способ списать не тому.
+  $('#adj-player').value = p.id || '';
+  markAdjDirty();
+  adjBalance();
 }
 
 async function findPlayer() {
@@ -539,7 +597,7 @@ async function load() {
     // Мир недоступен (например, wrong_world для помощника) — доступы и журнал
     // при этом читаемы, и их надо показать: иначе владелец не сможет отозвать
     // ключ, «потому что страница не загрузилась».
-    if (role === 'owner') { $('#staff-block').hidden = false; $('#audit-block').hidden = false; loadStaff(); loadAudit(); }
+    if (role === 'owner') { $('#staff-block').hidden = false; $('#audit-block').hidden = false; loadStaff(); loadAudit(); loadSweeps(); }
     return;
   }
   setText('#status', `Загружено. Мир ${data.world}.`);
@@ -636,6 +694,338 @@ $('#grant-flip').addEventListener('click', () => {
   const input = $('#grant-amount');
   input.value = String(-Math.abs(Number(input.value) || 0));
   setText('#grant-status', Number(input.value) < 0 ? 'Режим списания: сумма уйдёт с баланса игрока.' : 'Режим начисления.');
+});
+
+// ── USDT: начислить или списать проводкой adjust ───────────────────────────
+//
+// Двухшаговость не для красоты. Первое: итог считает сервер (баланс «до», «станет»,
+// сколько уже обещано незакрытым заявкам) — угадывать эти числа в браузере нельзя,
+// потому что `payBalanceMicro` включает и резервы выплат. Второе: ключ
+// идемпотентности переживает повторный клик — «Применить» дважды возвращает ту же
+// запись вместо двойного списания, и именно поэтому повторный клик обязан идти с
+// ТЕМ ЖЕ ключом, а не со свежим.
+let adjKey = '';
+let adjKeyUsed = false;
+let adjReady = false;
+
+function adjMarkKey() {
+  if (!adjKey || adjKeyUsed) {
+    adjKey = `adj-${Date.now().toString(36)}-${(crypto.randomUUID ? crypto.randomUUID().slice(0, 8) : Math.random().toString(36).slice(2, 10))}`;
+    adjKeyUsed = false;
+  }
+  return adjKey;
+}
+
+/** Цифры поменялись — превью больше не описывает эту операцию. */
+function markAdjDirty() {
+  adjReady = false;
+  adjKeyUsed = true;
+  $('#adj-confirm-wrap').hidden = true;
+  $('#adj-confirm').value = '';
+  $('#adj-preview').hidden = true;
+}
+
+function adjInput() {
+  const player = $('#adj-player').value.trim();
+  const amount = $('#adj-amount').value.trim();
+  const reason = $('#adj-reason').value.trim();
+  if (!player) { setText('#adj-status', ERROR_TEXT.bad_target); return null; }
+  if (!/^-?\d{1,12}(\.\d{1,6})?$/.test(amount) || Number(amount) === 0) {
+    setText('#adj-status', 'Сумма — число до шести знаков после запятой (не ноль). Минус = списание.');
+    return null;
+  }
+  if (reason.length < 3) { setText('#adj-status', ERROR_TEXT.reason_required); return null; }
+  return { player, amount, reason };
+}
+
+/** «Баланс и заявка»: серверные лимиты, а не наши догадки. */
+async function adjBalance() {
+  const player = $('#adj-player').value.trim();
+  if (!player) { setText('#adj-balance', 'Введите игрока — покажем баланс, лимит и незакрытые заявки.'); return; }
+  setText('#adj-balance', 'Читаем баланс…');
+  try {
+    const { status, data } = await call(`/admin/pay/adjust?player=${encodeURIComponent(player)}`);
+    if (status !== 200) { setText('#adj-balance', errorText(data, status)); return; }
+    const p = data.player || {};
+    setText('#adj-balance', p.id
+      ? `Баланс ${p.balance} USDT, из них обещано заявкам на вывод ${p.pending} USDT — списать можно не больше ${p.canAdjustDown} USDT. Потолок одной операции: ${data.maxAdjust} USDT.`
+      : `Потолок одной операции: ${data.maxAdjust} USDT. Игрока ещё не нашли.`);
+  } catch (e) {
+    setText('#adj-balance', `Сеть недоступна: ${e.message}.`);
+  }
+}
+
+async function adjRun(dryRun) {
+  const v = adjInput();
+  if (!v) return;
+  if (dryRun) adjMarkKey();
+  else if (!adjKey) { setText('#adj-status', 'Сначала «Показать итог»: он считает числа, по которым вы решаете.'); return; }
+  else if (!adjReady) { setText('#adj-status', 'Сумма или игрок изменились — нажмите «Показать итог» заново.'); return; }
+  const btn = dryRun ? $('#adj-preview-btn') : $('#adj-apply');
+  btn.disabled = true;
+  setText('#adj-status', dryRun ? 'Считаем, что станет с балансом…' : 'Пишем проводку…');
+  try {
+    const { status, data } = await call('/admin/pay/adjust', {
+      method: 'POST',
+      body: JSON.stringify({ ...v, idem: adjKey, dryRun, confirm: $('#adj-confirm').value.trim() }),
+    });
+    if (status !== 200 && status !== 201) { setText('#adj-status', errorText(data, status)); return; }
+    const a = data.adjust;
+    totalsGrid($('#adj-preview'), [
+      ['Направление', a.direction === 'debit' ? 'списание' : 'начисление'],
+      ['Сумма', `${a.direction === 'debit' ? '−' : '+'}${a.delta} USDT`],
+      ['Баланс был', `${a.balanceBefore} USDT`],
+      ['Баланс станет', `${a.balanceAfter} USDT`],
+      ['Обещано заявкам', `${a.pending} USDT`],
+      ['Ключ операции', a.idemKey],
+    ]);
+    $('#adj-preview').hidden = false;
+    // Превью прошло — значит именно эти числа и можно применить; меняем флаг
+    // только здесь, а сбрасываем при любом изменении полей (markAdjDirty).
+    if (dryRun) adjReady = true;
+    if (dryRun) {
+      $('#adj-confirm-wrap').hidden = false;
+      setText('#adj-status', 'Это превью: в базе ничего не изменилось. Впишите ADJUST и нажмите «Применить».');
+      $('#adj-confirm').focus();
+    } else {
+      adjKeyUsed = true;
+      adjReady = false;
+      $('#adj-confirm').value = '';
+      $('#adj-confirm-wrap').hidden = true;
+      setText('#adj-status', a.duplicated
+        ? `Эта операция уже записана (ключ ${a.idemKey}) — ничего не удвоено. Баланс: ${a.balanceAfter} USDT.`
+        : `Записано ${a.direction === 'debit' ? 'списание' : 'начисление'} ${a.delta} USDT: баланс ${a.balanceBefore} → ${a.balanceAfter} USDT. Причина: ${a.reason}.`);
+      $('#adj-reason').value = '';
+      load();
+      findPlayer();
+      adjBalance();
+    }
+  } catch (e) {
+    setText('#adj-status', `Сеть недоступна: ${e.message}. ${dryRun ? '' : 'Повторите с тем же ключом — проводка либо есть, либо её нет.'}`);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+$('#adj-preview-btn').addEventListener('click', () => adjRun(true));
+$('#adj-apply').addEventListener('click', () => adjRun(false));
+$('#adj-load').addEventListener('click', adjBalance);
+$('#adj-flip').addEventListener('click', () => {
+  const input = $('#adj-amount');
+  input.value = String(-Math.abs(Number(input.value) || 0));
+  markAdjDirty();
+  setText('#adj-status', Number(input.value) < 0
+    ? 'Режим списания: уйдёт с баланса игрока проводкой adjust.'
+    : 'Режим начисления: придёт на баланс игрока.');
+});
+for (const sel of ['#adj-player', '#adj-amount', '#adj-reason']) {
+  $(sel).addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    // Enter — только посмотреть: деньги не должны записываться от случайного
+    // нажатия «ввод» в поле суммы.
+    adjRun(true);
+  });
+}
+// А вот в поле подтверждения Enter означает «применяю»: слово уже введено,
+// и требовать ещё один клик — просто плодить клики по деньгам.
+$('#adj-confirm').addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  adjRun(false);
+});
+for (const sel of ['#adj-player', '#adj-amount', '#adj-reason']) {
+  $(sel).addEventListener('input', markAdjDirty);
+}
+
+// ── Сбор USDT с адресов приёма (sweep) ─────────────────────────────────────
+//
+// Единственное место админки, где Worker по нажатию кнопки подписывает и отправляет
+// транзакцию. Отсюда три правила: `dryRun` по умолчанию, отдельное слово
+// подтверждения и ключ операции на одну попытку. Ключ генерируется заново после
+// живой сборки: «повторить то же самое» здесь означало бы «второй перевод», а
+// сервер на открытый по адресу сбор ответит `sweep_in_progress` — это правильно,
+// но объяснять его должен текст кнопки, а не догадки оператора.
+let sweepKey = '';
+let sweepReady = false;
+
+function newSweepKey() {
+  const rand = crypto.randomUUID ? crypto.randomUUID().slice(0, 8) : Math.random().toString(36).slice(2, 10);
+  sweepKey = `swp-${Date.now().toString(36)}-${rand}`;
+  sweepReady = false;
+}
+
+/** Любая правка в форме — превью больше не описывает этот сбор. */
+function markSweepDirty() {
+  sweepReady = false;
+  $('#sweep-confirm-wrap').hidden = true;
+  $('#sweep-confirm').value = '';
+  $('#sweep-preview').hidden = true;
+}
+
+function sweepInput() {
+  const chain = $('#sweep-chain').value;
+  const address = $('#sweep-address').value.trim();
+  if (address && !/^0x[0-9a-fA-F]{40}$/.test(address)) {
+    setText('#sweep-status', ERROR_TEXT.bad_address);
+    return null;
+  }
+  return { chain, ...(address ? { address } : {}) };
+}
+
+function sweepChainLabel(chain) {
+  return chain === 'polygon' ? 'Polygon' : 'BNB Chain';
+}
+
+function renderSweepLog(rows) {
+  const head = document.createElement('thead');
+  head.innerHTML = '<tr><th>Запись</th><th>Сеть</th><th>Адрес</th><th>Сумма</th><th>Статус</th><th>Когда</th><th>Сеть</th></tr>';
+  const body = document.createElement('tbody');
+  for (const row of rows) {
+    const tr = document.createElement('tr');
+    for (const value of [
+      String(row.id || '').slice(0, 12),
+      sweepChainLabel(row.chain),
+      `${String(row.address || '').slice(0, 10)}…${String(row.address || '').slice(-4)}`,
+      `${row.amount} USDT`,
+      row.error ? `${row.status}: ${row.error}` : row.status,
+      row.createdAt ? new Date(row.createdAt).toLocaleString('ru-RU') : '—',
+    ]) {
+      const td = document.createElement('td');
+      td.textContent = String(value);
+      tr.append(td);
+    }
+    const linkCell = document.createElement('td');
+    if (row.explorerTx) {
+      const a = document.createElement('a');
+      a.href = row.explorerTx;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.textContent = row.txid ? `${String(row.txid).slice(0, 10)}…` : 'открыть';
+      linkCell.append(a);
+    } else {
+      linkCell.className = 'muted';
+      linkCell.textContent = row.txid ? '—' : 'транзакции нет';
+    }
+    tr.append(linkCell);
+    body.append(tr);
+  }
+  if (!body.children.length) {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 7;
+    td.className = 'muted';
+    td.textContent = 'Строк сбора ещё нет: это значит, что кнопка «Собрать» не нажималась (или всё отказали до намерения).';
+    tr.append(td);
+    body.append(tr);
+  }
+  $('#sweep-log').replaceChildren(head, body);
+}
+
+/** «Обновить список сборов»: журнал намерений — что ушло, что висит, что отказало. */
+async function loadSweeps() {
+  const chain = $('#sweep-chain').value;
+  setText('#sweep-status', 'Читаем журнал сборов…');
+  try {
+    const { status, data } = await call(`/admin/pay/sweeps?chain=${encodeURIComponent(chain)}&limit=20`);
+    if (status !== 200) { setText('#sweep-status', errorText(data, status)); return; }
+    const f = data.flags || {};
+    setText('#sweep-flags', `Флаги: PAYMENTS_ENABLED=${f.payments ? 'on' : 'выкл'}, SWEEP_ENABLED=${f.sweep ? 'on' : 'выкл'}, `
+      + `сеть ${f.network === 'mainnet' ? 'продакшн' : 'тестнет'}. За одно нажатие — до ${data.runLimit} адресов, `
+      + `слово подтверждения — «${data.confirm}».`);
+    renderSweepLog(data.sweeps || []);
+    const open = (data.sweeps || []).filter((r) => r.status === 'queued' || r.status === 'broadcasting' || r.status === 'sent');
+    setText('#sweep-status', open.length
+      ? `Открытых сборов: ${open.length} — их сверит cron, повторно не собираем.`
+      : 'Открытых сборов нет.');
+  } catch (e) {
+    setText('#sweep-status', `Сеть недоступна: ${e.message}.`);
+  }
+}
+
+async function sweepRun(dryRun) {
+  const v = sweepInput();
+  if (!v) return;
+  if (dryRun) newSweepKey();
+  else if (!sweepKey) { setText('#sweep-status', 'Сначала «Показать, что соберём»: он читает балансы, по которым вы решаете.'); return; }
+  else if (!sweepReady) { setText('#sweep-status', 'Сеть или адрес изменились — нажмите «Показать, что соберём» заново.'); return; }
+  const btn = dryRun ? $('#sweep-plan-btn') : $('#sweep-run');
+  btn.disabled = true;
+  setText('#sweep-status', dryRun ? 'Читаем балансы адресов (ничего не подписываем)…' : 'Подписываем и отправляем сбор…');
+  try {
+    const { status, data } = await call('/admin/pay/sweep/run', {
+      method: 'POST',
+      body: JSON.stringify({ ...v, idem: sweepKey, dryRun, confirm: $('#sweep-confirm').value.trim() }),
+    });
+    if (status !== 200 && status !== 201) { setText('#sweep-status', errorText(data, status)); return; }
+    const s = data.sweep || {};
+    const rows = s.rows || [];
+    const sent = rows.filter((r) => r.status !== 'skipped' && r.status !== 'would_sweep');
+    totalsGrid($('#sweep-preview'), [
+      ['Режим', dryRun ? 'просмотр' : 'сбор'],
+      ['Сеть', sweepChainLabel(s.chain || v.chain)],
+      ['Соберём', `${s.total || '0'} USDT`],
+      ['Адресов', rows.length],
+      ['Пропусков', (s.skipped || []).length + (s.unreadable || 0)],
+      ['Минимум', `${s.minAmount} USDT`],
+      ['Газ на перевод', `${s.gasLimit}`],
+      ['Горячий кошелёк', s.destination || '—'],
+      ['Ключ операции', sweepKey],
+    ]);
+    $('#sweep-preview').hidden = false;
+    const why = (s.skipped || []).slice(0, 6).map((r) => `${r.address.slice(0, 10)}… ${r.reason}`);
+    setText('#sweep-plan', why.length
+      ? `Пропущено: ${why.join(', ')}${(s.skipped || []).length > 6 ? ' …' : ''}.`
+      : 'Пропущенных адресов нет.');
+    if (dryRun) {
+      sweepReady = true;
+      $('#sweep-confirm-wrap').hidden = false;
+      $('#sweep-confirm').value = '';
+      setText('#sweep-status', rows.length
+        ? `Посмотрели: ${rows.length} адрес(ов) готовы, ${s.total || 0} USDT. Впишите ${data.confirm} и нажмите «Собрать» — это уже транзакции.`
+        : 'Собирать нечего: адресов с USDT не меньше минимума и нативкой на газ нет.');
+      $('#sweep-confirm').focus();
+    } else {
+      sweepReady = false;
+      sweepKey = '';
+      $('#sweep-confirm').value = '';
+      $('#sweep-confirm-wrap').hidden = true;
+      const failed = rows.filter((r) => r.status === 'failed');
+      setText('#sweep-status', sent.length
+        ? `Отправлено ${sent.length} из ${rows.length}: ${s.total || 0} USDT. Подтверждения допишет cron (статусы — в таблице ниже).${failed.length ? ` Отказали: ${failed.length}.` : ''}`
+        : `Ничего не отправлено: ${rows.length ? 'все адреса отказали или уже в работе' : 'кандидатов не осталось'}.`);
+      renderSweepLog(rows.map((r) => ({
+        id: r.id, chain: s.chain, address: r.address, amount: r.amount,
+        status: r.status, error: r.error, txid: r.txid, explorerTx: r.explorerTx, createdAt: Date.now(),
+      })));
+      loadPay();
+      loadSweeps();
+    }
+  } catch (e) {
+    setText('#sweep-status', `Сеть недоступна: ${e.message}. ${dryRun ? '' : 'Не повторяйте вслепую: откройте журнал сборов — транзакция либо есть, либо её нет.'}`);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+$('#sweep-plan-btn').addEventListener('click', () => sweepRun(true));
+$('#sweep-run').addEventListener('click', () => sweepRun(false));
+$('#sweep-load').addEventListener('click', loadSweeps);
+for (const sel of ['#sweep-chain', '#sweep-address']) {
+  $(sel).addEventListener('change', markSweepDirty);
+  $(sel).addEventListener('input', markSweepDirty);
+  $(sel).addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    // Enter — только просмотр: сбор денег не должен начинаться со случайного «ввод».
+    sweepRun(true);
+  });
+}
+// Enter в поле подтверждения — «подтверждаю»: слово уже набрано.
+$('#sweep-confirm').addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  sweepRun(false);
 });
 
 // Форму начисления показываем сразу: сервер всё равно проверит токен. Раньше она
