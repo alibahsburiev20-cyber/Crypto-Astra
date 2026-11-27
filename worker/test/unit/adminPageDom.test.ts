@@ -118,8 +118,36 @@ describe('админка: разметка и скрипт про доступы
   it('раздел списания USDT скрыт до входа владельца', () => {
     expect(html).toContain('id="usdt-block" hidden');
     expect(js).toContain("'#usdt-block'");
-    // Младший его не видит вовсе: сервер ответил бы `owner_only`.
-    expect(js).toMatch(/\['#staff-block', '#audit-block', '#usdt-block'\]/);
+    // Младший его не видит вовсе: сервер ответил бы `owner_only`. Сбор — там же.
+    expect(js).toMatch(/\['#staff-block', '#audit-block', '#usdt-block', '#sweep-block'\]/);
+  });
+
+  it('сбор USDT: два шага, сеть в запросе, и журнал намерений', () => {
+    for (const id of ['sweep-block', 'sweep-chain', 'sweep-address', 'sweep-load', 'sweep-flags', 'sweep-preview',
+      'sweep-plan', 'sweep-plan-btn', 'sweep-run', 'sweep-confirm', 'sweep-confirm-wrap', 'sweep-status', 'sweep-log']) {
+      expect(html, id).toContain(`id="${id}"`);
+      expect(js, id).toContain(`#${id}`);
+    }
+    expect(js).toContain('/admin/pay/sweep/run');
+    expect(js).toContain('/admin/pay/sweeps');
+    // Слово подтверждения видно человеку в разметке и совпадает с серверным.
+    expect(html).toContain('<code>SWEEP</code>');
+    expect(js).toContain('sweepRun(true)');
+    expect(js).toContain('sweepRun(false)');
+    // dryRun доезжает обоими значениями, а не «всегда правда».
+    expect(js).toContain('body: JSON.stringify({ ...v, idem: sweepKey, dryRun, confirm:');
+    // Ключ операции один на попытку и сгорает после живой сборки: второй клик не
+    // должен означать второй перевод.
+    expect(js).toContain('function newSweepKey()');
+    expect(js).toMatch(/if \(dryRun\) newSweepKey\(\);/);
+    expect(js).toContain('sweepReady = true;');
+  });
+
+  it('кнопка сбора не живёт без флагов: объяснение читается до клика', () => {
+    // `#sweep-flags` заполняется серверными флагами, а не догадками клиента.
+    expect(js).toContain('const f = data.flags || {};');
+    expect(js).toContain('PAYMENTS_ENABLED=');
+    expect(js).toContain('SWEEP_ENABLED=');
   });
 
   it('ключи словаря ошибок покрывают отказы списания', () => {

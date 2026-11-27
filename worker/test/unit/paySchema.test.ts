@@ -25,6 +25,9 @@ const MIGRATIONS = [
   MIGRATION_DIR + '0008_pay_addresses_chain.sql',
   MIGRATION_DIR + '0009_pay_addresses_polygon.sql',
   MIGRATION_DIR + '0010_pay_withdrawals_chain.sql',
+  // Журнал сборов: `pay_sweeps` обязана совпадать с кодом так же, как остальное, —
+  // иначе «рантайм создал то, чего миграция не знает» пройдёт незамеченным.
+  MIGRATION_DIR + '0012_pay_sweeps.sql',
 ];
 
 function migrationSql(name: string): string {

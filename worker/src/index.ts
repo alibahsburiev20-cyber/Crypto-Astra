@@ -6,6 +6,7 @@ import { chainSpec, evmChainSpecs } from './pay/chain';
 import { applyEvmDeposits, bscActiveAddresses, scanEvmBlocks } from './pay/evm/deposits';
 import { createEvmRpc } from './pay/evm/rpc';
 import { applyEvmPayoutConfirmations } from './pay/evm/payouts';
+import { applyEvmSweepConfirmations } from './pay/evm/sweeps';
 import { applyDeposits, scanAll, trongridFetcher } from './pay/monitor';
 import { tronApiBase } from './pay/tron/contracts';
 import { ensurePaySchema } from './pay/schema';
@@ -167,6 +168,24 @@ export default {
           if (res.checked) console.log('pay payouts confirm', { chain: rail.chain, ...res });
         } catch (e) {
           console.error('pay payouts confirm failed', rail.chain, e);
+        }
+      }
+    }
+
+    // Сбор с депозитных адресов: cron доводит до конца то, что уже отправлено.
+    // План и саму отправку мы намеренно оставили руками (`/admin/pay/sweep/run`):
+    // подписывать чужим ключом должен человек. А вот «ушла ли транзакция» —
+    // рутина, и без неё строка `pay_sweeps` вечно висела бы в `broadcasting`, а
+    // следующий план показывал бы те же деньги несобранными.
+    if (pay.sweep) {
+      for (const rail of evmChainSpecs(env, pay)) {
+        if (!rail.contract || !rail.apiBase) continue;
+        try {
+          const rpc = createEvmRpc({ url: rail.apiBase, fetchImpl: fetch });
+          const res = await applyEvmSweepConfirmations(env.DB, rpc, rail.confirmations, Date.now(), rail.chain);
+          if (res.checked) console.log('pay sweeps confirm', { chain: rail.chain, ...res });
+        } catch (e) {
+          console.error('pay sweeps confirm failed', rail.chain, e);
         }
       }
     }

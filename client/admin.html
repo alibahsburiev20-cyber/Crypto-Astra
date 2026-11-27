@@ -142,6 +142,32 @@
       </div>
       <p id="adj-status" class="muted"></p>
     </section>
+    <section class="block" id="sweep-block" hidden>
+      <h2>Сбор USDT с адресов приёма</h2>
+      <p class="muted">Каждый игрок получает свой адрес, и USDT не должен лежать на нём: сбор делает
+        с адреса <code>transfer</code> на горячий кошелёк. Ключ подписывает депозитный адрес в Signer —
+        приватных ключей в Worker нет и не будет. «Показать, что соберём» ничего не подписывает и не
+        пишет; «Собрать» требует <code>PAYMENTS_ENABLED=on</code>, <code>SWEEP_ENABLED=on</code>, слово
+        <code>SWEEP</code> и ключ операции — повтор с тем же ключом не удваивает перевод. За одно
+        нажатие не больше 5 адресов, меньше 10 USDT не собираем (комиссия съела бы перевод), а адресу
+        без нативки ставим <code>no_gas</code> и не трогаем. Enter — только просмотр.</p>
+      <div class="admin-form">
+        <label>Сеть <select id="sweep-chain"><option value="bsc">BNB Chain</option><option value="polygon">Polygon</option></select></label>
+        <label>Один адрес <input id="sweep-address" size="44" autocomplete="off" placeholder="0x… — пусто: все подходящие"></label>
+        <button type="button" id="sweep-load" class="ghost">Обновить список сборов</button>
+      </div>
+      <p id="sweep-flags" class="muted"></p>
+      <div id="sweep-preview" class="admin-totals" hidden></div>
+      <p id="sweep-plan" class="muted"></p>
+      <label id="sweep-confirm-wrap" hidden>Подтвердите сбор (уходят транзакции в сеть): впишите
+        <input id="sweep-confirm" size="10" autocomplete="off"></label>
+      <div class="admin-actions">
+        <button type="button" id="sweep-plan-btn"><img src="/icons/ui/admin.png" alt="" width="18" height="18"> Показать, что соберём</button>
+        <button type="button" id="sweep-run">Собрать</button>
+      </div>
+      <p id="sweep-status" class="muted"></p>
+      <table class="arena-table" id="sweep-log"></table>
+    </section>
     <section class="block" id="staff-block" hidden>
       <h2>Доступы</h2>
       <p class="muted">Младший админ входит по ссылке с ключом: видно монеты игрока, можно выдать или

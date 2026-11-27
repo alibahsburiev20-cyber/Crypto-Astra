@@ -329,7 +329,10 @@ describe('права доступа', () => {
 
   it('админские маршруты не открываются ни под каким методом без токена', async () => {
     const e = env();
-    for (const path of ['/admin/world', '/admin/pay', '/admin/pool', '/admin/world/grant', '/admin/pay/stop']) {
+    for (const path of ['/admin/world', '/admin/pay', '/admin/pool', '/admin/world/grant', '/admin/pay/stop',
+      // Исполнение сбора: POST двигает деньги, поэтому «без токена» обязан быть
+      // и он, и журнал намерений.
+      '/admin/pay/sweep/run', '/admin/pay/sweeps']) {
       for (const method of ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'HEAD']) {
         const r = await routeDispatch(new Request(`https://game.test${path}`, {
           method, headers: { 'CF-Connecting-IP': '198.51.100.4' },

@@ -17,6 +17,10 @@ set -uo pipefail
 BASE="${BASE:-http://127.0.0.1:8787}"
 TOKEN="${ADMIN_TOKEN:-$(sed -n 's/^ADMIN_TOKEN=//p' .dev.vars 2>/dev/null | tr -d '"')}"
 EMAIL="admin-loopback-$(date +%s)@example.com"
+# Ключи операций обязаны быть уникальны на запуск: `admadj:<ключ>` ищется по всей
+# базе, поэтому второй прогон скрипта на той же локальной D1 честно получил бы
+# `idem_conflict` — на чужом игроке тот же ключ уже проведения.
+RUN_TAG="$(date +%s)"
 PASSWORD="password123"
 
 pass=0
@@ -148,6 +152,9 @@ else
   check "хеш пароля не утекает" false "$(jq -r 'tostring | contains("password_hash")' <"$BODY")"
 fi
 
+# Флаги читаются один раз: по ним видно, какие гейты сработают в 9b и 9c.
+pay_on=$(code -H "X-Admin-Token: $TOKEN" "$BASE/admin/pay" >/dev/null; get .flags.payments)
+
 echo "9b) Списания USDT вручную: проводка adjust"
 if [ -z "$player" ]; then
   skip_note "корректировка" "игрок не заведён"
@@ -162,51 +169,83 @@ else
   check "маршрута /admin/player/debit нет" 404 "$(code -X POST -H "X-Admin-Token: $TOKEN" \
     -H 'Content-Type: application/json' -d "{\"player\":\"$player\",\"usdt\":-5,\"reason\":\"проверка\"}" "$BASE/admin/player/debit")"
   check "сумма с лишними знаками — 400" 400 "$(code -X POST -H "X-Admin-Token: $TOKEN" \
-    -H 'Content-Type: application/json' -d "{\"player\":\"$player\",\"amount\":\"1.1234567\",\"reason\":\"проверка\",\"idem\":\"adj-loop-1\"}" "$BASE/admin/pay/adjust")"
+    -H 'Content-Type: application/json' -d "{\"player\":\"$player\",\"amount\":\"1.1234567\",\"reason\":\"проверка\",\"idem\":\"${RUN_TAG}-adj-1\"}" "$BASE/admin/pay/adjust")"
   check "код" bad_amount "$(get .error)"
   check "без причины — 400" 400 "$(code -X POST -H "X-Admin-Token: $TOKEN" \
-    -H 'Content-Type: application/json' -d "{\"player\":\"$player\",\"amount\":\"5\",\"idem\":\"adj-loop-1\"}" "$BASE/admin/pay/adjust")"
+    -H 'Content-Type: application/json' -d "{\"player\":\"$player\",\"amount\":\"5\",\"idem\":\"${RUN_TAG}-adj-1\"}" "$BASE/admin/pay/adjust")"
   check "код" reason_required "$(get .error)"
 
-  pay_on=$(code -H "X-Admin-Token: $TOKEN" "$BASE/admin/pay" >/dev/null; get .flags.payments)
   if [ "$pay_on" != "true" ]; then
     check "выключенный денежный контур — 503" 503 "$(code -X POST -H "X-Admin-Token: $TOKEN" \
-      -H 'Content-Type: application/json' -d "{\"player\":\"$player\",\"amount\":\"1\",\"reason\":\"проверка\",\"idem\":\"adj-loop-1\"}" "$BASE/admin/pay/adjust")"
+      -H 'Content-Type: application/json' -d "{\"player\":\"$player\",\"amount\":\"1\",\"reason\":\"проверка\",\"idem\":\"${RUN_TAG}-adj-1\"}" "$BASE/admin/pay/adjust")"
     check "код" payments_disabled "$(get .error)"
     skip_note "живое списание" "PAYMENTS_ENABLED=off: писать в денежный журнал нельзя"
   else
     # 1) превью: числа есть, журнала нет. 2) запись без слова подтверждения — 400.
     # 3) запись; 4) повтор тем же ключом — та же проводка, а не вторая.
     check "превью начисления" 200 "$(code -X POST -H "X-Admin-Token: $TOKEN" \
-      -H 'Content-Type: application/json' -d "{\"player\":\"$player\",\"amount\":\"5\",\"reason\":\"проверка скриптом\",\"idem\":\"adj-loop-2\"}" "$BASE/admin/pay/adjust")"
+      -H 'Content-Type: application/json' -d "{\"player\":\"$player\",\"amount\":\"5\",\"reason\":\"проверка скриптом\",\"idem\":\"${RUN_TAG}-adj-2\"}" "$BASE/admin/pay/adjust")"
     check "превью ничего не пишет" true "$(get .adjust.dryRun)"
     check "баланс остался нулевым" 0 "$(code -H "X-Admin-Token: $TOKEN" "$BASE/admin/player?player=$player" >/dev/null; get .player.payBalanceMicro)"
     check "без ADJUST — 400" 400 "$(code -X POST -H "X-Admin-Token: $TOKEN" -H 'Content-Type: application/json' \
-      -d "{\"player\":\"$player\",\"amount\":\"5\",\"reason\":\"проверка скриптом\",\"idem\":\"adj-loop-2\",\"dryRun\":false}" "$BASE/admin/pay/adjust")"
+      -d "{\"player\":\"$player\",\"amount\":\"5\",\"reason\":\"проверка скриптом\",\"idem\":\"${RUN_TAG}-adj-2\",\"dryRun\":false}" "$BASE/admin/pay/adjust")"
     check "код" confirm_required "$(get .error)"
     check "с подтверждением — 201" 201 "$(code -X POST -H "X-Admin-Token: $TOKEN" -H 'Content-Type: application/json' \
-      -d "{\"player\":\"$player\",\"amount\":\"5\",\"reason\":\"проверка скриптом\",\"idem\":\"adj-loop-2\",\"dryRun\":false,\"confirm\":\"ADJUST\"}" "$BASE/admin/pay/adjust")"
+      -d "{\"player\":\"$player\",\"amount\":\"5\",\"reason\":\"проверка скриптом\",\"idem\":\"${RUN_TAG}-adj-2\",\"dryRun\":false,\"confirm\":\"ADJUST\"}" "$BASE/admin/pay/adjust")"
     check "итог посчитан сервером" 5000000 "$(get .adjust.balanceAfterMicro)"
     check "проводка в журнале" yes "$(code -H "X-Admin-Token: $TOKEN" "$BASE/admin/player?player=$player" >/dev/null; \
       [ "$(get .player.payBalanceMicro)" = "5000000" ] && echo yes || echo no)"
     adj_applied=yes
     check "повтор того же ключа — не второе списание" 200 "$(code -X POST -H "X-Admin-Token: $TOKEN" -H 'Content-Type: application/json' \
-      -d "{\"player\":\"$player\",\"amount\":\"5\",\"reason\":\"проверка скриптом\",\"idem\":\"adj-loop-2\",\"dryRun\":false,\"confirm\":\"ADJUST\"}" "$BASE/admin/pay/adjust")"
+      -d "{\"player\":\"$player\",\"amount\":\"5\",\"reason\":\"проверка скриптом\",\"idem\":\"${RUN_TAG}-adj-2\",\"dryRun\":false,\"confirm\":\"ADJUST\"}" "$BASE/admin/pay/adjust")"
     check "duplicated" true "$(get .adjust.duplicated)"
     check "баланс не удвоился" 5000000 "$(code -H "X-Admin-Token: $TOKEN" "$BASE/admin/player?player=$player" >/dev/null; get .player.payBalanceMicro)"
     check "другая сумма под тем же ключом — 409" 409 "$(code -X POST -H "X-Admin-Token: $TOKEN" -H 'Content-Type: application/json' \
-      -d "{\"player\":\"$player\",\"amount\":\"6\",\"reason\":\"исправляем\",\"idem\":\"adj-loop-2\",\"dryRun\":false,\"confirm\":\"ADJUST\"}" "$BASE/admin/pay/adjust")"
+      -d "{\"player\":\"$player\",\"amount\":\"6\",\"reason\":\"исправляем\",\"idem\":\"${RUN_TAG}-adj-2\",\"dryRun\":false,\"confirm\":\"ADJUST\"}" "$BASE/admin/pay/adjust")"
     check "код" idem_conflict "$(get .error)"
     check "списание больше баланса — 409" 409 "$(code -X POST -H "X-Admin-Token: $TOKEN" -H 'Content-Type: application/json' \
-      -d "{\"player\":\"$player\",\"amount\":\"-6\",\"reason\":\"вся жизнь\",\"idem\":\"adj-loop-3\",\"dryRun\":false,\"confirm\":\"ADJUST\"}" "$BASE/admin/pay/adjust")"
+      -d "{\"player\":\"$player\",\"amount\":\"-6\",\"reason\":\"вся жизнь\",\"idem\":\"${RUN_TAG}-adj-3\",\"dryRun\":false,\"confirm\":\"ADJUST\"}" "$BASE/admin/pay/adjust")"
     check "код" balance_below_zero "$(get .error)"
     check "ровно в ноль — можно" 201 "$(code -X POST -H "X-Admin-Token: $TOKEN" -H 'Content-Type: application/json' \
-      -d "{\"player\":\"$player\",\"amount\":\"-5\",\"reason\":\"возврат проверки\",\"idem\":\"adj-loop-4\",\"dryRun\":false,\"confirm\":\"ADJUST\"}" "$BASE/admin/pay/adjust")"
+      -d "{\"player\":\"$player\",\"amount\":\"-5\",\"reason\":\"возврат проверки\",\"idem\":\"${RUN_TAG}-adj-4\",\"dryRun\":false,\"confirm\":\"ADJUST\"}" "$BASE/admin/pay/adjust")"
     check "баланс снова 0" 0 "$(code -H "X-Admin-Token: $TOKEN" "$BASE/admin/player?player=$player" >/dev/null; get .player.payBalanceMicro)"
     # Сверка — то, из-за чего «ручные» проводки обычно и запрещают: если бы
     # adjust ломал хеш-цепь, cron остановил бы выплаты после первой же компенсации.
     check "сверка после двух проводок — цепь цела" true "$(code -H "X-Admin-Token: $TOKEN" "$BASE/admin/pay" >/dev/null; get .reconcile.ledger.ok)"
   fi
+fi
+
+echo "9c) Сбор USDT: маршруты, роли и гейты"
+# Живого сбора здесь не будет: для него нужны включённый `SWEEP_ENABLED`, свой RPC и
+# секрет `SIGNER_SWEEP_DESTINATION` — а значились бы они, скрипт двинул бы деньги.
+# Проверяем то, что ничем другим не проверяется: маршрут зарегистрирован, права
+# разведены по ролям, а отказ назван кодом, а не превратился в 404.
+sweep_st=$(code -H "X-Admin-Token: $TOKEN" "$BASE/admin/pay/sweeps?limit=5")
+check "GET /admin/pay/sweeps — журнал намерений" 200 "$sweep_st"
+check "слово подтверждения — SWEEP" SWEEP "$(get .confirm)"
+check "записей пока нет" 0 "$(jq -r '(.sweeps | length)' <"$BODY")"
+check "флаги приехали с сервера" yes "$(jq -r 'if has("flags") then "yes" else "no" end' <"$BODY")"
+check "помощнику журнал для чтения доступен" 200 "$(code -H "X-Admin-Key: $key" "$BASE/admin/pay/sweeps")"
+check "исполнение помощнику — 403" 403 "$(code -X POST -H "X-Admin-Key: $key" -H 'Content-Type: application/json' \
+  -d '{"chain":"bsc","dryRun":true}' "$BASE/admin/pay/sweep/run")"
+check "код" owner_only "$(get .error)"
+sweep_st=$(code -X POST -H "X-Admin-Token: $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"chain":"bsc","dryRun":true,"idem":"${RUN_TAG}-swp-1"}' "$BASE/admin/pay/sweep/run")
+check "владелец: маршрут существует (не 404)" yes "$([ "$sweep_st" != "404" ] && echo yes || echo no)"
+# Какой именно гейт сработает, зависит от локальных флагов; важно, что назван он
+# кодом из списка, а не «internal» и не «не найдено».
+check "отказ назван, а не проглочен" ok "$(jq -r 'if .error=="payments_disabled" or .error=="sweep_disabled" or .error=="hot_wallet_missing" or .error=="chain_not_configured" or .error=="no_candidates" then "ok" else .error end' <"$BODY")"
+sweep_on=$(code -H "X-Admin-Token: $TOKEN" "$BASE/admin/pay" >/dev/null; get .flags.sweep)
+check "план сбора читается и без включённого исполнения" 200 "$(code -H "X-Admin-Token: $TOKEN" "$BASE/admin/pay/sweep/plan?chain=bsc")"
+if [ "$pay_on" = "true" ] && [ "$sweep_on" = "true" ]; then
+  # Порядок гейтов такой, что проверка адреса стоит РАНЬШЕ конфигурации сети и
+  # кошелька: значит 400 гарантирован, а `bad_chain` — нет (там ещё нужен
+  # `PAY_HOT_ADDRESS`), его проверяет юнит-тест `adminSweep.test.ts`.
+  check "кривой адрес — 400 bad_address" 400 "$(code -X POST -H "X-Admin-Token: $TOKEN" -H 'Content-Type: application/json' \
+    -d '{"chain":"bsc","dryRun":true,"address":"0x123"}' "$BASE/admin/pay/sweep/run")"
+  check "код" bad_address "$(get .error)"
+else
+  skip_note "проверка тела запроса" "PAYMENTS_ENABLED=$( [ "$pay_on" = true ] && echo on || echo off ), SWEEP_ENABLED=$( [ "$sweep_on" = true ] && echo on || echo off ): гейт флагов стоит раньше разбора тела"
 fi
 
 echo "10) Блокировка входа"

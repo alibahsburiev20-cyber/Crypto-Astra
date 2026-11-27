@@ -57,9 +57,32 @@ export interface SignerEnv {
   SIGNER_EVM_MAX_GAS_WEI?: string;
   /** Потолок `gasLimit`. BEP-20 `transfer` стоит ~55k; миллион значит «в теле что-то не то». */
   SIGNER_EVM_MAX_GAS_LIMIT?: string;
+  /**
+   * Сбор USDT с депозитных адресов (`/sign/evm/sweep`). По умолчанию выключен:
+   * подпись ключом игрока — это операция с чужими деньгами, и включать её
+   * обязан владелец отдельно от выплат.
+   */
+  SIGNER_SWEEP_ENABLED?: string;
+  /**
+   * Единственный разрешённый получатель сбора — горячий кошелёк. Кому увести
+   * деньги решает этот секрет, а не запрос: иначе скомпрометированный Worker
+   * выменивал бы подпись на перевод на любой адрес.
+   */
+  SIGNER_SWEEP_DESTINATION?: string;
+  /** Потолок одного сбора в micro. По умолчанию 1000 USDT. */
+  SIGNER_SWEEP_MAX_MICRO?: string;
 }
 
 const MAX_INDEX = 1_000_000;
+/**
+ * Потолок газа на сбор. Столько же, сколько у выплаты (`PAYOUT_GAS_LIMIT`):
+ * сбор — тот же `transfer`. Отдельная константа здесь, а не импорт из Worker:
+ * Signer не должен подписывать чужой `gasLimit`, если на Worker его задумают
+ * поднять — счёт за газ платит игрок, с того же адреса, чей ключ подписывает.
+ */
+const SWEEP_GAS_LIMIT_CAP = 80_000n;
+/** Потолок одного сбора по умолчанию, micro (1000 USDT). */
+const DEFAULT_SWEEP_MAX_MICRO = 1_000_000_000;
 const MAX_RAW_HEX = 8192;
 /** Значения в JSON приходят строками: BigInt в `JSON.stringify` не существует. */
 const DECIMAL_RE = /^\d{1,78}$/;
@@ -344,6 +367,155 @@ export async function handleSignEvm(request: Request, env: SignerEnv): Promise<R
   return json({ ok: true, hash: hash.slice(2), from, signature: signed.signature });
 }
 
+export interface SignEvmSweepRequest {
+  index?: unknown;
+  address?: unknown;
+  tx?: unknown;
+  signingHash?: unknown;
+  recipient?: unknown;
+  amountMicro?: unknown;
+}
+
+/**
+ * Подписать сбор USDT с депозитного адреса (ключ выводится из семени по индексу).
+ *
+ * Почему это отдельная ручка, а не параметр `/sign/evm`: у выплаты подписант —
+ * наш горячий кошелёк, и «кому» задаёт заявка игрока. У сбора подписант — чужой
+ * кошелёк (адрес игрока), и единственная защита от «Worker выманил подпись и увёл
+ * деньги игрока» в том, что получатель жёстко прописан в секрете Signer, а не
+ * приходит в запросе. Плюс отдельный тумблер: сбор выключен, пока владелец его не
+ * включил, даже если выплаты уже работают.
+ *
+ * Проверки — каждая своим кодом, потому что чинятся по-разному:
+ *   1. `SIGNER_SWEEP_ENABLED = on` и семя на месте;
+ *   2. индекс в диапазоне, адрес вывели мы, и он совпал с названным;
+ *   3. `to` — контракт USDT сети из `chainId` тела (не из слова запроса);
+ *   4. тело — ровно `transfer(address,uint256)`, `value` = 0, газ в потолках;
+ *   5. хеш пересобран и совпал: подпись привязана к этим байтам, а не к описанию;
+ *   6. получатель внутри `data` = `SIGNER_SWEEP_DESTINATION`, а не «надеюсь, наш»;
+ *   7. сумма в `data` ровно та же в micro (шкала сети) и не больше потолка сбора.
+ */
+export async function handleSignEvmSweep(request: Request, env: SignerEnv): Promise<Response> {
+  const denied = authorized(request, env);
+  if (denied) return denied;
+  if (String(env.SIGNER_SWEEP_ENABLED ?? '').trim().toLowerCase() !== 'on') return fail('sweep_disabled', 503);
+
+  const seed = String(env.SIGNER_SEED ?? '').trim();
+  if (!/^[0-9a-fA-F]{64,}$/.test(seed)) return fail('seed_missing', 503);
+  const destination = String(env.SIGNER_SWEEP_DESTINATION ?? '').trim().toLowerCase();
+  if (!/^0x[0-9a-f]{40}$/.test(destination)) return fail('sweep_destination_missing', 503);
+
+  let body: SignEvmSweepRequest;
+  try {
+    body = await request.json() as SignEvmSweepRequest;
+  } catch {
+    return fail('bad_json', 400);
+  }
+
+  const index = Number(body.index);
+  if (!Number.isInteger(index) || index < 0 || index >= MAX_INDEX) return fail('bad_index', 400);
+
+  const raw = body.tx as Record<string, unknown> | undefined;
+  if (!raw || typeof raw !== 'object') return fail('bad_tx', 400);
+
+  let chainId = 0n;
+  let chain: PayChain = 'bsc';
+  let contract = '';
+  try {
+    chainId = decimal(raw.chainId, 'chain_id');
+    if (!chainIdAllowed(env, chainId)) return fail('chain_not_allowed', 400);
+    const key = evmKeyByChainId(Number(chainId));
+    if (!key) return fail('chain_unknown', 400);
+    chain = key === 'polygon' ? 'polygon' : 'bsc';
+    contract = contractOf(env, key);
+  } catch {
+    return fail('contract_misconfigured', 503);
+  }
+
+  let tx;
+  try {
+    const nonce = decimal(raw.nonce, 'nonce');
+    if (nonce > 0xffffffffn) return fail('bad_nonce', 400);
+    const maxPriorityFeePerGas = decimal(raw.maxPriorityFeePerGas, 'priority_fee');
+    const maxFeePerGas = decimal(raw.maxFeePerGas, 'max_fee');
+    const gasLimit = decimal(raw.gasLimit, 'gas_limit');
+    const cap = decimal(env.SIGNER_EVM_MAX_GAS_WEI ?? DEFAULT_MAX_GAS_WEI.toString(), 'gas_cap');
+    const limitCap = decimal(env.SIGNER_EVM_MAX_GAS_LIMIT ?? DEFAULT_MAX_GAS_LIMIT.toString(), 'gas_limit_cap');
+    // Ноль — не «бесплатно», а «нода врёт»: в сети с нулевой ставкой транзакция
+    // не включится, а адрес уже потратил nonce и сбор застрянет в `broadcasting`.
+    if (maxFeePerGas <= 0n) return fail('gas_price_too_low', 400);
+    if (maxFeePerGas > cap) return fail('gas_price_too_high', 400);
+    if (maxPriorityFeePerGas > maxFeePerGas) return fail('priority_above_max_fee', 400);
+    if (gasLimit < 21_000n || gasLimit > limitCap || gasLimit > SWEEP_GAS_LIMIT_CAP) return fail('bad_gas_limit', 400);
+    const to = String(raw.to ?? '').trim().toLowerCase();
+    if (!/^0x[0-9a-f]{40}$/.test(to)) return fail('bad_to', 400);
+    if (to !== contract) return fail('contract_mismatch', 400);
+    if (decimal(raw.value ?? '0', 'value') !== 0n) return fail('value_not_zero', 400);
+    const data = String(raw.data ?? '');
+    if (!/^0x[0-9a-fA-F]*$/.test(data)) return fail('bad_data', 400);
+    tx = {
+      chainId: Number(chainId), nonce: Number(nonce), maxPriorityFeePerGas, maxFeePerGas,
+      gasLimit, to, value: 0n, data: data.toLowerCase(),
+    };
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'bad_tx';
+    return fail(message.startsWith('bad_') ? message : 'bad_tx', 400);
+  }
+
+  if (tx.data.slice(2, 10) !== TRANSFER_SELECTOR) return fail('not_a_transfer_call', 400);
+  let parsed: { to: string; amountRaw: bigint };
+  try {
+    parsed = parseTransferCalldata(tx.data);
+  } catch {
+    return fail('not_a_transfer_call', 400);
+  }
+
+  const hash = signingHash(tx);
+  const claimed = String(body.signingHash ?? '').trim().toLowerCase().replace(/^0x/, '');
+  if (claimed && claimed !== hash.slice(2)) return fail('hash_mismatch', 400);
+
+  // Получатель решает всё: это единственное, что отличает «собрали в наш
+  // кошелёк» от «увели деньги игрока». Поэтому сверяем с секретом и обязательно
+  // с тем, что лежит внутри `data`, — описанию запроса мы не верим.
+  let recipient: string;
+  try {
+    recipient = toChecksumAddress(String(body.recipient ?? '')).toLowerCase();
+  } catch {
+    return fail('bad_recipient', 400);
+  }
+  if (parsed.to.toLowerCase() !== recipient) return fail('recipient_mismatch', 400);
+  if (recipient !== destination) return fail('destination_not_allowed', 400);
+
+  const amountMicro = Number(body.amountMicro);
+  if (!Number.isSafeInteger(amountMicro) || amountMicro <= 0) return fail('bad_amount', 400);
+  if (parsed.amountRaw !== microToChainValue(amountMicro, chain)) return fail('amount_mismatch', 400);
+  if (chainValueToMicro(parsed.amountRaw.toString(), chain) !== amountMicro) return fail('amount_not_exact', 400);
+  const maxMicro = Number(env.SIGNER_SWEEP_MAX_MICRO ?? DEFAULT_SWEEP_MAX_MICRO);
+  if (!Number.isFinite(maxMicro) || maxMicro <= 0) return fail('limit_misconfigured', 503);
+  if (amountMicro > maxMicro) return fail('above_sweep_limit', 400);
+
+  let derived: { privateKey: string; address: string };
+  try {
+    derived = await deriveEvmKey(seed, index);
+  } catch (e) {
+    return fail(`derive_failed:${e instanceof Error ? e.message : 'unknown'}`, 500);
+  }
+  const from = evmAddressFromPrivateKey(derived.privateKey).toLowerCase();
+  // Адрес обязан быть назван: сверка «индекс ↔ адрес» не даёт перепутать игрока
+  // и увести деньги с соседнего адреса того же семени.
+  const claimedAddress = String(body.address ?? '').trim().toLowerCase();
+  if (claimedAddress && claimedAddress !== from) return fail('address_mismatch', 400);
+  if (from === destination) return fail('source_is_destination', 400);
+
+  const signed = signDigest(keccak256(signingPayload(tx)), derived.privateKey);
+  // Журнал: сеть, nonce, индекс, кому, сколько. Ни семян, ни ключей, ни тел.
+  console.log('signer.sign.evm.sweep', JSON.stringify({
+    hash: hash.slice(2), chainId: tx.chainId, nonce: tx.nonce, index, from, to: recipient,
+    amountMicro, recovery: signed.recovery,
+  }));
+  return json({ ok: true, hash: hash.slice(2), from, index, signature: signed.signature });
+}
+
 export interface SignRequest {
   rawDataHex?: unknown;
   txID?: unknown;
@@ -429,6 +601,7 @@ export default {
     if (request.method === 'POST' && url.pathname === '/address') return handleAddress(request, env);
     if (request.method === 'POST' && url.pathname === '/sign') return handleSign(request, env);
     if (request.method === 'POST' && url.pathname === '/sign/evm') return handleSignEvm(request, env);
+    if (request.method === 'POST' && url.pathname === '/sign/evm/sweep') return handleSignEvmSweep(request, env);
     return fail('not_found', 404);
   },
 };

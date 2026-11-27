@@ -133,6 +133,40 @@ export const STATUS_BY_CODE: Record<string, number> = {
   balance_below_zero: 409,
   below_pending_withdrawals: 409,
   idem_conflict: 409,
+  // Конфигурация денежного контура и сбор USDT (`/admin/pay/sweep/*`). Эти коды
+  // маршрут отдаёт с явным статусом; строки нужны для «не ApiError» пути — без
+  // них отказ конфигурации превращается в 500, и оператор вместо «не задан
+  // PAY_HOT_ADDRESS» читает «internal».
+  hot_wallet_missing: 503,
+  usdt_contract_missing: 503,
+  chain_not_configured: 503,
+  chain_id_missing: 503,
+  chain_not_enabled: 409,
+  pay_chain_unknown: 503,
+    payouts_disabled: 503,
+  payouts_stopped: 409,
+  deposits_disabled: 503,
+  purchases_disabled: 503,
+  sweep_disabled: 503,
+  signer_not_configured: 503,
+  signer_unavailable: 502,
+  signer_unreachable: 502,
+  tx_hash_mismatch: 502,
+  chain_error: 502,
+  no_candidates: 400,
+  address_not_ours: 409,
+  sweep_in_progress: 409,
+  bad_contract: 400,
+  bad_destination_chain: 422,
+  address_chain_mismatch: 409,
+  above_maximum: 422,
+  bad_address: 400,
+  bad_chain: 400,
+  bad_id: 400,
+  unknown_product: 404,
+  not_reserved: 409,
+  // `not_found` в админке — «записи нет» (заявка, строка сбора), а не «страницы нет».
+  not_found: 404,
   // Общие коды: их бросают и игровые модули, и админка. Без статуса такой отказ
   // при «не ApiError» пути превращался бы в 500 internal.
   bad_request: 400,
